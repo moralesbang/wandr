@@ -11,6 +11,7 @@ Wandr is a portfolio project: a web map journal for walks, built to practice sen
 ## Docs
 
 - Write docs in English.
+- Commit and push docs-only changes straight to `main`, no branch, until the user says otherwise.
 - Each doc holds the current definition only. When a decision changes, rewrite the doc as if the previous version never existed, with no version labels or "what changed" sections; git keeps the history.
 - Read before acting:
   - [`docs/01-product-brief.md`](docs/01-product-brief.md) before proposing product changes.
