@@ -4,7 +4,7 @@
 
 **Status:** Approved
 **Date:** November 22, 2026
-**Related:** [`identity.md`](00-identity.md) · [`02-scope.md`](./02-scope.md) (what gets built first)
+**Related:** [`identity.md`](00-identity.md) · [`02-mvp-scope.md`](./02-mvp-scope.md) (what gets built first)
 
 ---
 

@@ -8,4 +8,4 @@ A portfolio project, built to practice senior software engineering with AI-assis
 
 - [Identity](docs/00-identity.md): what Wandr believes, how it speaks and how it looks.
 - [Product brief](docs/01-product-brief.md): the problem, who it's for and what Wandr does.
-- [MVP scope](docs/02-scope.md): what gets built first, and how it's verified.
+- [MVP scope](docs/02-mvp-scope.md): what gets built first, and how it's verified.
