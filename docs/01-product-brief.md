@@ -4,7 +4,7 @@
 
 **Status:** Approved
 **Date:** November 22, 2026
-**Related:** [`identity.md`](00-identity.md) · [`02-mvp-scope.md`](./02-mvp-scope.md) (what gets built first)
+**Related:** [`00-identity.md`](./00-identity.md) · [`02-mvp-scope.md`](./02-mvp-scope.md) (what gets built first)
 
 ---
 
@@ -79,7 +79,7 @@ A single **responsive web app**: a private journal for the walker, plus public p
 - The shared page shows the walk, **never its author**: no name, no profile.
 - The journal is useful even if nothing is ever shared.
 
-The principles, voice and visual direction behind every screen live in [`identity.md`](00-identity.md).
+The principles, voice and visual direction behind every screen live in [`00-identity.md`](./00-identity.md).
 
 ## 6. Non-goals
 
