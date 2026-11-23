@@ -15,12 +15,12 @@ The reference for what the MVP includes and what it leaves out. A feature is in 
   - Mon Nov 23: definition and UX.
   - Tue Nov 24: architecture and foundation (project scaffolding and a deployed walking skeleton).
   - Wed Nov 25 – Mon Nov 30: **6 build days** of ~8 hours. Estimates below are in build days (1 d = 8 h) and include tests.
-- **Capacity rule:** Musts take at most 60% of build capacity (3.6 d). They currently take **3.75 d (62.5%)**, accepted knowingly; see [§12](#12-risks-to-this-scope).
+- **Capacity rule:** Musts take at most 60% of build capacity (3.6 d). They currently take **3.85 d (64%)**, accepted knowingly; see [§12](#12-risks-to-this-scope).
 - **Quality bar:** a portfolio project. A smaller, polished product beats a broader, rough one: scope gives way before quality does.
 
 ## 2. The demo this scope must deliver
 
-> Back from a walk, a walker opens Wandr on their laptop and creates "Old houses of Laureles". They drop a find on the blue house with a note and a photo, then draw the route with a handful of points. Later, on their phone's browser, they open the journal and the walk. They choose the blue house and the middle stretch of the route, preview the public page, and create a link. In a second browser session, a friend with no account opens the link and sees exactly that: the blue house with its note and photo, the middle stretch, no start, no end, no other finds and no author. The walker fixes a typo in the blue house's note; the friend reloads and sees the fix. The walker adds a new find; the friend reloads and it isn't there. The walker revokes the link; the friend reloads the page and the photo's address and gets "not found". That night, in dark mode, the walker goes back through the journal using only the keyboard.
+> Back from a walk, a walker opens Wandr on their laptop and creates "Old houses of Laureles", their first walk; the map opens on their neighborhood. They drop a find on the blue house with a note and a photo, then draw the route with a handful of points. Later, on their phone's browser, they open the journal and the walk. They choose the blue house and the middle stretch of the route, preview the public page, and create a link. In a second browser session, a friend with no account opens the link and sees exactly that: the blue house with its note and photo, the middle stretch, no start, no end, no other finds and no author. The walker fixes a typo in the blue house's note; the friend reloads and sees the fix. The walker adds a new find; the friend reloads and it isn't there. The walker revokes the link; the friend reloads the page and the photo's address and gets "not found". That night, in dark mode, the walker goes back through the journal using only the keyboard.
 
 Every Must is a step in this story. A feature that isn't on this path isn't a Must.
 
@@ -86,14 +86,14 @@ Without these, Wandr does not solve the brief's three problems: keeping what mat
 | # | User outcome | Est. |
 | --- | --- | --- |
 | M1 | I can create an account, sign in and sign out, and my walks are visible only to me. | 0.25 d |
-| M2 | I can save a walk with a title and a date, and place finds on the map, each with a note. | 0.5 d |
+| M2 | I can save a walk with a title and a date, and place finds on the map, each with a note. | 0.6 d |
 | M3 | I can attach one photo to a find. | 0.5 d |
 | M4 | I can draw the route of a walk by adding, moving and deleting points on the map, with mouse or finger. | 0.75 d |
 | M5 | I can browse my walks and open one to see its route, finds and photos, on desktop and on my phone. | 0.5 d |
 | M6 | I can share chosen finds and a stretch of the route through a link that opens without an account, and revoke it at any time. | 1.0 d |
 | M7 | I can use Wandr with the keyboard, and in light or dark mode. | 0.25 d |
 
-**Must total: 3.75 d** (62.5% of 6 build days). M4 carries the interaction risk; M3 and M6 carry the privacy risk.
+**Must total: 3.85 d** (64% of 6 build days). M4 carries the interaction risk; M3 and M6 carry the privacy risk.
 
 ### User stories and acceptance criteria
 
@@ -108,6 +108,7 @@ Without these, Wandr does not solve the brief's three problems: keeping what mat
 - ✅ I can add a find by clicking or tapping the map, move it and delete it.
 - ✅ A find needs a note or a photo. The first line of the note serves as its title.
 - ✅ A walk with one find and no route is a complete entry.
+- ✅ A new walk's map opens on my latest walk. With no walks yet, it centers on where I am if I allow it, or at a world view if I don't. My location is never stored.
 - ✅ Adding a find with a note takes under 30 s.
 
 **M3 — Photo**
@@ -156,10 +157,9 @@ Important, but each has a workaround. Listed in **cut order**: the first one goe
 | S1 | I can change what a link shows, keeping its address, with the same preview. | 0.25 d | Revoke the link and create a new one. |
 | S2 | I can search my walks by title or note. | 0.25 d | Scroll the journal; there are few walks early on. |
 | S3 | I can see all my walks together on one map. | 0.25 d | Open each walk from the list. |
-| S4 | I can center the map on where I am, while the page is open and with my permission. | 0.1 d | Pan to the place. |
-| S5 | I can search for a place by name to move the map there. | 0.25 d | The map opens on my latest walk; pan from there. |
+| S4 | I can search for a place by name to move the map there. | 0.25 d | The map opens on my latest walk; pan from there. |
 
-**Should total: 1.1 d.** With Musts at 3.75 d, expect only the last ones in the list to be built, if any.
+**Should total: 1.0 d.** With Musts at 3.85 d, expect only the last ones in the list to be built, if any.
 
 ## 8. Could have
 
@@ -200,7 +200,7 @@ The brief's [non-goals](./01-product-brief.md#6-non-goals) are permanent stances
 | Thu Nov 26 | Walks, finds and photos | M2, M3 |
 | Fri Nov 27 | Route editor and journal | M4, M5 |
 | Sat Nov 28 | Share | M6 |
-| Sun Nov 29 | Keyboard and dark mode pass · **checkpoint at 12:00** | M7, then Shoulds from the bottom of the list up (S5 first) |
+| Sun Nov 29 | Keyboard and dark mode pass · **checkpoint at 12:00** | M7, then Shoulds from the bottom of the list up (S4 first) |
 | Mon Nov 30 | Hardening and the two-session demo | No new scope |
 
 Keyboard support and both color modes are built into each screen as it's made; Sunday closes the gaps. At the checkpoint, Shoulds start only if every Must meets its acceptance criteria.
@@ -216,7 +216,7 @@ Keyboard support and both color modes are built into each screen as it's made; S
 
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
-| Musts take 62.5% of capacity, above the 60% rule. | Little margin for polish; Shoulds likely don't get built. | Shoulds are cut in order without debate; Monday stays hardening only. |
+| Musts take 64% of capacity, above the 60% rule. | Little margin for polish; Shoulds likely don't get built. | Shoulds are cut in order without debate; Monday stays hardening only. |
 | Touch gestures for editing clash with map panning. | M4 slips or feels wrong on phones. | Spike on Wednesday on a real phone. If gestures clash, switch to an explicit edit mode and record the decision. |
 | Selecting a stretch is awkward on a phone. | M6 slips. | Fall back to sharing the whole route or none, and record the cut. |
 | The preview and the shared page drift apart. | The walker approves something other than what gets shared. | Render both from the public projection: the preview is the projection of an unsaved selection. |
