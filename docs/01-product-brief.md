@@ -4,7 +4,7 @@
 
 **Status:** Approved
 **Date:** November 22, 2026
-**Related:** [`00-identity.md`](./00-identity.md) · [`02-mvp-scope.md`](./02-mvp-scope.md) (what gets built first)
+**Related:** [`02-mvp-scope.md`](./02-mvp-scope.md) (what gets built first) · [`03-design-brief.md`](./03-design-brief.md)
 
 ---
 
@@ -70,7 +70,7 @@ A single **responsive web app**: a private journal for the walker, plus public p
 | **Return** | Open any past walk with its route and finds, on a laptop or a phone's browser. The journal is useful even if nothing is ever shared. | P1, P2 |
 | **Share** | Send only the chosen finds and one stretch of the route through a link that opens without an account and can be revoked. | P3 |
 
-What each capability includes in the MVP, and the rules every shared link follows, live in [`02-mvp-scope.md`](./02-mvp-scope.md). The principles, voice and visual direction behind every screen live in [`00-identity.md`](./00-identity.md).
+What each capability includes in the MVP, and the rules every shared link follows, live in [`02-mvp-scope.md`](./02-mvp-scope.md). The principles, voice and visual direction behind every screen, and the UX problems the design must solve, live in [`03-design-brief.md`](./03-design-brief.md).
 
 ## 6. Non-goals
 

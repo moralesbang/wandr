@@ -6,6 +6,6 @@ A portfolio project, built to practice senior software engineering with AI-assis
 
 ## Docs
 
-- [Identity](docs/00-identity.md): what Wandr believes, how it speaks and how it looks.
 - [Product brief](docs/01-product-brief.md): the problem, who it's for and what Wandr does.
 - [MVP scope](docs/02-mvp-scope.md): what the MVP includes and leaves out, and how it's verified.
+- [Design brief](docs/03-design-brief.md): how Wandr feels, speaks and looks, and the UX problems its design must solve.

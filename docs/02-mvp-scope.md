@@ -2,7 +2,7 @@
 
 **Status:** Approved
 **Date:** November 23, 2026
-**Related:** [`01-product-brief.md`](./01-product-brief.md) · [`00-identity.md`](./00-identity.md)
+**Related:** [`01-product-brief.md`](./01-product-brief.md) · [`03-design-brief.md`](./03-design-brief.md)
 
 The reference for what the MVP includes and what it leaves out. A feature is in the MVP only if it is listed here as a Must, Should or Could; anything else is out until this document changes. Shoulds and Coulds are built only after every Must is done.
 
@@ -144,7 +144,7 @@ Without these, Wandr does not solve the brief's three problems: keeping what mat
 **M7 — Keyboard and dark mode**
 - As a walker, I want Wandr to work the way I use my devices, so that it never gets in my way.
 - ✅ Every action works with the keyboard, with a visible focus, except placing and moving points on the map, which needs a pointer.
-- ✅ Wandr follows the system's light or dark setting, including the map. Both modes meet the contrast set in the identity doc.
+- ✅ Wandr follows the system's light or dark setting, including the map. Both modes meet the contrast set in the design brief (WCAG 2.2 AA).
 - ✅ Motion respects `prefers-reduced-motion`.
 
 ## 7. Should have
