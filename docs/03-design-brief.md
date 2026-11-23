@@ -2,14 +2,14 @@
 
 **Status:** Approved
 **Date:** November 23, 2026
-**Related:** [`01-product-brief.md`](./01-product-brief.md) · [`02-mvp-scope.md`](./02-mvp-scope.md) · [`04-flows.md`](./04-flows.md) · [Design System](https://claude.ai/artifact/EdqUYYoSM61zcvvNMnocUi) · [Design canvas](https://claude.ai/artifact/EsR7EX2xd6SZGrTCX4nvar)
+**Related:** [`01-product-brief.md`](./01-product-brief.md) · [`02-mvp-scope.md`](./02-mvp-scope.md) · [`04-flows.md`](./04-flows.md) · [Design System](https://claude.ai/artifact/EdqUYYoSM61zcvvNMnocUi) · [Key screens](https://claude.ai/artifact/KqRkrnF994etr17YePiQGd)
 
 The input for Wandr's visual design. The product brief says *what* we build and the MVP scope says *what comes first*; this document says *how it should feel* and *what the design must solve*.
 
 - **Sections 1–6** are Wandr's identity: what it believes, how it speaks and how it looks. They stay true even when the features change.
 - **Sections 7–8** are the MVP's UX problems and the constraints the design works within. They follow the scope, and change with it.
 
-The screens, their steps and their states live in [`04-flows.md`](./04-flows.md), not here. The final values (color and type tokens, spacing, motion, components and the map's look) live in the [Design System](https://claude.ai/artifact/EdqUYYoSM61zcvvNMnocUi), and the screens are drawn from it on the [Design canvas](https://claude.ai/artifact/EsR7EX2xd6SZGrTCX4nvar).
+The screens, their steps and their states live in [`04-flows.md`](./04-flows.md), not here. The final values (color and type tokens, spacing, motion, components and the map's look) live in the [Design System](https://claude.ai/artifact/EdqUYYoSM61zcvvNMnocUi), and the key screens are drawn from it on the [Key screens](https://claude.ai/artifact/KqRkrnF994etr17YePiQGd) canvas.
 
 ---
 
