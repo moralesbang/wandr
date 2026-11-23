@@ -170,7 +170,7 @@ flowchart TD
     P -->|"Reload after the walker's edits"| C
 ```
 
-The shared page names no author and asks nothing of the recipient: no sign-up, no prompts (U6).
+The shared page names no author and asks nothing of the recipient: no sign-up, no prompts. A quiet line above the title says what the page is, for a recipient who has never heard of Wandr (U6).
 
 ## 4. States and microcopy
 
@@ -178,6 +178,7 @@ Copy follows the voice in the [design brief](./03-design-brief.md#4-voice--tone)
 
 | Where | State | Copy |
 | --- | --- | --- |
+| Journal | Title | "Journal" |
 | Journal | Empty | "Nothing here yet. Your first walk will live here." · **New walk** |
 | Journal | Error | "Your walks didn't load." · **Try again** |
 | Journal | List | Each walk: its title, then "{date} · {n} finds" ("Sat 21 Nov 2026 · 3 finds", "1 find"); a walk with a link adds "Shared" |
@@ -188,6 +189,7 @@ Copy follows the voice in the [design brief](./03-design-brief.md#4-voice--tone)
 | Sign in | No account yet | "No account yet? **Sign up**" |
 | New walk | No title | "Give your walk a name." |
 | First walk | Location ask | "Center the map on where you are? Wandr only uses it to move the map, and doesn't save it." · **Use my location** · **Not now** |
+| Find form | Title | "What did you find?" · the note's label: "Note" |
 | Find form | Empty | **Save** unavailable · "Add a note or a photo." |
 | Find form | Walk has a link | "New finds stay off your link." |
 | Find form | No photo yet | **Add photo** · "JPEG, PNG or WebP, up to 10 MB." |
@@ -206,10 +208,12 @@ Copy follows the voice in the [design brief](./03-design-brief.md#4-voice--tone)
 | Share | Nothing chosen | **Next** unavailable · "Choose at least one find or a stretch." |
 | Share | Preview banner | "Preview. Only you can see this." |
 | Share | Created | "Your link is ready. It shows only what you chose." · **Copy link** → "Copied" |
+| Walk | Has a link | "Shared" beside the walk's date |
 | Walk | Stop sharing | "Stop sharing this walk? Anyone who opens the link will find nothing there. To share again, you'll create a new link." · **Stop sharing** · **Cancel** |
 | Walk | Finds list | Each find: its title, then what it holds: "Note", "Photo" or "Note and photo"; with a link, "On your link" or "Not on your link" |
 | Walk | Not on the link | "Not on your link" |
 | Walk | On the link | "On your link" |
+| Shared page | The walk | "A walk shared from Wandr" above the title |
 | Not found | Journal | "This walk isn't here." · **Back to your journal** |
 | Not found | Shared page | "There's no walk here. The link may be mistyped, or no longer shared." |
 
@@ -244,5 +248,5 @@ The [demo in the scope](./02-mvp-scope.md#2-the-demo-this-scope-must-deliver), s
 ## 7. To validate in the route editor spike
 
 - The tools rule in [§2](#2-the-map-editor) works with a finger on a real phone, including drags that start on a point.
-- Midpoint handles can be hit when points sit close together, at the zoom a neighborhood route is drawn at.
+- Midpoint handles can be hit when points sit close together, at the zoom a neighborhood route is drawn at. There, a point and its handle sit about 30 px apart, so their 44 × 44 px touch areas overlap.
 - **Previous point** and **Next point** make choosing a stretch's ends precise enough on a phone (U3).
