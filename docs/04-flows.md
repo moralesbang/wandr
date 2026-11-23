@@ -180,13 +180,18 @@ Copy follows the voice in the [design brief](./03-design-brief.md#4-voice--tone)
 | --- | --- | --- |
 | Journal | Empty | "Nothing here yet. Your first walk will live here." · **New walk** |
 | Journal | Error | "Your walks didn't load." · **Try again** |
+| Journal | List | Each walk: its title, then "{date} · {n} finds" ("Sat 21 Nov 2026 · 3 finds", "1 find"); a walk with a link adds "Shared" |
 | Sign up | Email in use | "There's already an account with this email." |
 | Sign up | Short password | "Use at least 8 characters." |
+| Sign up | Has an account | "Have an account? **Sign in**" |
 | Sign in | No match | "That email and password don't match." |
+| Sign in | No account yet | "No account yet? **Sign up**" |
 | New walk | No title | "Give your walk a name." |
 | First walk | Location ask | "Center the map on where you are? Wandr only uses it to move the map, and doesn't save it." · **Use my location** · **Not now** |
 | Find form | Empty | **Save** unavailable · "Add a note or a photo." |
 | Find form | Walk has a link | "New finds stay off your link." |
+| Find form | No photo yet | **Add photo** · "JPEG, PNG or WebP, up to 10 MB." |
+| Find | Uploading | "Uploading…" over the photo; the note stays editable |
 | Find | Photo too big | "This photo is over 10 MB." |
 | Find | Photo type | "Use a JPEG, PNG or WebP photo." |
 | Find | Upload failed | "The photo didn't upload." · **Try again** |
@@ -194,10 +199,15 @@ Copy follows the voice in the [design brief](./03-design-brief.md#4-voice--tone)
 | Delete walk | Confirm | "Delete “{title}”? Its finds, photos and route go with it. This can't be undone." With a link, adds: "Its link will stop working." · **Delete walk** · **Cancel** |
 | Delete find | Confirm | "Delete this find? This can't be undone." On the link, adds: "It will also disappear from your link." · **Delete find** · **Cancel** |
 | Clear route | Confirm | "Clear the route? Its points can't be brought back." With a stretch on the link, adds: "Your link will show no route." · **Clear route** · **Cancel** |
+| Share | Steps | "Step 1 of 3" · "Choose finds"; "Step 2 of 3" · "Choose a stretch"; "Step 3 of 3" · "Preview" |
+| Share | Choosing finds | Each find: its title, then what it holds: "Note", "Photo" or "Note and photo" |
+| Share | Stretch ends | **Start** and **End**, each with its place, "Point {n} of {total}", or "Not set" · **Previous point** · **Next point** |
+| Share | No route | **No route** · "Share the finds only" |
 | Share | Nothing chosen | **Next** unavailable · "Choose at least one find or a stretch." |
 | Share | Preview banner | "Preview. Only you can see this." |
 | Share | Created | "Your link is ready. It shows only what you chose." · **Copy link** → "Copied" |
 | Walk | Stop sharing | "Stop sharing this walk? Anyone who opens the link will find nothing there. To share again, you'll create a new link." · **Stop sharing** · **Cancel** |
+| Walk | Finds list | Each find: its title, then what it holds: "Note", "Photo" or "Note and photo"; with a link, "On your link" or "Not on your link" |
 | Walk | Not on the link | "Not on your link" |
 | Walk | On the link | "On your link" |
 | Not found | Journal | "This walk isn't here." · **Back to your journal** |

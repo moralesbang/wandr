@@ -2,14 +2,14 @@
 
 **Status:** Approved
 **Date:** November 23, 2026
-**Related:** [`01-product-brief.md`](./01-product-brief.md) · [`02-mvp-scope.md`](./02-mvp-scope.md)
+**Related:** [`01-product-brief.md`](./01-product-brief.md) · [`02-mvp-scope.md`](./02-mvp-scope.md) · [`04-flows.md`](./04-flows.md) · [Design System](https://claude.ai/artifact/EdqUYYoSM61zcvvNMnocUi) · [Design canvas](https://claude.ai/artifact/EsR7EX2xd6SZGrTCX4nvar)
 
 The input for Wandr's visual design. The product brief says *what* we build and the MVP scope says *what comes first*; this document says *how it should feel* and *what the design must solve*.
 
 - **Sections 1–6** are Wandr's identity: what it believes, how it speaks and how it looks. They stay true even when the features change.
 - **Sections 7–8** are the MVP's UX problems and the constraints the design works within. They follow the scope, and change with it.
 
-The screens, their steps and their states live in [`04-flows.md`](./04-flows.md), not here.
+The screens, their steps and their states live in [`04-flows.md`](./04-flows.md), not here. The final values (color and type tokens, spacing, motion, components and the map's look) live in the [Design System](https://claude.ai/artifact/EdqUYYoSM61zcvvNMnocUi), and the screens are drawn from it on the [Design canvas](https://claude.ai/artifact/EsR7EX2xd6SZGrTCX4nvar).
 
 ---
 
@@ -73,7 +73,7 @@ A warm, muted palette. Suggested starting point:
 | Warm neutral | Coffee brown |
 | Text | Ink gray |
 
-Final values and the dark-mode counterpart are defined in the Design System.
+Final values and the dark-mode counterpart are defined in the [Design System](https://claude.ai/artifact/EdqUYYoSM61zcvvNMnocUi).
 
 ### Typography
 
@@ -149,8 +149,4 @@ The hard parts of the MVP's experience. Each one names the Must it serves in [`0
 | **Motion** | `prefers-reduced-motion` is always respected. |
 | **Language** | English only. |
 | **Components** | ASSUMPTION: the UI is built with shadcn/ui and Tailwind CSS. The Design System names its color tokens after shadcn/ui's theme variables and themes shadcn/ui's components rather than inventing new ones where one exists. |
-| **Map** | Tiles come from a hosted provider with a light and a dark style. The design defines how the map looks; the provider and the map library are chosen to match it. |
-
-## 9. Open questions
-
-- Final palette, type families and the map's look. _(Settled in the Design System.)_
+| **Map** | Tiles come from a hosted provider with a light and a dark style. The Design System's map section defines how the map looks in both styles and lists the requirements the provider and the map library are chosen against. |
