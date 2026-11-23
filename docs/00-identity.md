@@ -97,4 +97,4 @@ Part of the identity, not an extra: sufficient contrast in light and dark modes,
 ## 7. Open questions
 
 - Final palette, type families and component library. _(Settled in the design system phase.)_
-- How far ASCII art goes beyond empty states. _(Only empty states in the MVP.)_
+- How far ASCII art goes beyond empty states.

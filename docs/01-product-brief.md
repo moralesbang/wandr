@@ -12,7 +12,7 @@
 
 People who walk for pleasure have no good place to keep the walks they want to remember. Photos and thoughts end up scattered, the path is rarely saved, and sharing a lovely stretch with someone means sending a screenshot or a vague description.
 
-**Wandr** is a web map journal for walks. After a walk, you place what caught your eye on a map (a find, with a note), optionally draw the route you want to repeat, and come back to it later from your laptop or your phone's browser. When you want to, you share **only the finds and the stretch you choose** through a link that opens without an account, stays up to date as you fix your notes, and that you can revoke at any time.
+**Wandr** is a web map journal for walks. After a walk, you place what caught your eye on a map (a find, with a note or a photo), optionally draw the route you want to repeat, and come back to it later from your laptop or your phone's browser. When you want to, you share **only the finds and the stretch you choose** through a link that opens without an account, stays up to date as you fix your notes, and that you can revoke at any time.
 
 **The promise:** *Wandr helps me keep the walk I want to remember*, not *Wandr records where I walked*.
 
@@ -38,7 +38,7 @@ People who walk for pleasure (to clear their head, unwind after work, or explore
 
 | # | Problem | How Wandr addresses it |
 | --- | --- | --- |
-| P1 | There is no **place to keep what mattered on a walk**, anchored where it happened. | Finds with notes, placed on a map |
+| P1 | There is no **place to keep what mattered on a walk**, anchored where it happened. | Finds with notes or photos, placed on a map |
 | P2 | Walkers **can't go back to a walk** they enjoyed, because the path was never kept. | A route drawn on the map (approximate) |
 | P3 | Walkers can't **share a walk safely**, without exposing where they live or their routine. | A revocable link with only the chosen finds and stretch |
 
@@ -66,20 +66,11 @@ A single **responsive web app**: a private journal for the walker, plus public p
 
 | Capability | What the user can do | Problem |
 | --- | --- | --- |
-| **Save** | Create a walk with a title and a date. Place one or more finds on the map, each with a note. Optionally draw the route by adding points on the map. A walk with a single find is a complete entry. | P1, P2 |
-| **Return** | Browse the journal of past walks. Open one to see its route and finds on the map, on desktop or on a phone's browser. | P1, P2 |
-| **Share** | Pick which finds to share and, optionally, one stretch of the route. Preview the public page, create a link that opens without an account, change what it shows, and revoke it at any time. | P3 |
+| **Save** | Place finds on a map, each with a note or a photo, and optionally draw the route. A walk with a single find is a complete entry. | P1, P2 |
+| **Return** | Open any past walk with its route and finds, on a laptop or a phone's browser. The journal is useful even if nothing is ever shared. | P1, P2 |
+| **Share** | Send only the chosen finds and one stretch of the route through a link that opens without an account and can be revoked. | P3 |
 
-**Product rules:**
-
-- Walks are **private by default**. Nothing becomes public unless the walker selects it.
-- A link shows **exactly what the walker selected**: the chosen finds and the chosen stretch, as they are now. Fixing a note or moving a point inside the stretch shows up on the next reload.
-- Anything **not selected never becomes public on its own**. A new find, or route outside the stretch, appears only if the walker adds it to the link.
-- A walk has **at most one link**. To show something different, the walker changes what the link shows, or revokes it and creates a new one.
-- The shared page shows the walk, **never its author**: no name, no profile.
-- The journal is useful even if nothing is ever shared.
-
-The principles, voice and visual direction behind every screen live in [`00-identity.md`](./00-identity.md).
+What each capability includes in the MVP, and the rules every shared link follows, live in [`02-mvp-scope.md`](./02-mvp-scope.md). The principles, voice and visual direction behind every screen live in [`00-identity.md`](./00-identity.md).
 
 ## 6. Non-goals
 
@@ -111,5 +102,5 @@ There is no user base yet, so these are hypotheses to watch, not targets.
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
 | **Demand is unvalidated.** | Nobody beyond the author keeps using it. | Use it for real walks; send real links to a few people and watch whether they open them. |
-| **Drawing a route feels like a chore.** | Walkers skip the route and P2 weakens. | The route is optional; a find alone is a complete entry. Snapping to streets can lower the effort later. |
-| **A shared page shows more than intended.** | Breaks the core promise and the walker's trust. | A link stores a selection, never a query over the walk: the public page reads only the selected finds and the route between the stretch's two ends. While editing, the walker sees which finds and which stretch are visible on the link. |
+| **Drawing a route feels like a chore.** | Walkers skip the route and P2 weakens. | The route is optional; a find alone is a complete entry. |
+| **A shared page shows more than intended.** | Breaks the core promise and the walker's trust. | Sharing follows explicit rules defended by automated tests; see [`02-mvp-scope.md`](./02-mvp-scope.md#5-surfaces-and-sharing-rules). |
