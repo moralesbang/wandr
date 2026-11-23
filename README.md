@@ -9,3 +9,4 @@ A portfolio project, built to practice senior software engineering with AI-assis
 - [Product brief](docs/01-product-brief.md): the problem, who it's for and what Wandr does.
 - [MVP scope](docs/02-mvp-scope.md): what the MVP includes and leaves out, and how it's verified.
 - [Design brief](docs/03-design-brief.md): how Wandr feels, speaks and looks, and the UX problems its design must solve.
+- [Flows](docs/04-flows.md): the MVP's screens, how people move through them, and what each shows in every state.

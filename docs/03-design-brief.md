@@ -9,7 +9,7 @@ The input for Wandr's visual design. The product brief says *what* we build and 
 - **Sections 1–6** are Wandr's identity: what it believes, how it speaks and how it looks. They stay true even when the features change.
 - **Sections 7–8** are the MVP's UX problems and the constraints the design works within. They follow the scope, and change with it.
 
-The screens, their steps and their states live in the flows doc, not here.
+The screens, their steps and their states live in [`04-flows.md`](./04-flows.md), not here.
 
 ---
 

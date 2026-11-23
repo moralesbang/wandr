@@ -17,3 +17,4 @@ Wandr is a portfolio project: a web map journal for walks, built to practice sen
   - [`docs/01-product-brief.md`](docs/01-product-brief.md) before proposing product changes.
   - [`docs/02-mvp-scope.md`](docs/02-mvp-scope.md) before planning or estimating work.
   - [`docs/03-design-brief.md`](docs/03-design-brief.md) before writing UI copy or visual design.
+  - [`docs/04-flows.md`](docs/04-flows.md) before designing or building a screen.
