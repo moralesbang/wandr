@@ -15,8 +15,8 @@
   },
   "devDependencies": {
     "@types/node": "26.6.6",
+    "@typescript/native": "catalog:",
     "@wandr/tsconfig": "workspace:*",
-    "oxlint": "catalog:",
-    "typescript": "catalog:"
+    "oxlint": "catalog:"
   }
 }

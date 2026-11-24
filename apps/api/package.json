@@ -23,8 +23,8 @@
   },
   "devDependencies": {
     "@types/bun": "catalog:",
+    "@typescript/native": "catalog:",
     "@wandr/tsconfig": "workspace:*",
-    "drizzle-kit": "0.31.11",
-    "typescript": "catalog:"
+    "drizzle-kit": "0.31.11"
   }
 }

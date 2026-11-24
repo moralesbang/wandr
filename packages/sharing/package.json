@@ -7,7 +7,7 @@
     ".": "./src/index.ts"
   },
   "devDependencies": {
-    "@wandr/tsconfig": "workspace:*",
-    "typescript": "catalog:"
+    "@typescript/native": "catalog:",
+    "@wandr/tsconfig": "workspace:*"
   }
 }
