@@ -19,7 +19,7 @@ Fix the violation itself as usual. Then, for the convention it broke:
 3. **Write a custom rule** in `packages/oxlint-plugin-wandr/`, the project's local plugin, never published:
    - The rule lives in `src/rules/<rule-name>.ts`, is exported from the plugin's index, and is referenced as `wandr/<rule-name>`.
    - Its message names the standard's rule ID and the fix: `"TanStack Query is imported only inside src/api/ (data-layer DL-002). Use a resource hook."`
-4. **Test it** in `src/rules/<rule-name>.test.ts` with the `RuleTester` from `oxlint/plugins-dev`, run by `bun test`. The tests MUST hold:
+4. **Test it** in `src/rules/<rule-name>.test.ts` with the `RuleTester` from `oxlint/plugins-dev`, run by `node --test` (the `RuleTester` refuses to run in Bun). The tests MUST hold:
    - **valid** cases: code that follows the convention, including code that looks close to a violation and isn't;
    - **invalid** cases: the violation that was found, and each other form it can take, every one asserting its `messageId`;
    - **edge cases**: the boundaries of the rule's paths (a file just inside and just outside the allowed folder), type-only imports, re-exports, aliased and dynamic imports, test files and generated files, whichever the rule can meet.

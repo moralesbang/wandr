@@ -53,3 +53,5 @@ Code MUST pass `turbo run lint` (oxlint) and the oxfmt check before it's committ
 ### WS-008 — File names in kebab-case
 
 Every source file MUST be named in kebab-case (`find-marker.tsx`, `use-delete-walk.ts`), whatever it exports. Route files follow TanStack Router's naming (`$walkId.tsx`, `_journal/`).
+
+Enforced by oxlint's `unicorn/filename-case`

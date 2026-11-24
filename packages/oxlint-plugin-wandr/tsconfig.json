@@ -1,0 +1,9 @@
+{
+  "extends": "@wandr/tsconfig/base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    // oxlint and the RuleTester run in Node, which runs TypeScript by stripping its types.
+    "erasableSyntaxOnly": true
+  },
+  "include": ["src"]
+}

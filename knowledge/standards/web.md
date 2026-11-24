@@ -34,6 +34,8 @@ A route file MUST hold only its route definition: `loader`, `validateSearch`, `b
 
 A feature MUST NOT import from another feature. A piece two features need moves to `components/` or `lib/`.
 
+Enforced by `wandr/no-cross-feature-imports`
+
 ## UI
 
 ### WEB-004 — shadcn/ui first

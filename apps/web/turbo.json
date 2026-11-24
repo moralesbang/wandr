@@ -1,0 +1,19 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "codegen": {
+      "dependsOn": ["@wandr/api#codegen"],
+      "inputs": ["../api/openapi.json"],
+      "outputs": ["src/api/schema.gen.ts"]
+    },
+    "build": {
+      "outputs": ["dist/**"]
+    },
+    "e2e": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "passThroughEnv": ["CI", "HOME", "PLAYWRIGHT_*"]
+    }
+  }
+}

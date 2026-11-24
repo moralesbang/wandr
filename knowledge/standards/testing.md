@@ -14,7 +14,7 @@ Applies to every test file (`*.test.ts`, `*.test.tsx`, `apps/web/e2e/**`) and to
 
 ### T-001 — One runner per workspace
 
-Tests in `apps/api` and `packages/` MUST run with `bun test`; tests in `apps/web/src` with Vitest; end-to-end tests in `apps/web/e2e/` with Playwright.
+Tests in `apps/api` and `packages/` MUST run with `bun test`, except `packages/oxlint-plugin-wandr`, whose rule tests run with `node --test` because oxlint's `RuleTester` runs only in Node; tests in `apps/web/src` with Vitest; end-to-end tests in `apps/web/e2e/` with Playwright.
 
 ### T-002 — Tests sit beside their code
 
@@ -30,7 +30,7 @@ A rule the docs write as a table or a list of cases MUST be tested with `test.ea
 
 ### T-004 — Against real services
 
-API tests MUST call the app through `app.request()` against the Postgres and MinIO that `docker compose` starts. They MUST NOT mock the database or the bucket. Every test starts from empty tables.
+API tests MUST call the app through `app.request()` against the Postgres and S3-compatible bucket that `docker compose` starts (`bun run services`), in their own `wandr_test` database and `wandr-test` bucket. They MUST NOT mock the database or the bucket. Every test starts from empty tables.
 
 ### T-005 — The privacy tests
 

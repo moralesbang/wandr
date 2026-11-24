@@ -1,0 +1,61 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "react", "import", "oxc", "vitest"],
+  "jsPlugins": ["./packages/oxlint-plugin-wandr/src/index.ts"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error"
+  },
+  "ignorePatterns": ["**/dist/**", "**/*.gen.ts", "apps/api/drizzle/**"],
+  "rules": {
+    "unicorn/filename-case": [
+      "error",
+      {
+        "case": "kebabCase",
+        "ignore": ["^__root\\.tsx$", "^\\$[A-Za-z]+\\.tsx$"]
+      }
+    ],
+    "react/react-in-jsx-scope": "off",
+    "import/no-unassigned-import": [
+      "error",
+      {
+        "allow": ["**/*.css", "@testing-library/jest-dom/vitest"]
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["apps/web/src/**"],
+      "excludeFiles": ["apps/web/src/api/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "@tanstack/react-query",
+                "message": "TanStack Query is imported only inside src/api/ (data-layer DL-002). Use a resource hook."
+              }
+            ],
+            "patterns": [
+              {
+                "group": ["@tanstack/react-query/*"],
+                "message": "TanStack Query is imported only inside src/api/ (data-layer DL-002). Use a resource hook."
+              },
+              {
+                "group": ["**/api/client", "**/api/client.ts", "@/api/client"],
+                "message": "The API client is imported only inside src/api/ (data-layer DL-002). Use a resource hook."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["apps/web/src/features/**"],
+      "rules": {
+        "wandr/no-cross-feature-imports": "error"
+      }
+    }
+  ]
+}

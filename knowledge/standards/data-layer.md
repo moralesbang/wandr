@@ -90,7 +90,9 @@ The data layer MUST live in `apps/web/src/api/`:
 ```
 src/api/
   client.ts            api (openapi-fetch) and unwrap
-  query-client.ts      the app's QueryClient
+  schema.gen.ts        the API's types, generated from openapi.json
+  query-client.ts      the app's QueryClient and the router context's type
+  query-provider.tsx   QueryProvider, so main.tsx never imports TanStack Query
   walks/
     queries.ts         walkQueries
     use-walks.ts
@@ -104,6 +106,8 @@ Each hook MUST sit in its own file, named after the hook in kebab-case.
 ### DL-002 — TanStack Query stays inside `src/api/`
 
 `@tanstack/react-query` and `src/api/client.ts` MUST be imported only from files under `src/api/`. Components import hooks; route loaders import factories and reach the `QueryClient` through the router context.
+
+Enforced by oxlint's `no-restricted-imports`
 
 #### Rationale
 

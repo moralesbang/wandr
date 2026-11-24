@@ -1,0 +1,292 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '@fontsource-variable/fraunces/opsz.css';
+@import '@fontsource-variable/figtree';
+
+/*
+ * Wandr's Design System (https://claude.ai/artifact/EdqUYYoSM61zcvvNMnocUi), as
+ * shadcn/ui's theme variables plus Wandr's own. Components style only through
+ * these tokens (web WEB-005). Light comes first; dark follows the system's
+ * colour scheme, the map included: Wandr has no theme switch.
+ *
+ * The fonts are self-hosted, so the browser talks to no one but the API and the
+ * map's tiles (docs/05-architecture.md §2). Obel Mono is under the SIL Open Font
+ * License: assets/fonts/OFL.txt travels with its files.
+ */
+
+@font-face {
+  font-family: 'Obel Mono';
+  src: url('./assets/fonts/ObelMono-VF.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Obel Mono';
+  src: url('./assets/fonts/ObelMono-Italic-VF.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+:root {
+  --background: #f4eee2;
+  --foreground: #2a2622;
+  --card: #fbf8f1;
+  --card-foreground: var(--foreground);
+  --popover: #fbf8f1;
+  --popover-foreground: var(--foreground);
+  --primary: #4f6330;
+  --primary-foreground: #fbf8f1;
+  --secondary: #f1ddd1;
+  --secondary-foreground: #8a3f22;
+  --muted: #ece4d5;
+  --muted-foreground: #70553f;
+  --accent: #e4e8d4;
+  --accent-foreground: #2f3b1c;
+  --destructive: #a3302a;
+  --destructive-fill: var(--destructive);
+  --destructive-foreground: #fbf8f1;
+  --border: #dcd1be;
+  --input: #736452;
+  --ring: var(--primary);
+
+  --map-land: #eee7d9;
+  --map-water: #d3dbd6;
+  --map-park: #e1e3cb;
+  --map-building: #e6ddcc;
+  --map-road: #fbf8f1;
+  --map-road-casing: #dcd2c0;
+  --map-label: #665b4d;
+  --route: var(--primary);
+  --route-casing: var(--card);
+  --route-point: var(--card);
+  --route-handle: #6f7c58;
+  --find: #a8512f;
+  --find-foreground: var(--card);
+  --map-selected: var(--foreground);
+  --link-band: #ebcdbb;
+  --link-off: #7d7262;
+  --stretch-end: var(--foreground);
+
+  --radius: 12px;
+
+  --elevation-sm: 0 1px 2px #2a26220f, 0 1px 3px #2a26220d;
+  --elevation-md: 0 2px 4px #2a26220d, 0 8px 24px #2a262214;
+  --elevation-map-marker: 0 1px 2px #2a262233;
+  --elevation-map-drag: 0 6px 14px #2a262233, 0 2px 4px #2a26221f;
+  --focus-ring: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
+
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+  --duration-map: 600ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #1d1b18;
+    --foreground: #eee7da;
+    --card: #27241f;
+    --popover: #2b2823;
+    --primary: #b0c38a;
+    --primary-foreground: #1d2214;
+    --secondary: #3a2820;
+    --secondary-foreground: #e9a88b;
+    --muted: #2e2a25;
+    --muted-foreground: #b8a893;
+    --accent: #2f3526;
+    --accent-foreground: #d3debb;
+    --destructive: #fe6459;
+    --destructive-fill: #b33832;
+    --destructive-foreground: #fbf8f1;
+    --border: #3a352f;
+    --input: #968b7c;
+
+    --map-land: #22201c;
+    --map-water: #191e1e;
+    --map-park: #252a1f;
+    --map-building: #2a2722;
+    --map-road: #36322b;
+    --map-road-casing: #2a2722;
+    --map-label: #9c9384;
+    --route-casing: var(--background);
+    --route-point: var(--background);
+    --route-handle: #8d9a73;
+    --find: #e39a7a;
+    --find-foreground: var(--background);
+    --link-band: #5a3a2c;
+    --link-off: #8a8275;
+
+    --elevation-sm: 0 1px 2px #00000066;
+    --elevation-md: 0 8px 24px #00000080;
+    --elevation-map-marker: 0 1px 2px #00000099;
+    --elevation-map-drag: 0 6px 14px #000000b3;
+  }
+}
+
+/* Under reduced motion, everything but fast fades drops to 0ms (web WEB-011). */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
+    --duration-map: 0ms;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-fill: var(--destructive-fill);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-map-land: var(--map-land);
+  --color-map-water: var(--map-water);
+  --color-map-park: var(--map-park);
+  --color-map-building: var(--map-building);
+  --color-map-road: var(--map-road);
+  --color-map-road-casing: var(--map-road-casing);
+  --color-map-label: var(--map-label);
+  --color-route: var(--route);
+  --color-route-casing: var(--route-casing);
+  --color-route-point: var(--route-point);
+  --color-route-handle: var(--route-handle);
+  --color-find: var(--find);
+  --color-find-foreground: var(--find-foreground);
+  --color-map-selected: var(--map-selected);
+  --color-link-band: var(--link-band);
+  --color-link-off: var(--link-off);
+  --color-stretch-end: var(--stretch-end);
+
+  --font-serif: 'Fraunces Variable', Georgia, 'Times New Roman', serif;
+  --font-sans: 'Figtree Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Obel Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --radius-xs: 6px;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --shadow-sm: var(--elevation-sm);
+  --shadow-md: var(--elevation-md);
+  --shadow-map-marker: var(--elevation-map-marker);
+  --shadow-map-drag: var(--elevation-map-drag);
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-enter: cubic-bezier(0, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  --spacing-touch: 44px;
+  --spacing-panel: 400px;
+  --spacing-measure: 640px;
+}
+
+/* The type scale: one class per style of the Design System. */
+@utility type-display {
+  font-family: var(--font-serif);
+  font-size: 40px;
+  line-height: 44px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variation-settings: 'opsz' 72;
+}
+
+@utility type-title {
+  font-family: var(--font-serif);
+  font-size: 30px;
+  line-height: 36px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  font-variation-settings: 'opsz' 48;
+}
+
+@utility type-heading {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 600;
+  font-variation-settings: 'opsz' 24;
+}
+
+@utility type-body-lg {
+  font-family: var(--font-sans);
+  font-size: 18px;
+  line-height: 28px;
+  font-weight: 400;
+}
+
+@utility type-body {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 400;
+}
+
+@utility type-label {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 600;
+}
+
+@utility type-small {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+}
+
+@utility type-meta {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+@utility type-meta-lg {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+
+/* 2px of background, then 2px of ring; the transparent outline keeps it in forced colours. */
+@utility focus-ring {
+  outline: 2px solid transparent;
+  box-shadow: var(--focus-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground type-body antialiased;
+  }
+
+  :focus-visible {
+    @apply focus-ring;
+  }
+}

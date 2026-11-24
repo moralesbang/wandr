@@ -1,0 +1,13 @@
+{
+  "name": "@wandr/sharing",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "devDependencies": {
+    "@wandr/tsconfig": "workspace:*",
+    "typescript": "catalog:"
+  }
+}

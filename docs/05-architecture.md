@@ -50,7 +50,7 @@ flowchart LR
 | Monorepo | Turborepo on Bun workspaces (isolated installs, catalogs), no remote cache | Turborepo's default remote cache is hosted by Vercel; CI caches `.turbo/` itself. |
 | Lint and format | oxlint and oxfmt; TypeScript `strict` with `noUncheckedIndexedAccess` | Fast, one toolchain. The route and stretch code index arrays, where `points[i]` may not exist. |
 | Conventions | Each convention an agent breaks becomes a lint error: a native oxlint rule, or one in a local plugin, with tests | A broken convention fails CI instead of waiting for a reviewer ([`lint-rules.md`](../knowledge/standards/lint-rules.md)). |
-| Tests | `bun test` for the API and packages, Vitest for the SPA, Playwright end to end | [§11](#11-testing). |
+| Tests | `bun test` for the API and packages, Vitest for the SPA, Playwright end to end; the lint plugin's rules under `node --test` | [§11](#11-testing). oxlint's `RuleTester` runs only in Node. |
 | Hosting | Railway: one service built from a `Dockerfile`, Postgres and a bucket in one project | A private network between the three, no pausing, and an image that runs on any host. |
 | CI/CD | GitHub Actions; Railway deploys `main` once its checks pass | [§12](#12-delivery). |
 
@@ -68,7 +68,7 @@ wandr/
     tsconfig/            the base TypeScript configuration
   docs/                  what Wandr is and why it's built this way
   knowledge/             how its code is written
-  docker-compose.yml     Postgres and MinIO for local development and tests
+  docker-compose.yml     Postgres and an S3-compatible bucket (RustFS) for local development and tests
 ```
 
 - **A package exists only when two apps use it.** `contract` and `sharing` are used by both apps; the database schema lives in `apps/api`, and shadcn/ui's components in `apps/web`.
@@ -195,7 +195,7 @@ Built on [Lucia's session recipe](https://lucia-auth.com/sessions/basic):
 | Layer | What it covers | Tool |
 | --- | --- | --- |
 | Unit | `packages/sharing`, one case per row of each stretch rule; `resolveGesture`, one case per row of the tools table | `bun test` |
-| API | Hono through `app.request()`, against real Postgres and MinIO in Docker; the privacy tests | `bun test` |
+| API | Hono through `app.request()`, against real Postgres and an S3-compatible bucket (RustFS) in Docker; the privacy tests | `bun test` |
 | Components | Forms and every screen state: empty, error, not found | Vitest, Testing Library |
 | End to end | The [scope's demo](./02-mvp-scope.md#2-the-demo-this-scope-must-deliver) with two browser sessions; an axe check in light and dark | Playwright, Chromium and WebKit at phone size |
 
@@ -211,9 +211,9 @@ Touch gestures on a real phone are checked by hand in the route editor spike, no
 ## 12. Delivery
 
 - **Workflow.** Code reaches `main` through a pull request whose checks pass; CI is a required check on `main`. Docs go straight to `main`.
-- **CI.** GitHub Actions on every pull request and on `main`: `turbo run lint typecheck test build`; a check that the generated `openapi.json` and client types match the code; the API tests with Postgres and MinIO as services; Playwright. `.turbo/` is cached by Actions; turbo's telemetry is off.
+- **CI.** GitHub Actions on every pull request and on `main`: `turbo run lint typecheck test build`; a check that the generated `openapi.json` and client types match the code; the API tests against the same `docker-compose.yml` services as local development; Playwright. `.turbo/` is cached by Actions; turbo's telemetry is off.
 - **Deploy.** Railway builds the `Dockerfile` and deploys `main` once GitHub's checks pass. Migrations run as the pre-deploy command, and `/api/health` gates the switch.
-- **Environments.** Local and production. Locally, `docker compose up` starts Postgres and MinIO.
+- **Environments.** Local and production. Locally, `bun run services` starts Postgres and RustFS, an S3-compatible server, and creates the buckets. MinIO no longer publishes images; RustFS speaks the same S3 API as the production bucket.
 - **Configuration.** The API validates its environment with zod at startup and refuses to start if anything is missing. `.env.example` is committed; secrets live in Railway.
 - **Observability.** Logs go to stdout, where Railway keeps them, with tokens redacted. No analytics and no error-tracking service: recipients aren't tracked.
 
