@@ -212,7 +212,7 @@ Touch gestures on a real phone are checked by hand in the route editor spike, no
 
 - **Workflow.** Code reaches `main` through a pull request whose checks pass; CI is a required check on `main`. Docs go straight to `main`.
 - **CI.** GitHub Actions on every pull request and on `main`: `turbo run lint typecheck test build`; a check that the generated `openapi.json` and client types match the code; the API tests against the same `docker-compose.yml` services as local development; Playwright. `.turbo/` is cached by Actions; turbo's telemetry is off.
-- **Deploy.** Railway builds the `Dockerfile` and deploys `main` once GitHub's checks pass. Migrations run as the pre-deploy command, and `/api/health` gates the switch.
+- **Deploy.** Railway builds the `Dockerfile` and deploys `main` once GitHub's checks pass. Migrations run as the pre-deploy command, and `/api/health` gates the switch. The Railway project (the service, Postgres and the bucket) is declared in `.railway/railway.ts`; `railway config plan` shows any drift.
 - **Environments.** Local and production. Locally, `bun run services` starts Postgres and RustFS, an S3-compatible server, and creates the buckets. MinIO no longer publishes images; RustFS speaks the same S3 API as the production bucket.
 - **Configuration.** The API validates its environment with zod at startup and refuses to start if anything is missing. `.env.example` is committed; secrets live in Railway.
 - **Observability.** Logs go to stdout, where Railway keeps them, with tokens redacted. No analytics and no error-tracking service: recipients aren't tracked.
