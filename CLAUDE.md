@@ -11,7 +11,9 @@ Wandr is a portfolio project: a web map journal for walks, built to practice sen
 
 ## Code
 
-Before writing or reviewing code under `apps/` or `packages/`, read [`knowledge/README.md`](knowledge/README.md) and every standard it lists for the paths you touch. When the user settles a new convention, record it there as a standard.
+- Before writing or reviewing code under `apps/` or `packages/`, read [`knowledge/README.md`](knowledge/README.md) and every standard it lists for the paths you touch. When the user settles a new convention, record it there as a standard.
+- When code breaks a convention in `knowledge/` or the architecture, yours or another agent's, turn the convention into a lint error following [`knowledge/standards/lint-rules.md`](knowledge/standards/lint-rules.md).
+- Code reaches `main` only through a pull request with passing checks: branch first, then open the PR.
 
 ## Docs
 
@@ -22,3 +24,4 @@ Before writing or reviewing code under `apps/` or `packages/`, read [`knowledge/
   - [`docs/02-mvp-scope.md`](docs/02-mvp-scope.md) before planning or estimating work.
   - [`docs/03-design-brief.md`](docs/03-design-brief.md) before writing UI copy or visual design.
   - [`docs/04-flows.md`](docs/04-flows.md) before designing or building a screen.
+  - [`docs/05-architecture.md`](docs/05-architecture.md) before writing code or changing how a part is built.
