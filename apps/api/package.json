@@ -1,0 +1,30 @@
+{
+  "name": "@wandr/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "typecheck": "tsc -p .",
+    "test": "bun test",
+    "codegen": "bun --env-file=.env.example src/openapi.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun src/db/migrate.ts",
+    "db:migrate:test": "bun --env-file=.env.test src/db/migrate.ts"
+  },
+  "dependencies": {
+    "@hono/zod-openapi": "1.6.3",
+    "@wandr/contract": "workspace:*",
+    "@wandr/sharing": "workspace:*",
+    "drizzle-orm": "0.45.4",
+    "hono": "4.13.21",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "@typescript/native": "catalog:",
+    "@wandr/tsconfig": "workspace:*",
+    "drizzle-kit": "0.31.11"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "oxlint-plugin-wandr",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "node --test 'src/**/*.test.ts'"
+  },
+  "dependencies": {
+    "@oxlint/plugins": "1.95.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "@typescript/native": "catalog:",
+    "@wandr/tsconfig": "workspace:*",
+    "oxlint": "catalog:"
+  }
+}

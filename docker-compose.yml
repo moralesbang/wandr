@@ -1,0 +1,58 @@
+# Postgres and an S3-compatible bucket for local development and the API tests,
+# here and in CI. `docker compose up -d --wait` starts them and creates the buckets.
+services:
+  postgres:
+    image: postgres:18.6-alpine
+    environment:
+      POSTGRES_USER: wandr
+      POSTGRES_PASSWORD: wandr
+      POSTGRES_DB: wandr
+    ports: ['5432:5432']
+    volumes:
+      - postgres:/var/lib/postgresql
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U wandr -d wandr_test']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  # RustFS, an S3-compatible server: MinIO no longer publishes images.
+  s3:
+    image: rustfs/rustfs:1.0.5
+    environment:
+      RUSTFS_ACCESS_KEY: wandr
+      RUSTFS_SECRET_KEY: wandr-secret
+    ports: ['9000:9000']
+    volumes:
+      - s3:/data
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fs http://localhost:9000/health || wget -qO- http://localhost:9000/health',
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  # Creates the development and test buckets, then exits.
+  buckets:
+    image: amazon/aws-cli:2.39.6
+    depends_on:
+      s3:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: wandr
+      AWS_SECRET_ACCESS_KEY: wandr-secret
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: ['sh', '-c']
+    command:
+      - >-
+        for b in wandr wandr-test; do
+        aws --endpoint-url http://s3:9000 s3api head-bucket --bucket $$b 2>/dev/null ||
+        aws --endpoint-url http://s3:9000 s3 mb s3://$$b; done
+
+volumes:
+  postgres:
+  s3:

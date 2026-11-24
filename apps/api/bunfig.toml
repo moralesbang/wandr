@@ -1,0 +1,3 @@
+[test]
+# Brings the test database up to the latest migration before any test runs.
+preload = ["./src/test/migrate.ts"]

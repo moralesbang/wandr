@@ -1,2 +1,10 @@
 .obsidian/
-
+node_modules/
+dist/
+.turbo/
+.env
+.env.local
+*.tsbuildinfo
+apps/web/test-results/
+apps/web/playwright-report/
+.claude/worktrees/

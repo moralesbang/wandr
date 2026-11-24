@@ -1,0 +1,10 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "codegen": {
+      "inputs": ["src/**", "../../packages/contract/src/**", ".env.example"],
+      "outputs": ["openapi.json"]
+    }
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "extends": "@wandr/tsconfig/base.json",
+  "include": ["src"]
+}

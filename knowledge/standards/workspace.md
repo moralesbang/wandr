@@ -46,6 +46,8 @@ A dependency MUST be added to the `package.json` of the workspace that imports i
 
 Every workspace MUST extend `packages/tsconfig`, which sets `strict` and `noUncheckedIndexedAccess`. A workspace MUST NOT loosen either.
 
+The compiler is TypeScript 7, from the catalog as `@typescript/native` (`npm:typescript@7…`); every workspace's `tsc` is that one. Only `apps/web` installs a package named `typescript`: an alias for `@typescript/typescript6`, because openapi-typescript needs the TypeScript 6 compiler API that TypeScript 7 no longer ships. A workspace MUST NOT add `typescript` otherwise. The alias goes when the API types come from a generator that doesn't need that API.
+
 ### WS-007 — oxlint and oxfmt pass before commit
 
 Code MUST pass `turbo run lint` (oxlint) and the oxfmt check before it's committed. A rule is disabled only on its line, with a comment saying why.
@@ -53,3 +55,5 @@ Code MUST pass `turbo run lint` (oxlint) and the oxfmt check before it's committ
 ### WS-008 — File names in kebab-case
 
 Every source file MUST be named in kebab-case (`find-marker.tsx`, `use-delete-walk.ts`), whatever it exports. Route files follow TanStack Router's naming (`$walkId.tsx`, `_journal/`).
+
+Enforced by oxlint's `unicorn/filename-case`
