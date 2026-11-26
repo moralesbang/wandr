@@ -14,7 +14,7 @@ The user's main goal is to **learn** to build a factory by iterating on it: a de
 The factory **delegates execution, not authority**. Use these to judge every design choice and to frame every question to the user.
 
 - **Inner loop**: implement → verify → diagnose → fix, fast and deterministic, run by the build agent alone until the checks pass or it hits its limit. The build agent writes and keeps the technical tests as it goes, red–green–refactor where it pays.
-- **Outer loop**: an evaluator with its own context checks the result against the issue's intent, including what the tests actually guarantee, and sends actionable findings, backed by evidence, back to the inner loop. Passing tests is necessary, never sufficient. The inner loop produces the tests; the outer loop certifies their value.
+- **Outer loop**: two reviewers, each in its own context, send actionable findings backed by evidence back to the inner loop: the evaluator checks the result against the issue's intent, and the test reviewer checks what the tests actually guarantee. Passing tests is necessary, never sufficient. The inner loop produces the tests; the outer loop certifies their value.
 - **Independent gates**: the final verdict comes from checks the agent can't change (the CLI and CI), not from one agent's judgment of another. Agents on the same model share blind spots, so back every judgment with a deterministic check wherever one exists.
 - **Isolation, not instructions**: agents are independent because of what they receive and what they may change (their own context, inputs and permissions), not because their prompts differ. They hand work over through files and commits, never through conversation history.
 - **Guarantees, not test count**: keep the smallest suite that covers the risks that matter. Every test costs runtime and maintenance, and earns its place by the defect it would catch.
@@ -29,12 +29,12 @@ The factory **delegates execution, not authority**. Use these to judge every des
 | Source of truth | The issue's ACs and the public contracts: `docs/04-flows.md`, `docs/03-design-brief.md`, `packages/contract` and `openapi.json`, public interfaces | Technical contracts, invariants and implementation risks |
 | Author | Test agent | Build agent |
 | When | Before implementation, in the red commit | During implementation, one at a time |
-| Who changes them | Only with the user's authorization: changing one changes a guarantee | The build agent, as long as no existing guarantee weakens |
-| Certified by | The evaluator, then CI | The evaluator, then CI |
+| Who changes them | The test agent: with the user's authorization when the guarantee changes, on a reviewer's finding when it doesn't | The build agent, as long as no existing guarantee weakens |
+| Certified by | The test reviewer, then CI | The test reviewer, then CI |
 
 **Acceptance tests** check behavior a user or caller can observe: in the SPA by role and accessible name (`knowledge/standards/testing.md` T-007), never by DOM structure. Minimal scaffolding (a route, an empty component, a stub with the right signature) may exist so the app and the tests run; the red must come from the missing behavior, never from a broken environment ("Valid red" under Decided).
 
-**Technical tests** follow a value check. Before writing one, the build agent records in its notes: the behavior, contract or invariant it protects; the concrete defect it would catch; whether another test already gives that guarantee; and the level that fits (unit, API, component, end to end). A test whose only target is framework behavior, an internal detail, a coverage number or a guarantee another test already gives earns no place. Coverage is a diagnostic, never evidence. The build agent's check is a first assessment; the evaluator certifies.
+**Technical tests** follow a value check. Before writing one, the build agent records in its notes: the behavior, contract or invariant it protects; the concrete defect it would catch; whether another test already gives that guarantee; and the level that fits (unit, API, component, end to end). A test whose only target is framework behavior, an internal detail, a coverage number or a guarantee another test already gives earns no place. Coverage is a diagnostic, never evidence. The build agent's check is a first assessment; the test reviewer certifies.
 
 ## Who sees what
 
@@ -43,8 +43,9 @@ Each agent runs as a fresh subagent. What it starts with is its independence.
 | Agent | Receives | Starts without |
 | --- | --- | --- |
 | Test agent | The issue and its ACs, the public contracts (see the table above), `knowledge/standards/testing.md`, the test infrastructure | Any implementation plan; it runs before the build agent |
-| Build agent | The issue, `docs/05-architecture.md`, the repo and `knowledge/`, the acceptance tests (read and run only), the check results, the evaluator's findings | The test agent's reasoning |
+| Build agent | The issue, `docs/05-architecture.md`, the repo and `knowledge/`, the acceptance tests (read and run only), the check results, the reviewers' findings | The test agent's reasoning |
 | Evaluator | The issue and its ACs, `docs/05-architecture.md` and `knowledge/`, the branch's diff against `main`, the whole test suite and its results | The build agent's notes and reasoning, until its first pass is written down; only then does it read them to contrast its own findings (the **blind first pass**) |
+| Test reviewer | The issue and its ACs, the public contracts, `knowledge/standards/testing.md`, the branch's diff against `main`, the whole test suite and its results, the CLI's list of removed, skipped and focused tests | The build agent's notes, including the value check of each technical test, until its blind first pass is written down |
 
 ## The flow at a glance
 
@@ -56,12 +57,12 @@ flowchart TD
     start["/factory 42 in a terminal:<br/>the orchestrator takes the job"]
     wt["CLI: worktree and branch,<br/>label factory:building"]
     test["Test agent: acceptance tests<br/>from the ACs and the contracts"]
-    red{"CLI: does every<br/>acceptance test fail?"}
+    red{"CLI: does every acceptance<br/>test fail on an assertion?"}
 
     ready --> start --> wt --> test --> red
-    red -->|"one already passes"| test
+    red -->|"no: the test agent fixes it"| test
 
-    subgraph outer ["Outer loop: the evaluator's verdict"]
+    subgraph outer ["Outer loop: independent review"]
         subgraph inner ["Inner loop: the build agent alone"]
             build["Build agent: implements,<br/>writes technical tests"]
             checks["Local CI checks:<br/>lint, types, every test"]
@@ -69,19 +70,26 @@ flowchart TD
             checks -->|"red: diagnose, fix"| build
         end
         gate{"CLI gate: all green,<br/>protected paths untouched?"}
-        eval["Evaluator: blind first pass,<br/>then the build notes.<br/>ACs, architecture, test review"]
+        eval["Evaluator: the result<br/>against the issue"]
+        tqr["Test reviewer:<br/>what the tests guarantee"]
+        verdict{"Orchestrator:<br/>any findings?"}
+        atfix["Test agent: minor fix<br/>to an acceptance test"]
         checks -->|green| gate
         gate -->|rejected| build
-        gate -->|passed| eval
-        eval -->|"findings with evidence"| build
+        gate -->|passed| eval & tqr
+        eval --> verdict
+        tqr --> verdict
+        verdict -->|"findings with evidence"| build
+        verdict -->|"acceptance test, same guarantee"| atfix
+        atfix --> checks
     end
 
     red -->|"red commit"| build
-    eval -->|approved| pr["CLI: opens the PR,<br/>label factory:pr-open"]
-    pr --> merge(["User reviews and merges"])
+    verdict -->|"none: both approve"| pr["CLI: opens the PR,<br/>label factory:pr-open"]
+    pr --> merged(["User reviews and merges"])
 
     build -.->|"escalation or retry limit"| dr
-    eval -.->|"round limit"| dr
+    verdict -.->|"round limit or a guarantee change"| dr
     dr["Decision Request on the issue,<br/>blocked label"] -.-> decide(["User answers on the issue"])
     decide -.->|"the job resumes"| start
 
@@ -90,10 +98,10 @@ flowchart TD
     classDef cli fill:#bfdbfe,stroke:#1e40af,color:#0f172a
     classDef agent fill:#bbf7d0,stroke:#166534,color:#052e16
     classDef wait fill:#fecaca,stroke:#991b1b,color:#450a0a
-    class ready,merge,decide user
-    class start orch
+    class ready,merged,decide user
+    class start,verdict orch
     class wt,red,checks,gate,pr cli
-    class test,build,eval agent
+    class test,build,eval,tqr,atfix agent
     class dr wait
 ```
 
@@ -111,42 +119,43 @@ Yellow is the user, purple the orchestrator (the `/factory` skill), blue the CLI
 | Subagents | Each runs in the background, with the inputs in "Who sees what". |
 | Deterministic actions | A CLI in **TypeScript on Bun** (the repo's runtime; no new toolchain, no build step, `Bun.$` for git and gh, tested with `bun test`). The CLI is the shell backbone: the skill runs CLI subcommands for every deterministic step and reasons only about the rest. |
 | Worktree | The CLI creates it: `factory start 42` makes `.claude/worktrees/42-<slug>` on branch `feat/42-<slug>`; all agents work there. The CLI owns branch naming and cleanup. |
-| V1 flow | Issue → **test agent** writes the acceptance tests from the contracts and commits them (the red commit) → **build agent**, in another context, implements until green, writing technical tests as it goes → the CI checks run locally → **evaluator agent**, in its own context and with a blind first pass, reviews the result and its tests and sends findings back to the build agent, then re-evaluates (the outer loop) → PR. The user reviews and merges. No plan gate in V1; refactoring happens inside the build agent's red–green–refactor. |
-| Tests vs implementation | Acceptance tests are **frozen but visible**: the build agent reads and runs them, never edits them. Technical tests belong to the build agent: it adds, changes and removes them, under the evaluator's review. |
+| V1 flow | Issue → **test agent** writes the acceptance tests from the contracts and commits them (the red commit) → **build agent**, in another context, implements until green, writing technical tests as it goes → the CI checks run locally → the **evaluator** and the **test reviewer**, in parallel, each in its own context and with a blind first pass, review the result and the tests; the orchestrator merges their findings into one list for the build agent, and both review again (the outer loop) → PR. The user reviews and merges. No plan gate in V1; refactoring happens inside the build agent's red–green–refactor. |
+| Tests vs implementation | Acceptance tests are **frozen but visible**: the build agent reads and runs them, never edits them. Technical tests belong to the build agent: it adds, changes and removes them, under the test reviewer's review. |
 | Protected paths | The CLI rejects a build whose diff touches an acceptance test, `.github/workflows/`, the lint or TypeScript config, `factory/` or `.claude/`: the agent can't change the rules it's judged by. |
-| Acceptance test names | Acceptance tests are named `*.acceptance.test.ts(x)`, and every test in `apps/web/e2e/` is one. The name keeps the protection after the job, so no later build agent can weaken a guarantee the user approved. When a new issue's ACs change a behavior an existing acceptance test checks, the test agent updates that test in the red commit: the user's approval of those ACs is the authorization. The V1 PR amends T-002 in `knowledge/standards/testing.md` (a test sits beside its file) for these names. |
-| Tests already on `main` | The build agent may change or remove technical tests already on `main`. The CLI hands the evaluator, as evidence, every test the diff removes, skips (`.skip`) or focuses (`.only`). |
+| Acceptance test names | Acceptance tests are named `*.acceptance.test.ts(x)`, and every test in `apps/web/e2e/` is one. The name keeps the protection after the job, so no later build agent can weaken a guarantee the user approved. When a new issue's ACs change a behavior an existing acceptance test checks, the test agent updates that test in the red commit: the user's approval of those ACs is the authorization. The V1 PR amends T-002 in `knowledge/standards/testing.md` (a test sits beside its file) for these names, renames the two tests that check rules written in the docs (`resolve-gesture.test.ts`, the map editor's tools table; `stretch.test.ts`, the shared stretch rules) as acceptance tests, and amends T-005 so the privacy tests are acceptance tests when they are written. |
+| Tests already on `main` | The build agent may change or remove technical tests already on `main`. The CLI hands the test reviewer, as evidence, every test the diff removes, skips (`.skip`) or focuses (`.only`). |
 | Valid red | At the red commit the CLI runs every new or changed acceptance test with a JUnit report and accepts the red only if each of their files appears in the report and each of their tests fails on an assertion: `type="AssertionError"` in `bun test` and Vitest, a `<failure>` of type `expect.*` in Playwright. A file missing from the report (`bun test`'s load error), a test named after its file (Vitest's), an empty run (Playwright's) or any other error rejects the red, and the test agent fixes it. So the test agent's scaffolding is stubs with the right signature that return an empty value, never throw, plus empty routes or screens; an end-to-end test asserts that an element is visible before acting on it. |
-| Hollow tests | Acceptance tests defend with the **verified red**, and at the green commit all must pass. Technical tests defend with the value check and the evaluator's test review. Mutation testing and traceability per AC are V2 candidates. |
-| Test review | The evaluator may recommend keeping, removing, merging, changing or adding any technical test, with a reason for each; the build agent applies them and the evaluator verifies again. |
+| Hollow tests | Acceptance tests defend with the **verified red**, and at the green commit all must pass. Technical tests defend with the value check and the test reviewer. Mutation testing and traceability per AC are V2 candidates. |
+| Evaluator | Opus, own context, blind first pass. Checks: ACs met; behavior end to end; conformance to `docs/05-architecture.md` and `knowledge/`; scope creep and over-engineering; tampering with the checks, special-casing a test's inputs included. |
+| Test reviewer | Opus, own agent and context, blind first pass, in parallel with the evaluator. Checks: risks left uncovered, assertions that can't fail, guarantees duplicated across levels, coupling to implementation details, excess mocks, guarantees removed or weakened, and whether each test would catch a real defect. It may recommend keeping, removing, merging, changing or adding any technical test, with a reason for each; the build agent applies them and the test reviewer verifies again. |
+| Acceptance test findings | A reviewer that finds a problem in an acceptance test judges whether the fix keeps the guarantee. If it does (a wrong selector, a typo), the test agent fixes it without the user, and the PR comment lists the fix. If it changes what the test guarantees, the job raises a Decision Request, and the test agent rewrites the test once the user authorizes it. |
 | Retries and diagnosis | A build attempt is one build-agent run until it stops. After a red attempt the orchestrator relaunches Sonnet in a fresh context with the failing output and the attempt's notes. After a second red attempt the orchestrator (Opus, in the main session) diagnoses from the test, the diff and both notes: a technical cause relaunches Sonnet once with that diagnosis; a functional ambiguity goes straight to a Decision Request. A third red attempt blocks the job with a Decision Request. At most 3 build attempts per job; the user hears only when the job blocks. |
-| Outer-loop rounds | A round is: the evaluator reports findings, the build agent fixes them, the evaluator reviews again. Up to 3 rounds with findings; a fourth blocks the job with a Decision Request. A fix that doesn't reach green spends the build attempts above. |
-| Handoff files | The build agent's notes (the value check of each technical test, its decisions) and the evaluator's findings (each with evidence: the command, its output, `file:line`) live in the job's folder. The orchestrator gives the evaluator the path to the build notes only after its blind first pass is written. When the PR opens, the CLI posts the notes and the evaluator's final report as a PR comment, so they stay on record in GitHub. |
+| Outer-loop rounds | A round is: both reviewers report findings, the build agent fixes them, both review again. The two share one budget: up to 3 rounds with findings; a fourth blocks the job with a Decision Request. A fix that doesn't reach green spends the build attempts above. |
+| Handoff files | The build agent's notes (the value check of each technical test, its decisions) and the reviewers' findings (each with evidence: the command, its output, `file:line`) live in the job's folder. The orchestrator gives each reviewer the path to the build notes only after its blind first pass is written. When the PR opens, the CLI posts the notes and both reviewers' final reports as a PR comment, so they stay on record in GitHub. |
 | Testing standards | The value check and "guarantees, not test count" become standards in `knowledge/standards/testing.md` in the V1 PR: they bind every test, written by a person or an agent, and the agents read them there. |
 | Escalation | The build agent stops and asks instead of deciding when the change would touch a public contract, the architecture, an acceptance test, or anything outside the issue's ACs. V1 enforces this by instruction only. |
 | Decision Requests | Whenever a job needs the user (an escalation or a block), the orchestrator comments on the issue with context, evidence, alternatives, a recommendation, impact and risks, and moves the job to the blocked label. The user's answer on the issue is the decision's record. |
 | Risk tolerance | One level for every V1 job: the repo's standards define the risks (the privacy tests, T-005). |
-| Models | Haiku explores code, Sonnet writes code (test and build agents), Opus does what matters: the orchestrator and the diagnosis of a failed build. |
+| Models | Haiku explores code, Sonnet writes code (test and build agents), Opus does what matters: the orchestrator, the diagnosis of a failed build, the evaluator and the test reviewer. |
 | `factory/README.md` | Explains the flow **visually** first: the overview diagram above, then diagrams of the stations, both loops, the job's states and labels, who runs each step and who sees what; then the commands. It describes the current version only. |
 | Versions | Each version is a git tag (`factory-v1`) plus `factory/versions/v1.md`: the need that motivated it, what it does, what the user learned, and the V2 candidates. `factory/versions/` is an explicit exception to the repo rule that docs hold only the current definition; record that exception in `CLAUDE.md`. |
 
 ## Open: settle with the user before designing
 
-1. **The evaluator.** Its checks, starting from: ACs met; behavior end to end; conformance to `docs/05-architecture.md` and `knowledge/`; scope creep and over-engineering; tampering with the checks (special-casing a test's inputs included); and the test review: risks left uncovered, assertions that can't fail, guarantees duplicated across levels, coupling to implementation details, excess mocks, guarantees removed or weakened, and whether each test would catch a real defect. Still to settle: whether the test review is a capability of the evaluator or its own agent; the evaluator's model; and what happens to a finding about an acceptance test. Changing one needs the user's authorization (decided); open is who rewrites it (back to the test agent, or the user through the Decision Request) and whether a fix that keeps the guarantee (a wrong selector, a typo) needs that authorization too.
-2. Anything else the design needs that isn't decided above, for example: whether the existing privacy tests (T-005) are renamed as acceptance tests, whether the CLI follows `knowledge/standards/workspace.md` (it lives outside `apps/` and `packages/`), the CLI's subcommands, the exact protected files, whether agent permissions or hooks can block edits to acceptance tests before the CLI ever sees the diff, the PR body (link `Closes #<n>`), how the user learns a job finished, how the local checks match CI (`.github/workflows/ci.yml`).
+Whatever the design needs that isn't decided above, for example: whether the CLI follows `knowledge/standards/workspace.md` (it lives outside `apps/` and `packages/`), the CLI's subcommands, the exact protected files, whether agent permissions or hooks can block edits to acceptance tests before the CLI ever sees the diff, the PR body (link `Closes #<n>`), how the user learns a job finished, how the local checks match CI (`.github/workflows/ci.yml`).
 
 ## How to run this session
 
 1. Read `README.md`, `docs/02-mvp-scope.md`, `docs/05-architecture.md`, `knowledge/README.md` and the standards it lists for the paths you'll touch (`testing.md` always), and `.github/workflows/ci.yml`. Read the Claude Code docs on skills, subagents and hooks (code.claude.com/docs/en/skills, /sub-agents, /agents, /hooks) to confirm the constraints above still hold: background subagents' tool set, the `model` field in agent frontmatter, per-agent tool and permission limits, `${CLAUDE_SKILL_DIR}`, `allowed-tools`.
 2. Settle every open item with the user. Done when no question remains.
 3. Write `factory/README.md` with the flow diagrams and show it to the user for approval before writing code. Done when the user approves it.
-4. Build V1 on a branch with a PR (code reaches `main` only through a PR with passing checks): the issue form, the labels, the CLI with its tests, the skill, the agents, `.gitignore` for `factory/.jobs/`, `factory/versions/v1.md`, the `CLAUDE.md` exception, the T-002 amendment and the new testing standards. Done when the CLI's tests pass and the PR's checks are green.
+4. Build V1 on a branch with a PR (code reaches `main` only through a PR with passing checks): the issue form, the labels, the CLI with its tests, the skill, the four agents, `.gitignore` for `factory/.jobs/`, `factory/versions/v1.md`, the `CLAUDE.md` exception, the testing standards' changes and renames above. Done when the CLI's tests pass and the PR's checks are green.
 5. Prove it end to end with the user on one small real issue: from `factory:ready` to an open PR. Record what happened in `factory/versions/v1.md`. Tag `factory-v1` after the user merges.
 6. Delete this file (`FACTORY_PROMPT.md`) in the same PR: the README and `versions/v1.md` replace it.
 
 ## V2 candidates already raised
 
-Seed `factory/versions/v1.md` with these: a dedicated refactor station after green; hidden acceptance tests held back for the evaluator, when the risk justifies them; the test review as its own agent (if V1 keeps it inside the evaluator); mutation testing on the diff only, so the score never becomes a target; property-based tests for invariants; contract tests; traceability per AC; a risk level per issue that scales verification; coverage as a diagnostic for the evaluator; a second-opinion evaluator on another model family; calibrating the evaluator against the user's verdicts; a cost budget per job; enforcing escalation in the CLI.
+Seed `factory/versions/v1.md` with these: a dedicated refactor station after green; hidden acceptance tests held back for the reviewers, when the risk justifies them; mutation testing on the diff only, so the score never becomes a target; property-based tests for invariants; contract tests; traceability per AC; a risk level per issue that scales verification; coverage as a diagnostic for the evaluator; a second-opinion evaluator on another model family; calibrating the reviewers against the user's verdicts; a cost budget per job; enforcing escalation in the CLI.
 
 ## Already found (sources)
 
@@ -154,7 +163,7 @@ Seed `factory/versions/v1.md` with these: a dedicated refactor station after gre
 - TDD with Claude: write tests from expected input/output, say it's TDD so it doesn't write mock implementations, run them and confirm they fail, commit them, then implement without changing them. [Anthropic, Claude Code best practices](https://www.anthropic.com/research/claude-code-best-practices).
 - The outer loop is Anthropic's evaluator-optimizer pattern: one model generates, another evaluates and gives feedback in a loop. [Anthropic, Building effective agents](https://www.anthropic.com/engineering/building-effective-agents).
 - Why the evaluator is separate and skeptical: an agent grading its own work praises it even when it's mediocre, and tuning a standalone evaluator to be skeptical is more tractable than making a generator critical of itself. Out of the box the evaluator found real issues and approved anyway; the author tuned it over several rounds by reading its logs where its judgment diverged from theirs, and failed a sprint when any criterion fell below a hard threshold. Generator and evaluator agreed on what "done" meant before any code (sprint contracts) and handed work over through files. Every harness component encodes an assumption about what the model can't do alone, so re-test each one as models improve. [Anthropic, Harness design for long-running application development (Mar 2026)](https://www.anthropic.com/engineering/harness-design-long-running-apps).
-- Why acceptance tests are frozen, the CLI rejects edits and escalation is an explicit exit: given tests that contradict the spec, Claude models cheated mostly by editing the tests (>79% of their cheating), despite being told not to. Hiding the tests cut cheating to near zero but hurt legitimate performance; read-only tests restored performance and stopped test edits, but not special-casing or operator overloading, which is why the evaluator looks for those. An option to flag the task for a human cut GPT-5's cheating from 54% to 9%. LLM monitors caught only 42–65% of cheating on multi-file tasks: deterministic gates first. [Zhong, Raghunathan & Carlini, ImpossibleBench (Oct 2025, ICLR 2026)](https://arxiv.org/abs/2510.20270).
+- Why acceptance tests are frozen, the CLI rejects edits and escalation is an explicit exit: given tests that contradict the spec, Claude models cheated mostly by editing the tests (>79% of their cheating), despite being told not to. Hiding the tests cut cheating to near zero but hurt legitimate performance; read-only tests restored performance and stopped test edits, but not special-casing or operator overloading, which is why the evaluator looks for those. Opus caught more cheating than Sonnet as a monitor, though neither caught all. An option to flag the task for a human cut GPT-5's cheating from 54% to 9%. LLM monitors caught only 42–65% of cheating on multi-file tasks: deterministic gates first. [Zhong, Raghunathan & Carlini, ImpossibleBench (Oct 2025, ICLR 2026)](https://arxiv.org/abs/2510.20270).
 - Mechanical enforcement over instructions: OpenAI's agent-written codebase enforces its architecture with custom linters and structural tests whose error messages tell the agent how to fix the problem; only versioned artifacts in the repo reach the agent; humans turn feedback into acceptance criteria and validate outcomes, and agents review each other's PRs until the reviewers are satisfied. Contrast: they run with minimal blocking merge gates and agents merge their own PRs, where Wandr keeps the merge with the user. [OpenAI, Harness engineering (Feb 2026)](https://openai.com/index/harness-engineering/).
 - Human on the loop, not in it: Meta separates catching tests (fail on a change, then discarded once answered) from hardening tests (pass and land to guard against regressions), filters LLM-generated tests with LLM judges combined with a deterministic rule-based assessor, and has engineers set criteria and review outcomes in aggregate, intervening at the policy level rather than per item: the basis for the user not approving technical tests one by one. [Meta, Just-in-Time Catching Test Generation (Jan 2026)](https://arxiv.org/abs/2601.22832), [Meta Engineering, JiTTesting at full scale (Oct 2026)](https://engineering.fb.com/2026/10/29/security/catching-bugs-before-they-land-jittestings-human-on-the-loop-approach-at-full-scale/).
 - Valid red: Beck accepts a test that doesn't even compile as red (*Test-Driven Development: By Example*); Freeman & Pryce watch every test fail and fix any failure they didn't expect before writing code (*Growing Object-Oriented Software, Guided by Tests*, ch. 5, "Watch the Test Fail"). The JUnit behavior under "Valid red" was verified on 2026-11-26 with `bun test` 1.4.2, Vitest 5.1.1 and Playwright 1.65.1, the repo's versions, by running a missing import, a syntax error, a stub that throws and a failing assertion through each. Not yet verified: a Playwright action on a missing element should fail as a timeout error, not an assertion, which is why end-to-end tests assert visibility first.
