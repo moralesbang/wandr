@@ -307,3 +307,55 @@ describe('a job shaped like #13', () => {
     expect(edgeState(view, 'e17', view.onAt, 5000)).toBe('trail')
   })
 })
+
+const usage = (usd: number, over: Record<string, unknown> = {}) => ({
+  messages: 3,
+  models: { 'claude-sonnet-5-5': 3 },
+  efforts: { medium: 3 },
+  tokens: { input: 1, output: 2, cacheRead: 3, cacheWrite5m: 4, cacheWrite1h: 5 },
+  usd,
+  unpriced: [],
+  ...over,
+})
+const play = (...events: FactoryEvent[]) => {
+  const annotator = new Annotator()
+  const view = createJobView(13)
+  for (const event of events) applyEvent(view, annotator.push(event))
+  return view
+}
+
+describe('cost, model and effort per run', () => {
+  test('each run shows its model and effort, and the job totals the runs', () => {
+    const view = play(
+      ...launch(1, TEST, 'x'),
+      hook(2, 'agent.stop', TEST),
+      hook(3, 'usage', TEST, { detail: usage(0.5) }),
+      hook(4, 'usage', undefined, { detail: usage(1.25, { models: { 'claude-opus-5-5': 3 } }) }),
+    )
+    expect(view.runs.get('a-test')?.usage).toMatchObject({
+      models: { 'claude-sonnet-5-5': 3 },
+      efforts: { medium: 3 },
+      usd: 0.5,
+    })
+    expect(view.runs.get('orchestrator')?.usage?.usd).toBe(1.25)
+    expect(view.cost.usd).toBeCloseTo(1.75, 6)
+  })
+
+  test('a run that stops again replaces its cost instead of adding to it', () => {
+    const view = play(
+      ...launch(1, TEST, 'x'),
+      hook(2, 'usage', TEST, { detail: usage(0.5) }),
+      hook(3, 'usage', TEST, { detail: usage(0.8) }),
+    )
+    expect(view.runs.get('a-test')?.usage?.usd).toBe(0.8)
+    expect(view.cost.usd).toBeCloseTo(0.8, 6)
+  })
+
+  test('a run with an unpriced model puts it on the job, not a zero', () => {
+    const view = play(
+      ...launch(1, TEST, 'x'),
+      hook(2, 'usage', TEST, { detail: usage(0, { unpriced: ['claude-mystery-9'] }) }),
+    )
+    expect(view.cost.unpriced).toEqual(['claude-mystery-9'])
+  })
+})

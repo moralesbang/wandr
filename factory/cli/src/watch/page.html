@@ -1254,6 +1254,7 @@
             <div class="stat"><span>Round</span><b id="s-round">0/3</b></div>
             <div class="stat"><span>Reads</span><b id="s-reads">0</b></div>
             <div class="stat"><span>Tokens</span><b id="s-tokens">~0</b></div>
+            <div class="stat"><span>Cost</span><b id="s-cost">$0.00</b></div>
             <div class="stat" id="s-breach-box"><span>Breaches</span><b id="s-breaches">0</b></div>
           </div>
           <div class="jobs" id="jobs" role="group" aria-label="Jobs"></div>
@@ -1489,6 +1490,14 @@
         new Date(t).toLocaleTimeString([], { hour12: false, timeZone: undefined })
       const tokensText = (n) =>
         n >= 1000 ? `~${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : `~${n}`
+      const costText = (usd, unpriced) => `$${usd.toFixed(2)}${unpriced.length ? ' +?' : ''}`
+      // "claude-opus-5-5" for one name, "claude-opus-5-5 ×12, claude-sonnet-5-5 ×3" for several.
+      const seenText = (counts) => {
+        const entries = Object.entries(counts)
+        return entries.length === 1
+          ? entries[0][0]
+          : entries.map(([name, n]) => `${name} ×${n}`).join(', ') || '–'
+      }
       const STATE_LABEL = { building: 'Building', blocked: 'Blocked', pr_open: 'PR open' }
       const STATE_CLASS = { building: 'building', blocked: 'blocked', pr_open: 'pr' }
       const edgeWindow = replaying ? Math.max(3000, 3000 * speed) : 6000
@@ -1556,6 +1565,11 @@
         $('s-round').textContent = `${view?.round ?? 0}/3`
         $('s-reads').textContent = String(view?.readCount ?? 0)
         $('s-tokens').textContent = tokensText(view?.tokens ?? 0)
+        const total = view?.cost
+        $('s-cost').textContent = total ? costText(total.usd, total.unpriced) : '$0.00'
+        $('s-cost').title = total?.unpriced.length
+          ? `No price for ${total.unpriced.join(', ')}: its cost is not in the total`
+          : ''
         const breaches = view?.breaches.length ?? 0
         $('s-breaches').textContent = String(breaches)
         const box = $('s-breach-box')
@@ -1806,7 +1820,13 @@
         ]
         el.innerHTML = `
           <div class="rline"><span class="rtitle">${esc(runLabel(view, run))}</span><span class="pill ${status === 'running' ? 'run' : status === 'finished' ? 'fin' : 'idle'}">${status}</span>${parent ? `<span class="muted">launched by ${esc(runLabel(view, parent))}</span>` : ''}</div>
-          <div class="kv">${station?.sub ? `<span>model <b>${esc(station.sub)}</b></span>` : ''}<span>reads <b>${run.reads.length}</b></span><span>tokens <b>${tokensText(runTokens(run))}</b></span></div>
+          <div class="kv">${
+            run.usage
+              ? `<span>model <b>${esc(seenText(run.usage.models))}</b></span><span>effort <b>${esc(seenText(run.usage.efforts))}</b></span><span>cost <b>${costText(run.usage.usd, run.usage.unpriced)}</b></span>`
+              : station?.sub
+                ? `<span>model <b>${esc(station.sub)}</b></span>`
+                : ''
+          }<span>reads <b>${run.reads.length}</b></span><span>tokens <b>${tokensText(runTokens(run))}</b></span></div>
           ${run.id === 'orchestrator' ? '' : `<p class="prompt">${run.prompt ? esc(run.prompt) : 'Prompt not recorded.'}</p>`}
           ${run.denied.map((d) => `<div class="warn amber">write denied · ${esc(where(d.target))}${d.detail?.reason ? ` · ${esc(d.detail.reason)}` : ''}</div>`).join('')}
           ${run.reads

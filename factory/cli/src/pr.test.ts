@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { makeJob } from './job-fixture.ts'
-import { approves, prBody } from './commands/pr.ts'
+import { approves, prBody, prComment, usageTable } from './commands/pr.ts'
+import type { FactoryEvent } from './events.ts'
 
 describe('approves', () => {
   test('a report whose first line is "Verdict: approve" approves', () => {
@@ -48,5 +49,79 @@ describe('prBody', () => {
 
   test('has no authorized-changes section when nothing was rewritten', () => {
     expect(prBody(makeJob(), parts)).not.toContain('Authorized guarantee changes')
+  })
+})
+
+const usage = (usd: number, over: Record<string, unknown> = {}) => ({
+  messages: 2,
+  models: { 'claude-opus-5-5': 2 },
+  efforts: { high: 2 },
+  tokens: { input: 12, output: 3400, cacheRead: 250_000, cacheWrite5m: 1000, cacheWrite1h: 500 },
+  usd,
+  unpriced: [],
+  ...over,
+})
+const event = (agent: { id: string; type: string } | undefined, detail: unknown): FactoryEvent => ({
+  t: 'now',
+  job: 7,
+  source: 'hook',
+  ...(agent ? { agent } : {}),
+  kind: 'usage',
+  detail: detail as Record<string, unknown>,
+})
+
+describe('usageTable and prComment', () => {
+  const reviewer = { id: 'a97330887a0a40f7a', type: 'factory-test-reviewer' }
+
+  test('one row per run with its model, effort and cost, and a total', () => {
+    const table = usageTable([event(undefined, usage(1.5)), event(reviewer, usage(1.09))])
+    expect(table).toContain(
+      '| orchestrator | claude-opus-5-5 | high | 12 | 3.4k | 250k | 1.5k | $1.50 |',
+    )
+    expect(table).toContain('| factory-test-reviewer (a973308) |')
+    expect(table).toContain('| **Total** | | | | | | | **$2.59** |')
+  })
+
+  test('a run that stopped twice counts once, at its latest total', () => {
+    const table = usageTable([event(reviewer, usage(0.5)), event(reviewer, usage(0.9))])
+    expect(table?.match(/factory-test-reviewer/g)).toHaveLength(1)
+    expect(table).toContain('**$0.90**')
+  })
+
+  test('an unpriced model is named, not counted as $0', () => {
+    const table = usageTable([event(reviewer, usage(0, { unpriced: ['claude-mystery-9'] }))])
+    expect(table).toContain('$0.00 + unpriced (claude-mystery-9)')
+  })
+
+  test('several models in one run are listed with their message counts', () => {
+    const table = usageTable([
+      event(reviewer, usage(1, { models: { 'claude-opus-5-5': 2, 'claude-sonnet-5-5': 1 } })),
+    ])
+    expect(table).toContain('claude-opus-5-5 ×2, claude-sonnet-5-5 ×1')
+  })
+
+  test('no usage logged, no table and no heading', () => {
+    expect(usageTable([])).toBeNull()
+    const comment = prComment({
+      buildNotes: 'notes',
+      pass: 2,
+      evaluator: 'E',
+      testReviewer: 'T',
+      usage: null,
+    })
+    expect(comment).not.toContain('Cost per agent')
+    expect(comment).toContain('Evaluator, final report (pass 2)')
+  })
+
+  test('the table leads the comment, so a long report cannot cut it off', () => {
+    const comment = prComment({
+      buildNotes: 'x'.repeat(100_000),
+      pass: 1,
+      evaluator: 'E',
+      testReviewer: 'T',
+      usage: 'TABLE',
+    })
+    expect(comment.indexOf('TABLE')).toBeLessThan(comment.indexOf('Build notes'))
+    expect(comment.length).toBeLessThan(65_536)
   })
 })

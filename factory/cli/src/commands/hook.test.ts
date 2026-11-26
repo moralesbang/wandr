@@ -7,8 +7,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { makeJob } from '../job-fixture.ts'
+import { readEvents } from '../events.ts'
 import { saveJob } from '../job.ts'
-import { hookGuard } from './hook.ts'
+import { hookGuard, hookLog } from './hook.ts'
 
 let root = ''
 let worktree = ''
@@ -64,5 +65,46 @@ describe('hook guard: the job folder', () => {
       hookSpecificOutput: { permissionDecision: string }
     }
     expect(decision.hookSpecificOutput.permissionDecision).toBe('deny')
+  })
+})
+
+const logged = () =>
+  readEvents(root, 7)
+    .filter((event) => event.kind === 'usage')
+    .map((event) => ({
+      run: event.agent?.id ?? 'orchestrator',
+      usd: (event.detail as { usd: number }).usd,
+    }))
+
+const log = (input: Record<string, unknown>) =>
+  hookLog(root, JSON.stringify({ session_id: 'job-session', ...input }))
+
+describe('hook log: usage', () => {
+  const fixtures = join(import.meta.dir, '..', 'usage-fixtures', 'job13')
+  test("a subagent's stop and the main session's turn end log each run's cost", async () => {
+    const reviewer = 'agent-a97330887a0a40f7a'
+    await log({
+      hook_event_name: 'SubagentStop',
+      agent_id: 'a97330887a0a40f7a',
+      agent_type: 'factory-test-reviewer',
+      agent_transcript_path: join(fixtures, `${reviewer}.jsonl`),
+      transcript_path: join(fixtures, 'main.jsonl'),
+    })
+    await log({ hook_event_name: 'Stop', transcript_path: join(fixtures, 'main.jsonl') })
+
+    const runs = logged()
+    expect(runs.map((r) => r.run)).toEqual(['a97330887a0a40f7a', 'orchestrator', 'orchestrator'])
+    expect(Math.abs((runs[0]?.usd ?? 0) - 1.09)).toBeLessThan(0.01)
+    expect(Math.abs((runs[1]?.usd ?? 0) - 1.57)).toBeLessThan(0.01)
+  })
+
+  test('a transcript that is gone logs the stop and breaks nothing', async () => {
+    await log({
+      hook_event_name: 'SubagentStop',
+      agent_id: 'gone',
+      agent_type: 'factory-build',
+      agent_transcript_path: join(root, 'no-such.jsonl'),
+    })
+    expect(readEvents(root, 7).map((event) => event.kind)).toEqual(['agent.stop'])
   })
 })

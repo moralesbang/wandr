@@ -3,6 +3,7 @@
 // imports beyond types and touches neither the DOM nor the clock: the page passes the time in.
 
 import type { Annotated } from '../annotate.ts'
+import type { RunUsage } from '../usage.ts'
 
 // ---- The flow: stations and edges, as in factory/README.md ---------------------------------------
 
@@ -206,7 +207,12 @@ export type Run = {
   searches: Annotated[]
   bash: Annotated[]
   changed: { status: string; path: string }[]
+  /** The run's total from its latest usage event: each one recomputes it from the transcript. */
+  usage: RunUsage | null
 }
+
+/** What the job's runs cost together; `unpriced` models have tokens but no price. */
+export type Cost = { usd: number; unpriced: string[] }
 
 export type Segment = { mode: OrchestratorMode; from: number; to: number | null }
 export type Mark = { t: number; kind: string; fail: boolean }
@@ -231,6 +237,7 @@ export type JobView = {
   round: number
   readCount: number
   tokens: number
+  cost: Cost
   stations: Record<StationId, StationState>
   /** Stations whose run read something it should not have. */
   flagged: Set<StationId>
@@ -269,6 +276,7 @@ export function createJobView(number: number): JobView {
     round: 0,
     readCount: 0,
     tokens: 0,
+    cost: { usd: 0, unpriced: [] },
     stations: Object.fromEntries(STATION_IDS.map((id) => [id, 'idle'])) as Record<
       StationId,
       StationState
@@ -307,6 +315,14 @@ export const runningStations = (view: JobView): StationId[] => {
   return [...found]
 }
 
+function totalCost(view: JobView): Cost {
+  const runs = [...view.runs.values()]
+  return {
+    usd: runs.reduce((sum, run) => sum + (run.usage?.usd ?? 0), 0),
+    unpriced: [...new Set(runs.flatMap((run) => run.usage?.unpriced ?? []))],
+  }
+}
+
 function runOf(view: JobView, ev: Annotated, time: number): Run {
   const id = ev.agent ? ev.agent.id : 'orchestrator'
   let run = view.runs.get(id)
@@ -329,6 +345,7 @@ function runOf(view: JobView, ev: Annotated, time: number): Run {
       searches: [],
       bash: [],
       changed: [],
+      usage: null,
     }
     view.runs.set(id, run)
     view.order.push(id)
@@ -474,6 +491,10 @@ function applyHook(view: JobView, ev: Annotated, time: number): Effects {
       }
       break
     }
+    case 'usage':
+      run.usage = ev.detail as RunUsage
+      view.cost = totalCost(view)
+      break
     case 'instructions':
       run.instructions.push(ev)
       break
@@ -653,6 +674,9 @@ export function describe(ev: Annotated): { kind: string; msg: string; cls: strin
       break
     case 'agent.launched':
       msg = text(detail.childType) || text(detail.childId)
+      break
+    case 'usage':
+      msg = typeof detail.usd === 'number' ? `$${detail.usd.toFixed(2)}` : ''
       break
     case 'agent.stop':
       msg = Array.isArray(detail.changed) ? `${detail.changed.length} files changed` : ''

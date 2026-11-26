@@ -63,6 +63,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun \"$CLAUDE_PROJECT_DIR/factory/cli/src/main.ts\" hook log",
+            "async": true
+          }
+        ]
+      }
     ]
   }
 }
