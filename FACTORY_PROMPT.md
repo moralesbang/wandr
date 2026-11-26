@@ -46,6 +46,59 @@ Each agent runs as a fresh subagent. What it starts with is its independence.
 | Build agent | The issue, `docs/05-architecture.md`, the repo and `knowledge/`, the acceptance tests (read and run only), the check results, the evaluator's findings | The test agent's reasoning |
 | Evaluator | The issue and its ACs, `docs/05-architecture.md` and `knowledge/`, the branch's diff against `main`, the whole test suite and its results | The build agent's notes and reasoning, until its first pass is written down; only then does it read them to contrast its own findings (the **blind first pass**) |
 
+## The flow at a glance
+
+`factory/README.md` opens with this diagram. Keep it true as the open items settle: it draws only what is decided, so a limit shows as an edge without its number.
+
+```mermaid
+flowchart TD
+    ready(["User labels the issue factory:ready"])
+    start["/factory 42 in a terminal:<br/>the orchestrator takes the job"]
+    wt["CLI: worktree and branch,<br/>label factory:building"]
+    test["Test agent: acceptance tests<br/>from the ACs and the contracts"]
+    red{"CLI: does every<br/>acceptance test fail?"}
+
+    ready --> start --> wt --> test --> red
+    red -->|"one already passes"| test
+
+    subgraph outer ["Outer loop: the evaluator's verdict"]
+        subgraph inner ["Inner loop: the build agent alone"]
+            build["Build agent: implements,<br/>writes technical tests"]
+            checks["Local CI checks:<br/>lint, types, every test"]
+            build --> checks
+            checks -->|"red: diagnose, fix"| build
+        end
+        gate{"CLI gate: all green,<br/>protected paths untouched?"}
+        eval["Evaluator: blind first pass,<br/>then the build notes.<br/>ACs, architecture, test review"]
+        checks -->|green| gate
+        gate -->|rejected| build
+        gate -->|passed| eval
+        eval -->|"findings with evidence"| build
+    end
+
+    red -->|"red commit"| build
+    eval -->|approved| pr["CLI: opens the PR,<br/>label factory:pr-open"]
+    pr --> merge(["User reviews and merges"])
+
+    build -.->|"escalation or retry limit"| dr
+    eval -.->|"round limit"| dr
+    dr["Decision Request on the issue,<br/>blocked label"] -.-> decide(["User answers on the issue"])
+    decide -.->|"the job resumes"| start
+
+    classDef user fill:#fde68a,stroke:#92400e,color:#1c1917
+    classDef orch fill:#e9d5ff,stroke:#6b21a8,color:#1e1b4b
+    classDef cli fill:#bfdbfe,stroke:#1e40af,color:#0f172a
+    classDef agent fill:#bbf7d0,stroke:#166534,color:#052e16
+    classDef wait fill:#fecaca,stroke:#991b1b,color:#450a0a
+    class ready,merge,decide user
+    class start orch
+    class wt,red,checks,gate,pr cli
+    class test,build,eval agent
+    class dr wait
+```
+
+Yellow is the user, purple the orchestrator (the `/factory` skill), blue the CLI's deterministic steps, green the agents, each in its own context, and red a job waiting for the user. Solid lines are the path to a PR; dotted lines leave it.
+
 ## Decided
 
 | Topic | Decision |
@@ -66,7 +119,7 @@ Each agent runs as a fresh subagent. What it starts with is its independence.
 | Escalation | The build agent stops and asks instead of deciding when the change would touch a public contract, the architecture, an acceptance test, or anything outside the issue's ACs. V1 enforces this by instruction only. |
 | Decision Requests | Whenever a job needs the user (an escalation or a block), the orchestrator comments on the issue with context, evidence, alternatives, a recommendation, impact and risks, and moves the job to the blocked label. The user's answer on the issue is the decision's record. |
 | Models | Haiku explores code, Sonnet writes code (test and build agents), Opus does what matters: the orchestrator and the diagnosis of a failed build. |
-| `factory/README.md` | Explains the flow **visually** first (diagrams of the stations, both loops, the job's states and labels, who runs each step, who sees what), then the commands. It describes the current version only. |
+| `factory/README.md` | Explains the flow **visually** first: the overview diagram above, then diagrams of the stations, both loops, the job's states and labels, who runs each step and who sees what; then the commands. It describes the current version only. |
 | Versions | Each version is a git tag (`factory-v1`) plus `factory/versions/v1.md`: the need that motivated it, what it does, what the user learned, and the V2 candidates. `factory/versions/` is an explicit exception to the repo rule that docs hold only the current definition; record that exception in `CLAUDE.md`. |
 
 ## Open: settle with the user before designing
