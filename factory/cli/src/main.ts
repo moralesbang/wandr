@@ -21,6 +21,7 @@ import { red } from './commands/red.ts'
 import { answer } from './commands/answer.ts'
 import { SANDBOX_USAGE, sandboxCommand } from './commands/sandbox.ts'
 import { describeAnswer, start } from './commands/start.ts'
+import { describeSeal, seal, unseal } from './seal.ts'
 import { watch } from './watch/server.ts'
 
 const USAGE = `Usage: bun run factory <command>
@@ -34,6 +35,8 @@ const USAGE = `Usage: bun run factory <command>
   atfix <n> --note <text>    commit a same-guarantee acceptance-test fix
   rewrite <n> --note <text>  commit a rewrite of acceptance tests (needs an answered Decision Request)
   block <n> <file>           keep a Decision Request and block the job
+  seal <n> --pass <k> --roles <r,...>  seal the build notes and earlier reports for a blind pass
+  unseal <n>                 restore them once every sealed role wrote its blind pass
   answer <n> "<text>"        the user's answer to the Decision Request (only from the user's own prompt)
   pr <n>                     open the pull request
   status                     list the jobs
@@ -64,6 +67,8 @@ async function main(argv: string[]): Promise<number> {
       note: { type: 'string' },
       port: { type: 'string' },
       abandon: { type: 'boolean' },
+      pass: { type: 'string' },
+      roles: { type: 'string' },
     },
   })
   const [command, arg] = positionals
@@ -77,6 +82,8 @@ async function main(argv: string[]): Promise<number> {
       print({ ...job, handoff: handoffDir(job) })
       const note = describeAnswer(job)
       if (note) print(`\n${note}\n`)
+      const sealNote = describeSeal(root, job)
+      if (sealNote) print(`\n${sealNote}\n`)
       return 0
     }
     case 'red': {
@@ -122,6 +129,22 @@ async function main(argv: string[]): Promise<number> {
       print(
         `Job #${arg} is blocked. Decision Request:\n\n${request}\n\nThe user answers with: ! bun run factory answer ${arg} "<text>"`,
       )
+      return 0
+    }
+    case 'seal': {
+      const pass = Number(values.pass)
+      if (!Number.isInteger(pass) || pass <= 0)
+        throw new Refusal('seal needs the review pass: seal <n> --pass <k> --roles <role,...>')
+      const roles = (values.roles ?? '').split(',').filter(Boolean)
+      const sealed = seal(root, issueNumber(arg), { pass, roles })
+      print(
+        `Sealed for pass ${sealed.pass} (${sealed.roles.join(', ')}): ${sealed.files.join(', ') || 'nothing to move'}.`,
+      )
+      return 0
+    }
+    case 'unseal': {
+      const restored = unseal(root, issueNumber(arg))
+      print(`Unsealed: ${restored.files.join(', ') || 'nothing to restore'}.`)
       return 0
     }
     case 'answer': {

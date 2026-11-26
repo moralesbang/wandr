@@ -1,8 +1,20 @@
 // Reads a job's event log in order and annotates each event with what factory watch shows: the
 // factory role behind it, isolation breaches, and information moving from one agent to another.
+//
+// A read is a Read, but also a Grep or a Glob, and a Bash command that prints a file: job #13's
+// reviewers read the sealed inputs with `cat`, and a page that classified only Read showed nothing.
+// Bash commands are read with the guard's own tokenizer (bash-words.ts), so the page flags what the
+// guard would deny. A denied read is a breach too: the agent tried.
 
-import type { FactoryEvent } from './events.ts'
-import { classifyRead, isFactoryAgent, type AgentType } from './visibility.ts'
+import { homedir } from 'node:os'
+import { isAbsolute, join, resolve } from 'node:path'
+import { commandPaths } from './bash-words.ts'
+import { locate, type FactoryEvent, type Places } from './events.ts'
+import { jobFolder } from './paths.ts'
+import { classifyRead, isFactoryAgent, type AgentType, type Target } from './visibility.ts'
+
+/** A denial the guard logged: the call never ran, but the agent reached for what it may not read. */
+const DENIED_READS = new Set(['read.denied', 'bash.denied', 'agent.denied'])
 
 export type Annotated = FactoryEvent & {
   /** The factory agent behind the event; a nested Explore run takes its launcher's role. */
@@ -14,11 +26,19 @@ export type Annotated = FactoryEvent & {
   input?: string
   /** Who wrote the file this event reads, when another actor did. */
   from?: string
+  /** For a Bash command, a Grep or a Glob: each path it read and how it was classified. */
+  reads?: { target: Target; input?: string; breach?: string }[]
 }
 
 const roleName = (role: AgentType) => role.replace('factory-', '')
 
 export class Annotator {
+  /**
+   * Where the job's areas are, to place the paths a command names. Given by the caller, or learned
+   * from the job's `job.started` event.
+   */
+  constructor(private places?: Places) {}
+
   private typeOf = new Map<string, string>()
   private parentOf = new Map<string, string>()
   private rounds = 0
@@ -71,6 +91,12 @@ export class Annotator {
       if (started?.caller) this.parentOf.set(event.agent.id, started.caller)
     }
     if (event.source === 'cli' && event.kind === 'round') this.rounds += 1
+    if (event.source === 'cli' && event.kind === 'job.started' && !this.places) {
+      const worktree = event.detail?.worktree
+      if (typeof worktree === 'string') {
+        this.places = { worktree, handoffDir: join(worktree, jobFolder(event.job)) }
+      }
+    }
 
     const role = this.roleOf(event.agent?.id)
     const annotated: Annotated = { ...event }
@@ -104,18 +130,74 @@ export class Annotator {
     if (event.kind === 'read' && target && key) {
       const writer = this.writerOf.get(key)
       if (writer && writer !== this.actor(event, role)) annotated.from = writer
-      if (role) {
-        const verdict = classifyRead(role, target, {
-          blindPassWritten: this.blindPasses.has(`${role}:${this.rounds + 1}`),
-        })
-        if (verdict.ok) annotated.input = verdict.input
-        else annotated.breach = verdict.reason
-      } else if (event.agent && target.area !== 'outside') {
-        // A run inside a job that isn't a factory agent and wasn't launched by one.
-        annotated.breach = `${event.agent.type} is not a factory agent and has no declared inputs`
-      }
+      const verdict = this.classify(event, role, target)
+      if (verdict?.input) annotated.input = verdict.input
+      if (verdict?.breach) annotated.breach = verdict.breach
+    }
+
+    if (event.kind === 'bash' || event.kind === 'search') {
+      const reads = this.readTargets(event).map((read) => ({
+        target: read,
+        ...this.classify(event, role, read),
+      }))
+      if (reads.length) annotated.reads = reads
+      const breaches = [...new Set(reads.flatMap((read) => (read.breach ? [read.breach] : [])))]
+      if (breaches.length) annotated.breach = breaches.join('; ')
+    }
+
+    if (DENIED_READS.has(event.kind)) {
+      const reason = event.detail?.reason
+      annotated.breach = typeof reason === 'string' ? reason : `${event.kind.replace('.', ' ')}`
     }
     return annotated
+  }
+
+  /** The breach rule for one read, or nothing for the orchestrator's reads. */
+  private classify(
+    event: FactoryEvent,
+    role: AgentType | undefined,
+    target: Target,
+  ): { input?: string; breach?: string } | undefined {
+    if (role) {
+      const verdict = classifyRead(role, target, {
+        blindPassWritten: this.blindPasses.has(`${role}:${this.rounds + 1}`),
+      })
+      return verdict.ok ? { input: verdict.input } : { breach: verdict.reason }
+    }
+    if (event.agent && target.area !== 'outside') {
+      // A run inside a job that isn't a factory agent and wasn't launched by one.
+      return { breach: `${event.agent.type} is not a factory agent and has no declared inputs` }
+    }
+    return undefined
+  }
+
+  /** The absolute path of a target, back from its area. */
+  private absolute(target: Target, places: Places) {
+    if (target.area === 'job') return join(places.handoffDir, target.path)
+    if (target.area === 'repo') return join(places.worktree, target.path)
+    return target.path
+  }
+
+  /** What a Bash command or a search read, placed in its area; nothing until the places are known. */
+  private readTargets(event: FactoryEvent): Target[] {
+    const places = this.places
+    if (!places) return []
+    const detail = event.detail ?? {}
+    if (event.kind === 'bash') {
+      const command = typeof detail.command === 'string' ? detail.command : ''
+      // Agents run in the job's worktree; a log that records the command's folder says so.
+      const cwd = typeof detail.cwd === 'string' ? detail.cwd : places.worktree
+      return commandPaths(command, { cwd, home: homedir() })
+        .filter((named) => named.read)
+        .map((named) => locate(named.path, places))
+    }
+    const base = event.target ? this.absolute(event.target, places) : places.worktree
+    const pattern = typeof detail.pattern === 'string' ? detail.pattern : ''
+    // A Grep's pattern is a regex over contents; a Glob's names the files it lists.
+    if (detail.tool === 'Glob' && pattern) {
+      return [locate(isAbsolute(pattern) ? pattern : resolve(base, pattern), places)]
+    }
+    return event.target ? [event.target] : []
   }
 }
 

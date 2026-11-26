@@ -2,13 +2,22 @@
 // stdin; outside a factory job both do nothing.
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { appendEvent, eventsFromHook, HookInput, locate, type FactoryEvent } from '../events.ts'
+import { join, relative, resolve } from 'node:path'
+import {
+  appendEvent,
+  eventsFromHook,
+  HookInput,
+  locate,
+  type FactoryEvent,
+  type Places,
+} from '../events.ts'
 import { findJobBySession, handoffDir, jobsDir, stateDir, type Job } from '../job.ts'
+import { isWithin } from '../paths.ts'
 import { changedBetween, workingTree } from '../shell.ts'
 import { bashPolicy } from '../bash-policy.ts'
-import { allow, type Policy } from '../policy.ts'
-import { agentPolicy, readPolicy } from '../read-guard.ts'
+import { allow, deny, type Policy } from '../policy.ts'
+import { agentPolicy, messagePolicy, readPolicy } from '../read-guard.ts'
+import { isSealedName, loadSeal } from '../seal.ts'
 import { classifyWrite } from '../visibility.ts'
 
 const readText = (path: string) => {
@@ -71,11 +80,28 @@ export async function hookLog(root: string, stdin: string): Promise<void> {
   }
 }
 
-/** Edit and Write by an agent stay inside its write column; the orchestrator's writes are logged. */
-const writePolicy: Policy = ({ input, places, agent }) => {
-  if (!agent) return allow
+/**
+ * Edit and Write by an agent stay inside its write column. Nobody, the orchestrator included, writes
+ * the job's state in the main checkout (only the CLI and the hooks do) or, while the job is sealed,
+ * a sealed name in the job's folder: `factory unseal` would refuse to overwrite it.
+ */
+const writePolicy: Policy = ({ root, job, input, places, agent }) => {
   const path = input.tool_input?.file_path ?? input.tool_input?.notebook_path
   if (typeof path !== 'string') return allow
+  const absolute = resolve(path)
+  if (!agent && isWithin(absolute, jobsDir(root))) {
+    return deny(
+      `${absolute} is the job's state in the main checkout, written only by the CLI and the hooks. Use \`bun run factory <command>\`; what you hand an agent goes in ${places.handoffDir}.`,
+    )
+  }
+  const sealed = loadSeal(root, job.number)
+  const rel = relative(places.handoffDir, absolute)
+  if (sealed && isWithin(absolute, places.handoffDir) && isSealedName(rel)) {
+    return deny(
+      `Job #${job.number} is sealed for review pass ${sealed.pass}: ${rel} is sealed material, and \`bun run factory unseal ${job.number}\` would refuse to overwrite it. Write it after the unseal.`,
+    )
+  }
+  if (!agent) return allow
   return classifyWrite(agent.type, locate(path, places))
 }
 
@@ -90,6 +116,23 @@ const POLICIES: Record<string, { policy: Policy; kind: string }> = {
   Bash: { policy: bashPolicy, kind: 'bash.denied' },
   Agent: { policy: agentPolicy, kind: 'agent.denied' },
   Task: { policy: agentPolicy, kind: 'agent.denied' },
+  SendMessage: { policy: messagePolicy, kind: 'agent.denied' },
+}
+
+/** What a denial logs besides its reason: the path it read or wrote, the command, the recipient. */
+function deniedTarget(input: HookInput, places: Places): Partial<FactoryEvent> {
+  const toolInput = input.tool_input ?? {}
+  const text = (key: string) => (typeof toolInput[key] === 'string' ? toolInput[key] : undefined)
+  const path = text('file_path') ?? text('notebook_path') ?? text('path')
+  return {
+    ...(path ? { target: locate(resolve(path), places) } : {}),
+    detail: {
+      ...(text('command') ? { command: text('command')?.slice(0, 300) } : {}),
+      ...(text('pattern') ? { pattern: text('pattern') } : {}),
+      ...(text('subagent_type') ? { subagentType: text('subagent_type') } : {}),
+      ...(text('to') ? { to: text('to') } : {}),
+    },
+  }
 }
 
 /**
@@ -109,7 +152,7 @@ export function hookGuard(root: string, stdin: string): string {
       : undefined
     const verdict = entry.policy({ root, job, input, places, ...(agent ? { agent } : {}) })
     if (verdict.ok) return ''
-    const path = input.tool_input?.file_path ?? input.tool_input?.notebook_path
+    const denied = deniedTarget(input, places)
     appendEvent(root, {
       t: new Date().toISOString(),
       job: job.number,
@@ -117,8 +160,8 @@ export function hookGuard(root: string, stdin: string): string {
       ...(agent ? { agent } : {}),
       kind: entry.kind,
       ...(input.tool_use_id ? { toolUseId: input.tool_use_id } : {}),
-      ...(typeof path === 'string' ? { target: locate(path, places) } : {}),
-      detail: { reason: verdict.reason },
+      ...denied,
+      detail: { ...denied.detail, reason: verdict.reason },
     })
     return JSON.stringify({
       hookSpecificOutput: {

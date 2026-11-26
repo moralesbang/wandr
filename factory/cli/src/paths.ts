@@ -1,6 +1,14 @@
 // Which repo paths are acceptance tests and which define the rules a build is judged by.
 // Paths are relative to the repo (or the job's worktree) root, with forward slashes.
 
+import { isAbsolute, relative } from 'node:path'
+
+/** Whether an absolute path is the folder itself or anything under it. */
+export function isWithin(path: string, dir: string): boolean {
+  const rel = relative(dir, path)
+  return rel === '' || (rel !== '..' && !rel.startsWith('../') && !isAbsolute(rel))
+}
+
 const match = (patterns: readonly string[], path: string) =>
   patterns.some((pattern) => new Bun.Glob(pattern).match(path))
 

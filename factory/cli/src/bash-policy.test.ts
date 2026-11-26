@@ -24,7 +24,12 @@ const WHO = [
   ['an agent', 'factory-build'],
 ] as const
 
-const decide = (command: string, agent: string | undefined, cwd: string = root) => {
+// An agent works in the job's worktree; the orchestrator also runs the CLI from the main checkout.
+const decide = (
+  command: string,
+  agent: string | undefined,
+  cwd: string = agent ? worktree : root,
+) => {
   const out = hookGuard(
     root,
     JSON.stringify({
@@ -129,20 +134,11 @@ describe.each(WHO)('the guard on Bash from %s', (_who, agent) => {
   test.each([
     'bun run factory check 13',
     'bun run factory red 13',
-    'gh issue view 13',
-    'gh issue view 13 --comments --json body',
-    'gh issue list --label factory:ready',
-    'gh pr view 5',
-    'gh pr list',
-    'gh pr checks 5',
-    'gh pr diff 5',
     'git status',
     'git commit -m "feat: x"',
-    'cat ROOT/factory/.jobs/13/job.json',
-    'jq .state ROOT/factory/.jobs/13/job.json',
     'bun test 2>&1 | tail -5',
-  ])('allows %s', (template) => {
-    expect(decide(template.replaceAll('ROOT', root), agent)).toBeNull()
+  ])('allows %s', (command) => {
+    expect(decide(command, agent)).toBeNull()
   })
 
   test("allows writing the handoff folder in the job's worktree", () => {
@@ -150,5 +146,25 @@ describe.each(WHO)('the guard on Bash from %s', (_who, agent) => {
     expect(
       decide(`cp /tmp/x ${worktree}/factory/.jobs/13/build-notes.md`, agent, worktree),
     ).toBeNull()
+  })
+})
+
+// Reading GitHub and the job's state stays the orchestrator's: an agent reads the issue from the job
+// folder, and the state holds the event log and the sealed store.
+describe('reads only the orchestrator may make', () => {
+  test.each([
+    'gh issue view 13',
+    'gh issue view 13 --comments --json body',
+    'gh issue list --label factory:ready',
+    'gh pr view 5',
+    'gh pr list',
+    'gh pr checks 5',
+    'gh pr diff 5',
+    'cat ROOT/factory/.jobs/13/job.json',
+    'jq .state ROOT/factory/.jobs/13/job.json',
+  ])('%s: allowed to the orchestrator, denied to an agent', (template) => {
+    const command = template.replaceAll('ROOT', root)
+    expect(decide(command, undefined)).toBeNull()
+    expect(decide(command, 'factory-build')?.permissionDecision).toBe('deny')
   })
 })

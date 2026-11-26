@@ -202,7 +202,11 @@ function preToolEvents(
           ...base,
           kind: 'search',
           ...(searched ? { target: locate(searched, places) } : {}),
-          detail: { tool: input.tool_name, pattern: str(toolInput.pattern) },
+          detail: {
+            tool: input.tool_name,
+            pattern: str(toolInput.pattern),
+            ...(str(toolInput.glob) ? { glob: str(toolInput.glob) } : {}),
+          },
         },
       ]
     }
@@ -211,7 +215,10 @@ function preToolEvents(
         {
           ...base,
           kind: 'bash',
-          detail: { command: (str(toolInput.command) ?? '').slice(0, 300) },
+          detail: {
+            command: (str(toolInput.command) ?? '').slice(0, 4000),
+            ...(str(input.cwd) ? { cwd: str(input.cwd) } : {}),
+          },
         },
       ]
     case 'Agent':

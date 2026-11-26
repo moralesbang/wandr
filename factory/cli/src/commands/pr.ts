@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { readEvents, type FactoryEvent } from '../events.ts'
 import type { RunUsage } from '../usage.ts'
 import { handoffDir, reviewPass, saveJob, stateDir, type Job } from '../job.ts'
+import { refuseWhileSealed } from '../seal.ts'
 import { gh, git } from '../shell.ts'
 import { LABELS, record, Refusal, requireJob } from './common.ts'
 import { moveLabel } from './start.ts'
@@ -113,6 +114,7 @@ export function prComment(parts: {
 /** Opens the PR once the gate passed on HEAD and both final reports approve. */
 export async function pr(root: string, number: number): Promise<Job> {
   const job = requireJob(root, number)
+  refuseWhileSealed(root, job, 'the PR')
   // What the agents and the orchestrator wrote is in the handoff folder; what the CLI posts is
   // kept with the job's state.
   const dir = handoffDir(job)

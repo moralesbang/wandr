@@ -87,6 +87,13 @@ describe('classifyRead', () => {
   const before = { blindPassWritten: false }
   const after = { blindPassWritten: true }
 
+  test.each(['factory-evaluator', 'factory-test-reviewer'] as const)(
+    '%s reads the AC map before its blind pass',
+    (agent) => {
+      expect(classifyRead(agent, { area: 'job', path: 'acceptance.md' }, before).ok).toBe(true)
+    },
+  )
+
   test('the test agent reading implementation source is a breach', () => {
     expect(classifyRead('factory-test', repo('apps/api/src/walks.ts'), before).ok).toBe(false)
   })
@@ -147,5 +154,36 @@ describe('sandboxes: each reviewer owns its own', () => {
   ] as const)("%s may neither write nor read another's sandbox: %s", (agent, path) => {
     expect(classifyWrite(agent, job(path)).ok).toBe(false)
     expect(classifyRead(agent, job(path), before).ok).toBe(false)
+  })
+})
+
+describe('classifyRead: what a reviewer sees only after its blind pass', () => {
+  const before = { blindPassWritten: false }
+  const after = { blindPassWritten: true }
+
+  // Each of these repeats or cites the build agent's reasoning: a Decision Request restates the
+  // escalation from the build notes, and an earlier round's final reports and findings were written
+  // after reading them.
+  test.each([
+    ['factory-evaluator', 'build-notes.md'],
+    ['factory-evaluator', 'decision-requests/1.md'],
+    ['factory-test-reviewer', 'decision-requests/1.posted.md'],
+    ['factory-evaluator', 'reviews/1.findings.md'],
+    ['factory-evaluator', 'reviews/1.evaluator.md'],
+    ['factory-test-reviewer', 'reviews/1.test-reviewer.md'],
+    ['factory-evaluator', 'diagnosis.md'],
+    ['factory-test-reviewer', 'summary.md'],
+  ] as const)('%s reading %s: a breach before, fine after', (agent, path) => {
+    const early = classifyRead(agent, job(path), before)
+    expect(early.ok).toBe(false)
+    expect(early.ok ? '' : early.reason).toContain('before writing its blind first pass')
+    expect(classifyRead(agent, job(path), after).ok).toBe(true)
+  })
+
+  test.each([
+    ['factory-evaluator', 'reviews/1.evaluator.blind.md'],
+    ['factory-test-reviewer', 'reviews/2.test-reviewer.blind.md'],
+  ] as const)('%s reads its own blind passes from the start: %s', (agent, path) => {
+    expect(classifyRead(agent, job(path), before).ok).toBe(true)
   })
 })

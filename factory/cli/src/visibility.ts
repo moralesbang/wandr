@@ -44,6 +44,26 @@ const BUILD_NOTES: Input = {
   from: 'after-blind-pass',
 }
 
+// What repeats or cites the build agent's reasoning, so a reviewer sees it only after its blind
+// pass, like the notes: a Decision Request restates the build's escalation, and an earlier round's
+// final reports and merged findings were written after reading the notes. `factory seal` moves all
+// of it out of the worktree for the blind pass (seal.ts).
+const DECISION_REQUESTS: Input = {
+  label: 'Decision Requests',
+  paths: ['job:decision-requests/**'],
+  from: 'after-blind-pass',
+}
+const FINDINGS: Input = {
+  label: 'Merged findings',
+  paths: ['job:reviews/*.findings.md'],
+  from: 'after-blind-pass',
+}
+const ORCHESTRATOR_NOTES: Input = {
+  label: "The orchestrator's diagnosis and summary",
+  paths: ['job:diagnosis.md', 'job:summary.md'],
+  from: 'after-blind-pass',
+}
+
 /** A reviewer's disposable checkout, made by `factory sandbox`, inside the job's folder. */
 const sandboxGlob = (role: string) => `sandbox/${role}/**`
 
@@ -55,9 +75,16 @@ const reviewer = (role: 'evaluator' | 'test-reviewer'): Input[] => [
   { label: 'The repo at the branch', paths: ['repo:**'], from: 'start' },
   CHECKS,
   { label: 'The gate and its test changes', paths: ['job:gate.json'], from: 'start' },
-  { label: 'Its own reports', paths: [`job:reviews/*.${role}*.md`], from: 'start' },
+  // The test agent's map from each AC to its tests: written before the build, so nothing in it
+  // comes from the build notes.
+  { label: 'The AC map', paths: ['job:acceptance.md'], from: 'start' },
+  { label: 'Its own blind passes', paths: [`job:reviews/*.${role}.blind.md`], from: 'start' },
   { label: 'Its own sandbox', paths: [`job:${sandboxGlob(role)}`], from: 'start' },
   BUILD_NOTES,
+  { label: 'Its own final reports', paths: [`job:reviews/*.${role}.md`], from: 'after-blind-pass' },
+  FINDINGS,
+  DECISION_REQUESTS,
+  ORCHESTRATOR_NOTES,
 ]
 
 export const INPUTS: Record<AgentType, readonly Input[]> = {

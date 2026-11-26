@@ -9,8 +9,28 @@ import { record, requireJob } from './common.ts'
 export type GateResult = { passed: boolean; problems: string[]; tests: TestChanges; head: string }
 
 /**
+ * The trailers a build commit may carry: attribution and references, each one short line. Anything
+ * else under the subject is a body, and a `Note: …` line is a body dressed as a trailer.
+ */
+const TRAILER =
+  /^(?:Co-Authored-By|Signed-off-by|Claude-Session|Factory-Job|Refs|Closes|Fixes): \S.{0,150}$/i
+
+/**
+ * What a commit message says beyond its subject and its trailers. The build agent's reasoning
+ * reaches the reviewers only through build-notes.md, which is sealed during their blind passes; a
+ * body would carry it past the seal in `git log`.
+ */
+export function bodyBeyondTrailers(message: string): string {
+  const [, ...rest] = message.trim().split('\n')
+  return rest
+    .filter((line) => line.trim() && !TRAILER.test(line.trim()))
+    .join('\n')
+    .trim()
+}
+
+/**
  * The independent gate before review: the last checks were green on exactly HEAD, nothing is left
- * uncommitted, and no commit the CLI didn't make touches a protected path. Commits already on main
+ * uncommitted, and no commit the CLI didn't make touches a protected path or has a message body. Commits already on main
  * aren't the job's: a job that merges main doesn't answer for them.
  */
 export async function gate(
@@ -44,6 +64,11 @@ export async function gate(
     (sha) => !job.cliCommits.includes(sha),
   )
   for (const sha of agentCommits) {
+    if (bodyBeyondTrailers(await git(cwd, 'log', '-1', '--format=%B', sha))) {
+      problems.push(
+        `${sha.slice(0, 7)} has a commit message body. A build commit is a subject line and its trailers only: the reasons go in build-notes.md. Reword it: \`git commit --amend\` for the last commit, or \`git reset --soft\` to before it and commit again.`,
+      )
+    }
     const files = lines(
       await git(cwd, 'diff-tree', '--no-commit-id', '--name-only', '-r', '--root', sha),
     )

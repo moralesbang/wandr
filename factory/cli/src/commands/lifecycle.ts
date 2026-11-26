@@ -13,12 +13,15 @@ import {
 } from '../job.ts'
 import { isAcceptanceTest } from '../paths.ts'
 import { removeSandboxes } from '../sandbox.ts'
+import { refuseWhileSealed } from '../seal.ts'
 import { commitAll, gh, git, uncommitted } from '../shell.ts'
 import { LABELS, record, Refusal, requireJob } from './common.ts'
 import { moveLabel } from './start.ts'
 
 export function attempt(root: string, number: number): Job {
-  const counted = countAttempt(requireJob(root, number))
+  const job = requireJob(root, number)
+  refuseWhileSealed(root, job, 'a build attempt')
+  const counted = countAttempt(job)
   if (!counted.ok) throw new Refusal(counted.reason)
   saveJob(root, counted.job)
   record(root, number, 'attempt', { attempt: counted.job.attempts })
@@ -26,7 +29,9 @@ export function attempt(root: string, number: number): Job {
 }
 
 export function round(root: string, number: number): Job {
-  const counted = countRound(requireJob(root, number))
+  const job = requireJob(root, number)
+  refuseWhileSealed(root, job, 'a new round')
+  const counted = countRound(job)
   if (!counted.ok) throw new Refusal(counted.reason)
   saveJob(root, counted.job)
   record(root, number, 'round', { round: counted.job.rounds })
@@ -88,6 +93,7 @@ const commitMessage = (
  */
 export async function atfix(root: string, number: number, note: string): Promise<Job> {
   const job = requireJob(root, number)
+  refuseWhileSealed(root, job, 'an acceptance-test fix')
   if (!note.trim()) throw new Refusal('Say what the fix changes: factory atfix <n> --note "…"')
   const cited = citation(job)?.answer.cited === false ? citation(job) : null
   const { sha, files } = await commitAcceptanceChange(
@@ -112,6 +118,7 @@ export async function atfix(root: string, number: number, note: string): Promise
  */
 export async function rewrite(root: string, number: number, note: string): Promise<Job> {
   const job = requireJob(root, number)
+  refuseWhileSealed(root, job, 'a rewrite')
   const cited = citation(job)
   if (!cited) {
     throw new Refusal(
@@ -149,6 +156,8 @@ export async function block(
   file: string,
 ): Promise<{ job: Job; request: string }> {
   const job = requireJob(root, number)
+  // Kept in decision-requests/, the request would be sealed material the seal never recorded.
+  refuseWhileSealed(root, job, 'a Decision Request')
   const dir = join(handoffDir(job), 'decision-requests')
   mkdirSync(dir, { recursive: true })
   const kept = join(dir, `${job.decisionRequests.length + 1}.md`)

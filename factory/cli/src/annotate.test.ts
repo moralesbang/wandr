@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { annotate } from './annotate.ts'
 import type { FactoryEvent } from './events.ts'
 
@@ -21,6 +23,8 @@ const read = (
 ) => hook('read', { agent, target: { area, path } })
 const write = (agent: FactoryEvent['agent'], path: string) =>
   hook('write', { agent, target: { area: 'job', path } })
+const bash = (agent: FactoryEvent['agent'], command: string) =>
+  hook('bash', { agent, detail: { command } })
 
 describe('the blind pass', () => {
   test('a reviewer reading build-notes before its blind pass is flagged', () => {
@@ -112,5 +116,129 @@ describe('other breaches and handoffs', () => {
   test('a read of a file the same actor wrote carries no handoff', () => {
     const events = annotate([write(builder, 'build-notes.md'), read(builder, 'build-notes.md')])
     expect(events[1]?.from).toBeUndefined()
+  })
+})
+
+describe('reads by Bash, Grep and Glob', () => {
+  const worktree = '/repo/.claude/worktrees/7-add-a-thing'
+  const started: FactoryEvent = {
+    t: String(tick++),
+    job: 7,
+    source: 'cli',
+    kind: 'job.started',
+    detail: { worktree },
+  }
+  const flagged = (...events: FactoryEvent[]) => annotate([started, ...events]).at(-1)?.breach
+
+  test.each([
+    'cat factory/.jobs/7/build-notes.md',
+    `cat -n ${worktree}/factory/.jobs/7/build-notes.md`,
+    'git log --oneline && cat factory/.jobs/7/decision-requests/1.md factory/.jobs/7/decision-requests/1.posted.md',
+    'cat factory/.jobs/7/decision-requests/*.md',
+    'head -50 factory/.jobs/7/reviews/1.findings.md',
+    'sed -n 1,40p factory/.jobs/7/diagnosis.md',
+    'grep -n width factory/.jobs/7/build-notes.md',
+    'jq . factory/.jobs/7/summary.md',
+    'cd factory/.jobs/7 && cat reviews/1.evaluator.md',
+    'echo ----; cat factory/.jobs/7/reviews/1.evaluator.md | head',
+  ])('flags a reviewer reading a sealed input before its blind pass: %s', (command) => {
+    expect(flagged(bash(evaluator, command))).toContain('blind first pass')
+  })
+
+  test.each([
+    'ls factory/.jobs/7 factory/.jobs/7/*',
+    'cat factory/.jobs/7/issue.md factory/.jobs/7/gate.json',
+    'grep -n build-notes apps/web/src/main.ts',
+    'git diff main...HEAD --stat',
+    'cat factory/.jobs/7/reviews/1.evaluator.blind.md',
+  ])('does not flag %s', (command) => {
+    expect(flagged(bash(evaluator, command))).toBeUndefined()
+  })
+
+  test('does not take a heredoc for a file the command reads', () => {
+    const tester = { id: 'q1', type: 'factory-test' }
+    expect(
+      flagged(bash(tester, 'cat > apps/web/e2e/icons.spec.ts <<EOF\nimport x\nEOF')),
+    ).toBeUndefined()
+  })
+
+  test('does not flag the same read once the blind pass is written', () => {
+    expect(
+      flagged(
+        write(evaluator, 'reviews/1.evaluator.blind.md'),
+        bash(evaluator, 'cat factory/.jobs/7/build-notes.md'),
+      ),
+    ).toBeUndefined()
+  })
+
+  test("flags a Bash read of the main checkout's job state", () => {
+    expect(flagged(bash(builder, 'cat /repo/factory/.jobs/7/sealed/build-notes.md'))).toContain(
+      'outside',
+    )
+  })
+
+  test('flags a Grep in the sealed inputs and a Glob for them', () => {
+    expect(
+      flagged(
+        hook('search', {
+          agent: evaluator,
+          target: { area: 'job', path: 'build-notes.md' },
+          detail: { tool: 'Grep', pattern: 'width' },
+        }),
+      ),
+    ).toContain('blind first pass')
+    expect(
+      flagged(
+        hook('search', {
+          agent: evaluator,
+          target: { area: 'repo', path: 'factory/.jobs/7' },
+          detail: { tool: 'Glob', pattern: 'reviews/*.findings.md' },
+        }),
+      ),
+    ).toBeDefined()
+  })
+
+  test.each(['read.denied', 'bash.denied', 'agent.denied'])('flags %s as a breach', (kind) => {
+    expect(flagged(hook(kind, { agent: evaluator, detail: { reason: 'sealed' } }))).toBe('sealed')
+  })
+})
+
+describe("replay: job #13's reviewers", () => {
+  const fixture = readFileSync(
+    join(import.meta.dir, 'replay-fixtures', 'job13-reviewers.jsonl'),
+    'utf8',
+  )
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as FactoryEvent)
+  const events = annotate(fixture)
+  const at = (time: string, type: string) =>
+    events.find(
+      (event) =>
+        event.t.slice(11, 19) === time && event.agent?.type === type && event.kind === 'bash',
+    )
+
+  test.each([
+    ['20:25:24', 'factory-evaluator', 'decision requests'],
+    ['20:25:28', 'factory-test-reviewer', 'decision requests'],
+    ['20:30:45', 'factory-evaluator', 'merged findings'],
+    ['20:30:45', 'factory-evaluator', 'its own final reports'],
+    ['20:30:45', 'factory-test-reviewer', 'merged findings'],
+    ['20:30:45', 'factory-test-reviewer', 'its own final reports'],
+  ])('flags the %s read by the %s of %s before its blind pass', (time, type, input) => {
+    const breach = at(time, type)?.breach
+    expect(breach).toContain(input)
+    expect(breach).toContain('before writing its blind first pass')
+  })
+
+  test('does not flag the build-notes reads after each blind pass', () => {
+    const notes = events.filter(
+      (event) =>
+        event.t > '2026-11-26T20:29' &&
+        (event.target?.path === 'build-notes.md' ||
+          String(event.detail?.command).includes('build-notes.md')),
+    )
+    expect(notes.length).toBe(4)
+    for (const event of notes) expect(event.breach).toBeUndefined()
   })
 })
