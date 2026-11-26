@@ -1,6 +1,9 @@
 import { defineConfig, devices } from '@playwright/test'
 
-const PORT = 3100
+// A factory sandbox sets E2E_PORT to serve its own build. A server already listening there is
+// someone else's build, never ours to reuse; without E2E_PORT a running dev server is reused locally.
+const PORT = Number(process.env.E2E_PORT ?? 3100)
+const reuseExistingServer = !process.env.CI && !process.env.E2E_PORT
 
 // The SPA as production serves it: built, and from the API's own origin.
 export default defineConfig({
@@ -20,6 +23,6 @@ export default defineConfig({
     command: 'bun --env-file=../api/.env.test ../api/src/index.ts',
     env: { PORT: String(PORT), WEB_DIST: 'dist' },
     url: `http://localhost:${PORT}/api/health`,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer,
   },
 })

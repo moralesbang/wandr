@@ -22,7 +22,8 @@
       "inputs": ["**/*.{ts,tsx,js,mjs}", ".oxlintrc.json", "!**/node_modules/**", "!**/dist/**"]
     },
     "e2e": {
-      "cache": false
+      "cache": false,
+      "passThroughEnv": ["E2E_PORT"]
     }
   }
 }

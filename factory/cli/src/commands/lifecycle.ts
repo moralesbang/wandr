@@ -12,6 +12,7 @@ import {
   type Job,
 } from '../job.ts'
 import { isAcceptanceTest } from '../paths.ts'
+import { removeSandboxes } from '../sandbox.ts'
 import { commitAll, gh, git, uncommitted } from '../shell.ts'
 import { LABELS, record, Refusal, requireJob } from './common.ts'
 import { moveLabel } from './start.ts'
@@ -240,6 +241,8 @@ export async function abandon(root: string, number: number): Promise<string[]> {
   })
 
   const done = [await downWorktreeStack(root, job.worktree)]
+  // Before the worktree goes: a sandbox reads its service settings from it.
+  done.push(...(await removeSandboxes(root, job)))
 
   if (existsSync(job.worktree)) {
     await git(root, 'worktree', 'remove', '--force', job.worktree)
@@ -270,6 +273,7 @@ export async function clean(root: string, number: number): Promise<void> {
     ? (JSON.parse(await gh('pr', 'view', job.pr, '--json', 'state')) as { state: string }).state
     : 'NONE'
   if (state !== 'MERGED') throw new Refusal(`Job #${number}'s PR isn't merged (${state}).`)
+  await removeSandboxes(root, job)
   await git(root, 'worktree', 'remove', '--force', job.worktree)
   await git(root, 'branch', '-D', job.branch)
   rmSync(stateDir(root, number), { recursive: true, force: true })

@@ -44,6 +44,9 @@ const BUILD_NOTES: Input = {
   from: 'after-blind-pass',
 }
 
+/** A reviewer's disposable checkout, made by `factory sandbox`, inside the job's folder. */
+const sandboxGlob = (role: string) => `sandbox/${role}/**`
+
 const reviewer = (role: 'evaluator' | 'test-reviewer'): Input[] => [
   ISSUE,
   INSTRUCTIONS,
@@ -53,6 +56,7 @@ const reviewer = (role: 'evaluator' | 'test-reviewer'): Input[] => [
   CHECKS,
   { label: 'The gate and its test changes', paths: ['job:gate.json'], from: 'start' },
   { label: 'Its own reports', paths: [`job:reviews/*.${role}*.md`], from: 'start' },
+  { label: 'Its own sandbox', paths: [`job:${sandboxGlob(role)}`], from: 'start' },
   BUILD_NOTES,
 ]
 
@@ -195,11 +199,11 @@ export function classifyWrite(agent: string, target: Target): WriteVerdict {
     case 'factory-evaluator':
     case 'factory-test-reviewer': {
       const role = agent.replace('factory-', '')
-      const own = new Bun.Glob(`reviews/*.${role}*.md`)
-      return target.area === 'job' && own.match(target.path)
+      const own = [`reviews/*.${role}*.md`, sandboxGlob(role)]
+      return target.area === 'job' && own.some((glob) => new Bun.Glob(glob).match(target.path))
         ? { ok: true }
         : deny(
-            `A reviewer writes only its own reports, reviews/<pass>.${role}[.blind].md in the job folder. Report the problem as a finding instead.`,
+            `A reviewer writes only its own reports, reviews/<pass>.${role}[.blind].md in the job folder, and anything in its own sandbox, sandbox/${role}/ (factory sandbox <n> ${role}). Report the problem as a finding instead.`,
           )
     }
     default:

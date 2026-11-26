@@ -127,3 +127,25 @@ describe('classifyRead', () => {
     ).toBe(false)
   })
 })
+
+describe('sandboxes: each reviewer owns its own', () => {
+  const before = { blindPassWritten: false }
+
+  test.each([
+    ['factory-evaluator', 'sandbox/evaluator/apps/web/public/manifest.webmanifest'],
+    ['factory-test-reviewer', 'sandbox/test-reviewer/apps/api/src/app.ts'],
+  ] as const)('%s may write and read anywhere in its own sandbox: %s', (agent, path) => {
+    expect(classifyWrite(agent, job(path))).toEqual(allowed)
+    expect(classifyRead(agent, job(path), before).ok).toBe(true)
+  })
+
+  test.each([
+    ['factory-evaluator', 'sandbox/test-reviewer/apps/web/public/manifest.webmanifest'],
+    ['factory-test-reviewer', 'sandbox/evaluator/apps/api/src/app.ts'],
+    ['factory-evaluator', 'sandbox/evaluator-other/x.ts'],
+    ['factory-build', 'sandbox/evaluator/apps/api/src/app.ts'],
+  ] as const)("%s may neither write nor read another's sandbox: %s", (agent, path) => {
+    expect(classifyWrite(agent, job(path)).ok).toBe(false)
+    expect(classifyRead(agent, job(path), before).ok).toBe(false)
+  })
+})

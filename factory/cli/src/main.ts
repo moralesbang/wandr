@@ -19,6 +19,7 @@ import {
 import { pr } from './commands/pr.ts'
 import { red } from './commands/red.ts'
 import { answer } from './commands/answer.ts'
+import { SANDBOX_USAGE, sandboxCommand } from './commands/sandbox.ts'
 import { describeAnswer, start } from './commands/start.ts'
 import { watch } from './watch/server.ts'
 
@@ -39,7 +40,8 @@ const USAGE = `Usage: bun run factory <command>
   watch [--port <port>]      serve the live page
   clean <n>                  remove a merged job
   clean <n> --abandon        discard an unmerged job so its issue can start again
-  hook log | hook guard      Claude Code hook entry points`
+  hook log | hook guard      Claude Code hook entry points
+${SANDBOX_USAGE}`
 
 const issueNumber = (value: string | undefined) => {
   const number = Number(value)
@@ -52,6 +54,8 @@ const print = (value: unknown) =>
   console.log(typeof value === 'string' ? value : JSON.stringify(value, null, 2))
 
 async function main(argv: string[]): Promise<number> {
+  // The sandbox splits its own arguments at `--`, so the command it runs keeps its flags.
+  if (argv[0] === 'sandbox') return sandboxCommand(mainRoot(), argv.slice(1))
   const { positionals, values } = parseArgs({
     args: argv,
     allowPositionals: true,
