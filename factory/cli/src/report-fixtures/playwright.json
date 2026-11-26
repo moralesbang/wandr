@@ -1,0 +1,122 @@
+{
+  "runner": "playwright",
+  "files": [
+    {
+      "path": "zz-a.spec.ts"
+    }
+  ],
+  "tests": [
+    {
+      "file": "zz-a.spec.ts",
+      "name": "group › assertion",
+      "project": "chromium",
+      "status": "failed",
+      "failure": {
+        "kind": "assertion",
+        "type": "expect.toBe",
+        "message": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: 2\nReceived: 1"
+      }
+    },
+    {
+      "file": "zz-a.spec.ts",
+      "name": "group › assertion",
+      "project": "webkit",
+      "status": "failed",
+      "failure": {
+        "kind": "assertion",
+        "type": "expect.toBe",
+        "message": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: 2\nReceived: 1"
+      }
+    },
+    {
+      "file": "zz-a.spec.ts",
+      "name": "group › visible",
+      "project": "chromium",
+      "status": "failed",
+      "failure": {
+        "kind": "assertion",
+        "type": "expect.toBeVisible",
+        "message": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByRole('heading', { name: 'Walk' })\nExpected: visible\nTimeout: 1000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" getByRole('heading', { name: 'Walk' }) with timeout 1000ms\n  - waiting for getByRole('heading', { name: 'Walk' })\n"
+      }
+    },
+    {
+      "file": "zz-a.spec.ts",
+      "name": "group › visible",
+      "project": "webkit",
+      "status": "failed",
+      "failure": {
+        "kind": "assertion",
+        "type": "expect.toBeVisible",
+        "message": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByRole('heading', { name: 'Walk' })\nExpected: visible\nTimeout: 1000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" getByRole('heading', { name: 'Walk' }) with timeout 1000ms\n  - waiting for getByRole('heading', { name: 'Walk' })\n"
+      }
+    },
+    {
+      "file": "zz-a.spec.ts",
+      "name": "group › click missing",
+      "project": "chromium",
+      "status": "failed",
+      "failure": {
+        "kind": "error",
+        "type": "TimeoutError",
+        "message": "TimeoutError: locator.click: Timeout 1000ms exceeded.\nCall log:\n  - waiting for getByRole('button', { name: 'Save' })\n"
+      }
+    },
+    {
+      "file": "zz-a.spec.ts",
+      "name": "group › throws",
+      "project": "chromium",
+      "status": "failed",
+      "failure": {
+        "kind": "error",
+        "type": "Error",
+        "message": "Error: boom"
+      }
+    },
+    {
+      "file": "zz-a.spec.ts",
+      "name": "group › click missing",
+      "project": "webkit",
+      "status": "failed",
+      "failure": {
+        "kind": "error",
+        "type": "TimeoutError",
+        "message": "TimeoutError: locator.click: Timeout 1000ms exceeded.\nCall log:\n  - waiting for getByRole('button', { name: 'Save' })\n"
+      }
+    },
+    {
+      "file": "zz-a.spec.ts",
+      "name": "group › passes",
+      "project": "chromium",
+      "status": "passed"
+    },
+    {
+      "file": "zz-a.spec.ts",
+      "name": "group › skipped",
+      "project": "chromium",
+      "status": "skipped"
+    },
+    {
+      "file": "zz-a.spec.ts",
+      "name": "group › throws",
+      "project": "webkit",
+      "status": "failed",
+      "failure": {
+        "kind": "error",
+        "type": "Error",
+        "message": "Error: boom"
+      }
+    },
+    {
+      "file": "zz-a.spec.ts",
+      "name": "group › passes",
+      "project": "webkit",
+      "status": "passed"
+    },
+    {
+      "file": "zz-a.spec.ts",
+      "name": "group › skipped",
+      "project": "webkit",
+      "status": "skipped"
+    }
+  ]
+}

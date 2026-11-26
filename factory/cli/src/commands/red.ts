@@ -1,24 +1,44 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { withChecksLock } from '../checks.ts'
 import { canTryRed, jobDir, saveJob, type Job } from '../job.ts'
-import { redProblems, runOf, type Runner, type TestRun } from '../junit.ts'
+import { fromBunJUnit } from '../junit.ts'
 import { isAcceptanceTest, ruleProtecting } from '../paths.ts'
+import {
+  readReport,
+  redProblems,
+  runOf,
+  type Report,
+  type Runner,
+  type TestRun,
+} from '../report.ts'
 import { commitAll, runLogged, uncommitted } from '../shell.ts'
 import { record, Refusal, requireJob } from './common.ts'
 
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
 
+const reporter = (runner: 'vitest' | 'playwright') =>
+  fileURLToPath(new URL(`../reporters/${runner}.ts`, import.meta.url))
+
+/** Runs a group's files; Vitest and Playwright write our common report, bun writes JUnit. */
 function command(runner: Runner, names: string[], report: string): string {
   const files = names.map(quote).join(' ')
   switch (runner) {
     case 'bun':
       return `bun test ${files} --reporter=junit --reporter-outfile=${quote(report)}`
     case 'vitest':
-      return `bunx vitest run ${files} --reporter=junit --outputFile=${quote(report)}`
+      return `bunx vitest run ${files} --reporter=${quote(reporter('vitest'))}`
     case 'playwright':
-      return `PLAYWRIGHT_JUNIT_OUTPUT_NAME=${quote(report)} bunx playwright test ${files} --reporter=junit`
+      return `bunx playwright test ${files} --reporter=${quote(reporter('playwright'))}`
   }
+}
+
+/** The group's report, or an empty one when the runner wrote none (it crashed before running). */
+function readRun(runner: Runner, path: string): Report {
+  if (!existsSync(path)) return { runner, files: [], tests: [] }
+  const content = readFileSync(path, 'utf8')
+  return runner === 'bun' ? fromBunJUnit(content) : readReport(content)
 }
 
 /**
@@ -74,7 +94,10 @@ export async function red(root: string, number: number): Promise<{ job: Job; pro
       for (const runs of groups.values()) {
         const first = runs[0]
         if (!first) continue
-        const report = join(dir, `${stamp}-${index++}.xml`)
+        const report = join(
+          dir,
+          `${stamp}-${first.runner}-${index++}.${first.runner === 'bun' ? 'xml' : 'json'}`,
+        )
         await runLogged(
           command(
             first.runner,
@@ -83,10 +106,14 @@ export async function red(root: string, number: number): Promise<{ job: Job; pro
           ),
           join(job.worktree, first.cwd),
           log,
-          { CI: '1' },
+          { CI: '1', FACTORY_REPORT: report },
         )
-        const xml = existsSync(report) ? readFileSync(report, 'utf8') : '<testsuites/>'
-        found.push(...redProblems(first.runner, xml, runs))
+        found.push(
+          ...redProblems(
+            readRun(first.runner, report),
+            runs.map((run) => run.reportName),
+          ),
+        )
       }
       return found
     },

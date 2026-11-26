@@ -12,8 +12,10 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@playwright/test": "catalog:",
     "@types/bun": "catalog:",
     "@typescript/native": "catalog:",
-    "@wandr/tsconfig": "workspace:*"
+    "@wandr/tsconfig": "workspace:*",
+    "vitest": "catalog:"
   }
 }

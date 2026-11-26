@@ -242,13 +242,15 @@ The name keeps an acceptance test protected after its job, so no later build age
 
 ### A valid red
 
-`factory red` runs every new or changed acceptance test with a JUnit report and accepts the red only if each file appears in the report and each test fails on an assertion:
+`factory red` runs every new or changed acceptance test and accepts the red only if each file loaded, ran at least one test, and every test fails on an assertion. Vitest and Playwright run with our own reporters (`factory/cli/src/reporters/`), which write one JSON report in a common shape; `bun test` has no custom-reporter API, so the CLI converts its JUnit report into that shape. The rule then works on one shape:
 
 | Runner | Accepted | Rejected |
 | --- | --- | --- |
-| `bun test` | `type="AssertionError"` | A file missing from the report (a load error) |
-| Vitest | `type="AssertionError"` | A test named after its file (a load error) |
-| Playwright | A `<failure>` of type `expect.*` | An empty run, a timeout |
+| `bun test` (JUnit, converted) | `type="AssertionError"` | A file missing from the report (a load error) |
+| Vitest (own reporter) | An error named `AssertionError` | A load error on the file's module |
+| Playwright (own reporter) | A failed step of the `expect` category | A load error, a file with no test in the run, a timeout |
+
+In every runner, a thrown error, a timeout, a load error, a skipped test, a passing test and a file with no test also reject the red.
 
 Any other error rejects the red and the test agent fixes it. `factory red` records each rejection: after 3 rejected reds the job raises a Decision Request and `red` refuses a 4th. So scaffolding is stubs with the right signature that return an empty value and never throw, plus empty routes or screens; an end-to-end test asserts that an element is visible before acting on it.
 
@@ -322,7 +324,7 @@ Run from the repo root as `bun run factory <command>`. The orchestrator runs eve
 | Command | What it does | Refuses when |
 | --- | --- | --- |
 | `start <n> --session <id>` | Creates `.claude/worktrees/<n>-<slug>` on `feat/<n>-<slug>`, installs, writes `factory/.jobs/<n>/job.json`, moves the label to `factory:building`. On a blocked job, moves it back and prints the user's answer. | The issue lacks `factory:ready` or numbered ACs; 3 jobs already run |
-| `red <n>` | Runs the new or changed acceptance tests with a JUnit report and commits them as the red commit | A test passes, or fails on anything but an assertion; 3 reds were already rejected |
+| `red <n>` | Runs the new or changed acceptance tests and commits them as the red commit | A test passes, or fails on anything but an assertion; 3 reds were already rejected |
 | `check <n>` | Runs the CI commands under the lock and saves the output in the job's folder | — (exits non-zero on red) |
 | `attempt <n>` | Records a build attempt (see "The two loops" for which runs count) | It would be the 4th |
 | `gate <n>` | Checks the last `check` was green on `HEAD`, the tree is clean and no protected path changed; writes the list of removed, skipped and focused tests | Any of those fails |
