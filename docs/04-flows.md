@@ -19,7 +19,8 @@ Which screens the MVP has, how the walker and the recipient move through them, a
 | **Walk** | Journal | See and edit one walk: its map, finds and route, and its link. | M2–M6 | Loading, view, adding a find, drawing the route, find open, shared, not found, error |
 | **Share** | Journal | Choose finds and a stretch, preview, create the link. | M6 | Choosing finds, choosing a stretch, preview, creating, created, error |
 | **Shared page** | Public | Show a link's selection, read-only. | M6 | Loading, the walk, find open, not found |
-| **Not found** | Both | Answer for anything that doesn't exist or isn't yours. | M1, M6 | — |
+| **Not found** | Both | Answer for anything that doesn't exist or isn't yours, an unknown address included. | M1, M6 | — |
+| **Error** | Both | Answer for a page that can't load, with a way to try again. It never shows technical detail. | — | — |
 
 Every journal screen has a way back to the journal and a way to sign out (M1). A signed-out visitor who opens a journal page goes to **Sign in** and, once signed in, back to that page.
 
@@ -174,10 +175,16 @@ The shared page names no author and asks nothing of the recipient: no sign-up, n
 
 ## 4. States and microcopy
 
-Copy follows the voice in the [design brief](./03-design-brief.md#4-voice--tone). Loading states show the shape of the content without text.
+Copy follows the voice in the [design brief](./03-design-brief.md#4-voice--tone). Loading states show the shape of the content without text. Before the app's JavaScript runs there is no content to take the shape of, so every address shows the Contour mark alone: 64 × 64 px, centered on the page background, named "Loading" for assistive technology. It stays until the page has something to show.
+
+A tab's title is "{page} · Wandr", following the page in view; the home page is just "Wandr".
+
+**Not found** for an unknown address and **Error** are the app's fallbacks: they answer for every page without its own state.
 
 | Where | State | Copy |
 | --- | --- | --- |
+| Any page | No JavaScript | "Wandr needs JavaScript." · "Turn it on, then reload the page." |
+| Any page | Error | "This page didn't load." · **Try again** · **Back to the start** · tab title "Page didn't load · Wandr" |
 | Journal | Title | "Journal" |
 | Journal | Empty | "Nothing here yet. Your first walk will live here." · **New walk** |
 | Journal | Error | "Your walks didn't load." · **Try again** |
@@ -214,6 +221,7 @@ Copy follows the voice in the [design brief](./03-design-brief.md#4-voice--tone)
 | Walk | Not on the link | "Not on your link" |
 | Walk | On the link | "On your link" |
 | Shared page | The walk | "A walk shared from Wandr" above the title |
+| Not found | Unknown address | "This path isn't on the map." · "The address may be mistyped, or the page may have moved." · **Back to the start** · tab title "Page not found · Wandr" |
 | Not found | Journal | "This walk isn't here." · **Back to your journal** |
 | Not found | Shared page | "There's no walk here. The link may be mistyped, or no longer shared." |
 
