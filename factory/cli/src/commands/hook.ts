@@ -6,6 +6,9 @@ import { join } from 'node:path'
 import { appendEvent, eventsFromHook, HookInput, locate, type FactoryEvent } from '../events.ts'
 import { findJobBySession, handoffDir, jobsDir, stateDir, type Job } from '../job.ts'
 import { changedBetween, workingTree } from '../shell.ts'
+import { bashPolicy } from '../bash-policy.ts'
+import { allow, type Policy } from '../policy.ts'
+import { agentPolicy, readPolicy } from '../read-guard.ts'
 import { classifyWrite } from '../visibility.ts'
 
 const readText = (path: string) => {
@@ -68,30 +71,53 @@ export async function hookLog(root: string, stdin: string): Promise<void> {
   }
 }
 
+/** Edit and Write by an agent stay inside its write column; the orchestrator's writes are logged. */
+const writePolicy: Policy = ({ input, places, agent }) => {
+  if (!agent) return allow
+  const path = input.tool_input?.file_path ?? input.tool_input?.notebook_path
+  if (typeof path !== 'string') return allow
+  return classifyWrite(agent.type, locate(path, places))
+}
+
+/** Which policy judges each tool, and the event a denial logs. */
+const POLICIES: Record<string, { policy: Policy; kind: string }> = {
+  Edit: { policy: writePolicy, kind: 'write.denied' },
+  Write: { policy: writePolicy, kind: 'write.denied' },
+  NotebookEdit: { policy: writePolicy, kind: 'write.denied' },
+  Read: { policy: readPolicy, kind: 'read.denied' },
+  Grep: { policy: readPolicy, kind: 'read.denied' },
+  Glob: { policy: readPolicy, kind: 'read.denied' },
+  Bash: { policy: bashPolicy, kind: 'bash.denied' },
+  Agent: { policy: agentPolicy, kind: 'agent.denied' },
+  Task: { policy: agentPolicy, kind: 'agent.denied' },
+}
+
 /**
- * Denies an Edit or Write outside the agent's write scope. Prints the PreToolUse decision on
- * stdout; prints nothing to let the call through. Fails open: the CLI gate is the final verdict.
+ * The synchronous PreToolUse guard: asks the tool's policy, logs a denial and prints the decision
+ * on stdout; prints nothing to let the call through. Fails open: the CLI gate is the final verdict.
  */
 export function hookGuard(root: string, stdin: string): string {
   try {
     const found = find(root, stdin)
     if (!found) return ''
     const { input, job } = found
-    // The orchestrator, in the main session, isn't guarded: its writes are logged.
-    if (!input.agent_id) return ''
-    const path = input.tool_input?.file_path ?? input.tool_input?.notebook_path
-    if (typeof path !== 'string') return ''
-    const target = locate(path, { worktree: job.worktree, handoffDir: handoffDir(job) })
-    const verdict = classifyWrite(input.agent_type ?? 'unknown', target)
+    const entry = POLICIES[input.tool_name ?? '']
+    if (!entry) return ''
+    const places = { worktree: job.worktree, handoffDir: handoffDir(job) }
+    const agent = input.agent_id
+      ? { id: input.agent_id, type: input.agent_type ?? 'unknown' }
+      : undefined
+    const verdict = entry.policy({ root, job, input, places, ...(agent ? { agent } : {}) })
     if (verdict.ok) return ''
+    const path = input.tool_input?.file_path ?? input.tool_input?.notebook_path
     appendEvent(root, {
       t: new Date().toISOString(),
       job: job.number,
       source: 'hook',
-      agent: { id: input.agent_id, type: input.agent_type ?? 'unknown' },
-      kind: 'write.denied',
+      ...(agent ? { agent } : {}),
+      kind: entry.kind,
       ...(input.tool_use_id ? { toolUseId: input.tool_use_id } : {}),
-      target,
+      ...(typeof path === 'string' ? { target: locate(path, places) } : {}),
       detail: { reason: verdict.reason },
     })
     return JSON.stringify({
