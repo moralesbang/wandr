@@ -70,11 +70,18 @@ function poll(
 
 export async function watch(root: string, port: number): Promise<void> {
   const page = readFileSync(join(import.meta.dir, 'page.html'), 'utf8')
+  // state.ts is shared with the tests, so the browser gets it as plain JavaScript, types erased.
+  const state = new Bun.Transpiler({ loader: 'ts' }).transformSync(
+    readFileSync(join(import.meta.dir, 'state.ts'), 'utf8'),
+  )
   const server = Bun.serve({
     port,
     idleTimeout: 0,
     routes: {
       '/': new Response(page, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }),
+      '/state.js': new Response(state, {
+        headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' },
+      }),
       '/events': (request) => {
         const job = new URL(request.url).searchParams.get('job')
         const only = job ? Number(job) : null

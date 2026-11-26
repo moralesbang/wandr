@@ -371,14 +371,15 @@ flowchart LR
 - `InstructionsLoaded` shows each `CLAUDE.md` an agent loads.
 - Files a `Bash` command changes are attributed from git: when an agent stops, the hook records what changed in the worktree during its run. Only one agent writes at a time, so the attribution is exact.
 
-**The page** is one self-contained HTML file with inline SVG and no build step. It shows:
+**The page** is one HTML file with inline CSS, SVG and JavaScript and no build step; `factory watch` also serves `cli/src/watch/state.ts`, the event-to-state logic the page shares with its tests. It shows:
 
-- **The flow**: the stations of the diagram above, the active one highlighted, each handoff animated along its edge: the red commit to the build agent, the gate's verdict, the findings back to the inner loop.
-- **The timeline**: one lane per agent run (each build attempt is its own run) for up to 3 jobs, so overlapping bars show what runs in parallel.
-- **Each agent's context**: the prompt it received, the instructions it loaded, every file it read with its lines and size, every file it changed. When an agent reads a file another agent wrote, the page animates that information from one to the other.
+- **The flow**: the stations of the diagram above, each lit as it runs, failed in red when a check, the gate or a red is rejected, and the edges of the latest move animated. Violet brackets mark where the orchestrator is, with a tag saying what it is doing; they sit on the station it waits on (the build agent while the checks it triggers run, both reviewers together, the Decision Request when blocked) and glide as the job moves. When an agent reads a file another actor wrote, a comet travels from one station to the other.
+- **The live feed**: every event, newest first.
+- **The timeline**: the orchestrator's lane, coloured by where its brackets were (deciding, running a CLI step, waiting on an agent, waiting on you); the CLI steps; and one lane per agent run (each build attempt is its own run, nested runs indented) for the job selected, so overlapping bars show what runs in parallel.
+- **Each agent's context**: pick a run, or follow the live one: the prompt it received, the instructions it loaded, every file it read with its lines and size, every file it changed, every write denied.
 - **Isolation breaches, in red**, against `visibility.ts`.
 
-A finished job replays from its log at any speed.
+A finished job replays from its log at any speed: `bun run factory watch`, then open `/?job=<n>&speed=<x>`; quiet stretches are skipped so the replay keeps moving.
 
 ## Where things live
 
