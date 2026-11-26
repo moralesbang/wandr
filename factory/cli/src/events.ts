@@ -1,0 +1,228 @@
+// The event log, factory/.jobs/<n>/events.jsonl: written only by the CLI and by Claude Code hooks.
+// It keeps paths, line ranges and sizes, never file contents.
+
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { join, relative, sep } from 'node:path'
+import { z } from 'zod'
+import { jobDir, type Job } from './job.ts'
+import type { Area, Target } from './visibility.ts'
+
+export type AgentRef = { id: string; type: string }
+
+export type FactoryEvent = {
+  t: string
+  job: number
+  source: 'hook' | 'cli'
+  /** The agent run that acted; absent for the orchestrator (the main session) and the CLI. */
+  agent?: AgentRef
+  kind: string
+  toolUseId?: string
+  target?: Target
+  lines?: { offset?: number; limit?: number }
+  tokens?: number
+  detail?: Record<string, unknown>
+}
+
+export function appendEvent(root: string, event: FactoryEvent): void {
+  const dir = jobDir(root, event.job)
+  mkdirSync(dir, { recursive: true })
+  appendFileSync(join(dir, 'events.jsonl'), `${JSON.stringify(event)}\n`)
+}
+
+export const cliEvent = (
+  job: number,
+  kind: string,
+  detail?: Record<string, unknown>,
+): FactoryEvent => ({ t: new Date().toISOString(), job, source: 'cli', kind, detail })
+
+/** The fields of Claude Code's hook input the log uses. */
+export const HookInput = z.looseObject({
+  session_id: z.string(),
+  hook_event_name: z.string(),
+  agent_id: z.string().optional(),
+  agent_type: z.string().optional(),
+  tool_name: z.string().optional(),
+  tool_use_id: z.string().optional(),
+  tool_input: z.record(z.string(), z.unknown()).optional(),
+  tool_response: z.unknown().optional(),
+  file_path: z.string().optional(),
+  load_reason: z.string().optional(),
+})
+export type HookInput = z.infer<typeof HookInput>
+
+/** Places an absolute path in its area: the job's worktree, the job's folder, or outside both. */
+export function locate(path: string, places: { worktree: string; jobDir: string }): Target {
+  const inside = (dir: string) => {
+    const rel = relative(dir, path)
+    return rel && !rel.startsWith('..') && !rel.startsWith(sep) ? rel.split(sep).join('/') : null
+  }
+  const asJob = inside(places.jobDir)
+  if (asJob) return { area: 'job', path: asJob }
+  const asRepo = inside(places.worktree)
+  if (asRepo) return { area: 'repo', path: asRepo }
+  return { area: 'outside' as Area, path }
+}
+
+const str = (value: unknown) => (typeof value === 'string' ? value : undefined)
+const num = (value: unknown) => (typeof value === 'number' ? value : undefined)
+
+/** Roughly 4 characters per token, over the lines a Read returns (2000 by default). */
+export function approximateTokens(content: string, offset = 1, limit = 2000): number {
+  const lines = content.split('\n').slice(Math.max(offset - 1, 0), Math.max(offset - 1, 0) + limit)
+  return Math.ceil(lines.join('\n').length / 4)
+}
+
+export type HookContext = {
+  job: Job
+  jobDir: string
+  now: string
+  /** Reads a file's text to size it; returns null when it can't. Never logged. */
+  readText: (path: string) => string | null
+}
+
+/** Turns one hook input into the events it logs; an event of no interest logs nothing. */
+export function eventsFromHook(input: HookInput, context: HookContext): FactoryEvent[] {
+  const places = { worktree: context.job.worktree, jobDir: context.jobDir }
+  const base = {
+    t: context.now,
+    job: context.job.number,
+    source: 'hook' as const,
+    ...(input.agent_id
+      ? { agent: { id: input.agent_id, type: input.agent_type ?? 'unknown' } }
+      : {}),
+    ...(input.tool_use_id ? { toolUseId: input.tool_use_id } : {}),
+  }
+  const toolInput = input.tool_input ?? {}
+
+  switch (input.hook_event_name) {
+    case 'SubagentStart':
+      return [{ ...base, kind: 'agent.start' }]
+    case 'SubagentStop':
+      return [{ ...base, kind: 'agent.stop' }]
+    case 'InstructionsLoaded':
+      return input.file_path
+        ? [
+            {
+              ...base,
+              kind: 'instructions',
+              target: locate(input.file_path, places),
+              detail: { reason: input.load_reason },
+            },
+          ]
+        : []
+    case 'PreToolUse':
+      return preToolEvents(input, toolInput, base, places, context)
+    case 'PostToolUse':
+      return postToolEvents(input, toolInput, base, places)
+    default:
+      return []
+  }
+}
+
+type Base = Omit<FactoryEvent, 'kind'>
+
+function preToolEvents(
+  input: HookInput,
+  toolInput: Record<string, unknown>,
+  base: Base,
+  places: { worktree: string; jobDir: string },
+  context: HookContext,
+): FactoryEvent[] {
+  const path = str(toolInput.file_path) ?? str(toolInput.notebook_path)
+  switch (input.tool_name) {
+    case 'Read': {
+      if (!path) return []
+      const offset = num(toolInput.offset)
+      const limit = num(toolInput.limit)
+      const content = context.readText(path)
+      return [
+        {
+          ...base,
+          kind: 'read',
+          target: locate(path, places),
+          lines: { offset, limit },
+          ...(content === null ? {} : { tokens: approximateTokens(content, offset, limit) }),
+        },
+      ]
+    }
+    case 'Edit':
+    case 'Write':
+    case 'NotebookEdit':
+      // Logged after the fact, in PostToolUse: only a write that happened counts.
+      return []
+    case 'Grep':
+    case 'Glob': {
+      const searched = str(toolInput.path)
+      return [
+        {
+          ...base,
+          kind: 'search',
+          ...(searched ? { target: locate(searched, places) } : {}),
+          detail: { tool: input.tool_name, pattern: str(toolInput.pattern) },
+        },
+      ]
+    }
+    case 'Bash':
+      return [
+        {
+          ...base,
+          kind: 'bash',
+          detail: { command: (str(toolInput.command) ?? '').slice(0, 300) },
+        },
+      ]
+    case 'Agent':
+    case 'Task':
+      return [
+        {
+          ...base,
+          kind: 'agent.prompt',
+          detail: {
+            subagentType: str(toolInput.subagent_type),
+            description: str(toolInput.description),
+            prompt: str(toolInput.prompt),
+          },
+        },
+      ]
+    default:
+      return input.tool_name ? [{ ...base, kind: 'tool', detail: { tool: input.tool_name } }] : []
+  }
+}
+
+function postToolEvents(
+  input: HookInput,
+  toolInput: Record<string, unknown>,
+  base: Base,
+  places: { worktree: string; jobDir: string },
+): FactoryEvent[] {
+  const response = (input.tool_response ?? {}) as Record<string, unknown>
+  const path = str(toolInput.file_path) ?? str(toolInput.notebook_path)
+  if (['Edit', 'Write', 'NotebookEdit'].includes(input.tool_name ?? '') && path) {
+    return [{ ...base, kind: 'write', target: locate(path, places) }]
+  }
+  if ((input.tool_name === 'Agent' || input.tool_name === 'Task') && str(response.agentId)) {
+    return [
+      {
+        ...base,
+        kind: 'agent.launched',
+        detail: { childId: str(response.agentId), childType: str(response.agentType) },
+      },
+    ]
+  }
+  if (input.tool_name === 'Bash' && response.bashEditDiff !== undefined) {
+    const diff = response.bashEditDiff
+    const files = Array.isArray(diff)
+      ? diff.map((entry) =>
+          typeof entry === 'string'
+            ? entry
+            : (str((entry as Record<string, unknown>).file_path) ??
+              str((entry as Record<string, unknown>).filePath) ??
+              str((entry as Record<string, unknown>).path) ??
+              '?'),
+        )
+      : typeof diff === 'object' && diff !== null
+        ? Object.keys(diff)
+        : []
+    return files.length ? [{ ...base, kind: 'bash.files', detail: { files } }] : []
+  }
+  return []
+}

@@ -8,3 +8,6 @@ dist/
 apps/web/test-results/
 apps/web/playwright-report/
 .claude/worktrees/
+
+# Factory jobs: state, handoff files and event logs
+factory/.jobs/

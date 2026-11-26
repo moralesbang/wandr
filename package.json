@@ -4,7 +4,8 @@
   "workspaces": {
     "packages": [
       "apps/*",
-      "packages/*"
+      "packages/*",
+      "factory/cli"
     ],
     "catalog": {
       "@types/bun": "1.4.5",
@@ -24,7 +25,8 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "services": "docker compose up -d --wait && docker compose wait buckets",
-    "db:migrate": "bun run --cwd apps/api db:migrate"
+    "db:migrate": "bun run --cwd apps/api db:migrate",
+    "factory": "bun factory/cli/src/main.ts"
   },
   "devDependencies": {
     "@railway/cli": "5.75.0",

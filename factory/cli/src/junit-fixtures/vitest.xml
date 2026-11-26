@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="5" failures="4" errors="0" time="0.007062583">
+    <testsuite name="src/zz-a.acceptance.test.ts" timestamp="2026-11-26T16:51:15.365Z" hostname="host" tests="3" failures="2" errors="0" skipped="0" time="0.007062583">
+        <testcase classname="src/zz-a.acceptance.test.ts" name="group &gt; fails on an assertion" time="0.005267667">
+            <failure message="expected 1 to be 2 // Object.is equality" type="AssertionError">
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ src/zz-a.acceptance.test.ts:3:51
+            </failure>
+        </testcase>
+        <testcase classname="src/zz-a.acceptance.test.ts" name="group &gt; throws" time="0.00058025">
+            <failure message="boom" type="Error">
+Error: boom
+ ❯ src/zz-a.acceptance.test.ts:4:32
+            </failure>
+        </testcase>
+        <testcase classname="src/zz-a.acceptance.test.ts" name="group &gt; passes" time="0.000204208">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/zz-b.acceptance.test.ts" timestamp="2026-11-26T16:51:15.370Z" hostname="host" tests="1" failures="1" errors="0" skipped="0" time="0">
+        <testcase classname="src/zz-b.acceptance.test.ts" name="src/zz-b.acceptance.test.ts" time="0">
+            <failure message="Failed to resolve import &quot;./does-not-exist&quot; from &quot;src/zz-b.acceptance.test.ts&quot;. Does the file exist?" type="Error">
+Error: Failed to resolve import &quot;./does-not-exist&quot; from &quot;src/zz-b.acceptance.test.ts&quot;. Does the file exist?
+  Plugin: vite:import-analysis
+  File: /repo/apps/web/src/zz-b.acceptance.test.ts:2:21
+  1  |  import { describe, expect, test } from &quot;vitest&quot;;
+  2  |  import { nope } from &quot;./does-not-exist&quot;;
+     |                        ^
+  3  |  test(&quot;uses a missing import&quot;, () =&gt; {
+  4  |  	expect(nope).toBe(1);
+ ❯ TransformPluginContext._formatLog node_modules/vite
+ ❯ TransformPluginContext.error node_modules/vite
+ ❯ resolveId node_modules/vite
+ ❯ node_modules/vite
+ ❯ TransformPluginContext.transform node_modules/vite
+ ❯ EnvironmentPluginContainer.transform node_modules/vite
+ ❯ loadAndTransform node_modules/vite
+            </failure>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/zz-c.acceptance.test.ts" timestamp="2026-11-26T16:51:15.370Z" hostname="host" tests="1" failures="1" errors="0" skipped="0" time="0">
+        <testcase classname="src/zz-c.acceptance.test.ts" name="src/zz-c.acceptance.test.ts" time="0">
+            <failure message="Transform failed with 1 error:
+
+[PARSE_ERROR] Unexpected token
+   ╭─[ src/zz-c.acceptance.test.ts:2:40 ]
+   │
+ 2 │ test(&apos;syntax&apos;, () =&gt; { expect(1).toBe( })
+   │                                        ┬  
+   │                                        ╰── 
+───╯
+" type="Error">
+Error: Transform failed with 1 error:
+
+[PARSE_ERROR] Unexpected token
+   ╭─[ src/zz-c.acceptance.test.ts:2:40 ]
+   │
+ 2 │ test(&apos;syntax&apos;, () =&gt; { expect(1).toBe( })
+   │                                        ┬  
+   │                                        ╰── 
+───╯
+
+  Plugin: vite:oxc
+  File: /repo/apps/web/src/zz-c.acceptance.test.ts
+ ❯ transformWithOxc node_modules/vite
+ ❯ TransformPluginContext.transform node_modules/vite
+ ❯ EnvironmentPluginContainer.transform node_modules/vite
+ ❯ loadAndTransform node_modules/vite
+            </failure>
+        </testcase>
+    </testsuite>
+</testsuites>

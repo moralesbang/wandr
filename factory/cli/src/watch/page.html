@@ -1,0 +1,943 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Factory watch</title>
+    <style>
+      :root {
+        --bg: #fafaf9;
+        --panel: #ffffff;
+        --ink: #1c1917;
+        --muted: #57534e;
+        --line: #d6d3d1;
+        --user: #fde68a;
+        --user-s: #92400e;
+        --orch: #e9d5ff;
+        --orch-s: #6b21a8;
+        --cli: #bfdbfe;
+        --cli-s: #1e40af;
+        --agent: #bbf7d0;
+        --agent-s: #166534;
+        --wait: #fecaca;
+        --wait-s: #991b1b;
+        --breach: #dc2626;
+        --flow: #d97706;
+        --focus: #2563eb;
+        color-scheme: light;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0c0a09;
+          --panel: #1c1917;
+          --ink: #f5f5f4;
+          --muted: #a8a29e;
+          --line: #44403c;
+          --user: #78350f;
+          --user-s: #fcd34d;
+          --orch: #4c1d95;
+          --orch-s: #d8b4fe;
+          --cli: #1e3a8a;
+          --cli-s: #93c5fd;
+          --agent: #14532d;
+          --agent-s: #86efac;
+          --wait: #7f1d1d;
+          --wait-s: #fca5a5;
+          --breach: #f87171;
+          --flow: #fbbf24;
+          --focus: #60a5fa;
+          color-scheme: dark;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          14px/1.45 ui-sans-serif,
+          system-ui,
+          sans-serif;
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--line);
+      }
+      h1 {
+        font-size: 16px;
+        margin: 0;
+      }
+      h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin: 0 0 8px;
+      }
+      .status {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--muted);
+        margin-right: 6px;
+        vertical-align: middle;
+      }
+      .dot.on {
+        background: #16a34a;
+      }
+      .jobs {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .jobs button,
+      .lane-label {
+        font: inherit;
+        color: inherit;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 4px 10px;
+        cursor: pointer;
+      }
+      .jobs button[aria-pressed='true'] {
+        border-color: var(--focus);
+        box-shadow: inset 0 0 0 1px var(--focus);
+      }
+      button:focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 2px;
+      }
+      main {
+        display: grid;
+        grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+        gap: 16px;
+        padding: 16px;
+      }
+      @media (max-width: 900px) {
+        main {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+      section {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+        min-width: 0;
+      }
+      .stack {
+        display: grid;
+        gap: 16px;
+        align-content: start;
+        min-width: 0;
+      }
+      svg {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .station rect {
+        stroke-width: 1.5;
+        transition: stroke-width 0.2s;
+      }
+      .station text {
+        font-size: 12px;
+        fill: var(--ink);
+        text-anchor: middle;
+        dominant-baseline: middle;
+        pointer-events: none;
+      }
+      .station.active rect {
+        stroke-width: 4;
+      }
+      .station.flash rect {
+        animation: flash 0.9s ease-out;
+      }
+      @keyframes flash {
+        from {
+          stroke-width: 6;
+        }
+        to {
+          stroke-width: 1.5;
+        }
+      }
+      .edge {
+        stroke: var(--line);
+        stroke-width: 1.5;
+        fill: none;
+      }
+      .edge.dotted {
+        stroke-dasharray: 4 4;
+      }
+      .user rect {
+        fill: var(--user);
+        stroke: var(--user-s);
+      }
+      .orch rect {
+        fill: var(--orch);
+        stroke: var(--orch-s);
+      }
+      .cli rect {
+        fill: var(--cli);
+        stroke: var(--cli-s);
+      }
+      .agent rect {
+        fill: var(--agent);
+        stroke: var(--agent-s);
+      }
+      .wait rect {
+        fill: var(--wait);
+        stroke: var(--wait-s);
+      }
+      .packet {
+        fill: var(--focus);
+      }
+      .packet.info {
+        fill: var(--flow);
+      }
+      .timeline {
+        position: relative;
+      }
+      .lane {
+        display: grid;
+        grid-template-columns: 190px minmax(0, 1fr);
+        gap: 8px;
+        align-items: center;
+        margin: 3px 0;
+      }
+      .lane-label {
+        text-align: left;
+        font-size: 12px;
+        padding: 3px 8px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .lane-label[aria-pressed='true'] {
+        border-color: var(--focus);
+      }
+      .lane.nested .lane-label {
+        margin-left: 16px;
+        width: calc(100% - 16px);
+      }
+      .track {
+        position: relative;
+        height: 18px;
+        background: color-mix(in srgb, var(--line) 35%, transparent);
+        border-radius: 4px;
+      }
+      .bar {
+        position: absolute;
+        top: 2px;
+        height: 14px;
+        border-radius: 3px;
+        background: var(--agent);
+        border: 1px solid var(--agent-s);
+      }
+      .bar.running {
+        background: repeating-linear-gradient(
+          45deg,
+          var(--agent),
+          var(--agent) 6px,
+          color-mix(in srgb, var(--agent) 60%, var(--panel)) 6px,
+          color-mix(in srgb, var(--agent) 60%, var(--panel)) 12px
+        );
+      }
+      .bar.orch {
+        background: var(--orch);
+        border-color: var(--orch-s);
+      }
+      .tick {
+        position: absolute;
+        top: 0;
+        width: 2px;
+        height: 18px;
+        background: var(--breach);
+      }
+      .mark {
+        position: absolute;
+        top: -2px;
+        width: 1px;
+        height: 22px;
+        background: var(--cli-s);
+        opacity: 0.6;
+      }
+      .job-title {
+        font-weight: 600;
+        margin: 10px 0 4px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .breach {
+        color: var(--breach);
+      }
+      .list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        font-size: 12px;
+        font-family: ui-monospace, monospace;
+      }
+      .list li {
+        padding: 2px 0;
+        border-bottom: 1px dashed color-mix(in srgb, var(--line) 60%, transparent);
+        overflow-wrap: anywhere;
+      }
+      .list li.breach {
+        font-weight: 600;
+      }
+      .from {
+        color: var(--flow);
+      }
+      details {
+        margin: 6px 0;
+      }
+      summary {
+        cursor: pointer;
+        font-weight: 600;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font-size: 12px;
+        background: color-mix(in srgb, var(--line) 25%, transparent);
+        padding: 8px;
+        border-radius: 6px;
+        max-height: 260px;
+        overflow: auto;
+        margin: 6px 0;
+      }
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 8px;
+      }
+      .legend span::before {
+        content: '';
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        margin-right: 4px;
+        vertical-align: -1px;
+        border: 1px solid;
+      }
+      .legend .l-user::before {
+        background: var(--user);
+        border-color: var(--user-s);
+      }
+      .legend .l-orch::before {
+        background: var(--orch);
+        border-color: var(--orch-s);
+      }
+      .legend .l-cli::before {
+        background: var(--cli);
+        border-color: var(--cli-s);
+      }
+      .legend .l-agent::before {
+        background: var(--agent);
+        border-color: var(--agent-s);
+      }
+      .legend .l-wait::before {
+        background: var(--wait);
+        border-color: var(--wait-s);
+      }
+      .legend .l-info::before {
+        background: var(--flow);
+        border-color: var(--flow);
+        border-radius: 50%;
+      }
+      .empty {
+        color: var(--muted);
+        font-style: italic;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Factory watch</h1>
+      <span class="status"
+        ><span id="dot" class="dot"></span><span id="mode">Connecting…</span></span
+      >
+      <div class="jobs" id="jobs" role="group" aria-label="Jobs"></div>
+    </header>
+    <main>
+      <div class="stack">
+        <section aria-labelledby="flow-h">
+          <h2 id="flow-h">Flow <span id="flow-job" class="muted"></span></h2>
+          <svg
+            id="flow"
+            viewBox="0 0 900 300"
+            role="img"
+            aria-label="The factory's stations, the active one highlighted"
+          ></svg>
+          <div class="legend">
+            <span class="l-user">User</span><span class="l-orch">Orchestrator</span
+            ><span class="l-cli">CLI</span> <span class="l-agent">Agent</span
+            ><span class="l-wait">Waiting for the user</span
+            ><span class="l-info">Information moving between agents</span>
+          </div>
+        </section>
+        <section aria-labelledby="tl-h">
+          <h2 id="tl-h">Timeline</h2>
+          <div id="timeline" class="timeline"><p class="empty">No job yet.</p></div>
+        </section>
+      </div>
+      <div class="stack">
+        <section aria-labelledby="br-h">
+          <h2 id="br-h">Isolation breaches <span id="br-count"></span></h2>
+          <ul id="breaches" class="list">
+            <li class="empty">None.</li>
+          </ul>
+        </section>
+        <section aria-labelledby="ctx-h">
+          <h2 id="ctx-h">Context</h2>
+          <div id="context"><p class="empty">Select an agent run in the timeline.</p></div>
+        </section>
+        <section aria-labelledby="ho-h">
+          <h2 id="ho-h">Handoffs</h2>
+          <ul id="handoffs" class="list">
+            <li class="empty">None yet.</li>
+          </ul>
+        </section>
+      </div>
+    </main>
+    <script>
+      'use strict'
+      const params = new URLSearchParams(location.search)
+      const replayJob = params.get('job')
+      const speed = Number(params.get('speed') || 0)
+      const replaying = Boolean(replayJob && speed > 0)
+
+      // ---- The flow: stations and edges, as in factory/README.md -------------------------------
+      const STATIONS = {
+        ready: { label: 'factory:ready', x: 70, y: 40, kind: 'user' },
+        start: { label: '/factory', x: 200, y: 40, kind: 'orch' },
+        wt: { label: 'Worktree', x: 330, y: 40, kind: 'cli' },
+        test: { label: 'Test agent', x: 460, y: 40, kind: 'agent' },
+        red: { label: 'Valid red?', x: 600, y: 40, kind: 'cli' },
+        build: { label: 'Build agent', x: 600, y: 140, kind: 'agent' },
+        checks: { label: 'Checks', x: 460, y: 140, kind: 'cli' },
+        gate: { label: 'Gate', x: 330, y: 140, kind: 'cli' },
+        eval: { label: 'Evaluator', x: 200, y: 105, kind: 'agent' },
+        tqr: { label: 'Test reviewer', x: 200, y: 175, kind: 'agent' },
+        verdict: { label: 'Findings?', x: 70, y: 140, kind: 'orch' },
+        atfix: { label: 'AT fix', x: 460, y: 245, kind: 'agent' },
+        pr: { label: 'PR', x: 70, y: 245, kind: 'cli' },
+        dr: { label: 'Decision Request', x: 790, y: 140, kind: 'wait' },
+      }
+      const EDGES = [
+        ['ready', 'start'],
+        ['start', 'wt'],
+        ['wt', 'test'],
+        ['test', 'red'],
+        ['red', 'build'],
+        ['red', 'test'],
+        ['build', 'checks'],
+        ['checks', 'build'],
+        ['checks', 'gate'],
+        ['gate', 'build'],
+        ['gate', 'eval'],
+        ['gate', 'tqr'],
+        ['eval', 'verdict'],
+        ['tqr', 'verdict'],
+        ['verdict', 'build'],
+        ['verdict', 'atfix'],
+        ['atfix', 'checks'],
+        ['verdict', 'pr'],
+        ['build', 'dr', true],
+        ['verdict', 'dr', true],
+      ]
+      const ROLE_STATION = {
+        'factory-test': 'test',
+        'factory-build': 'build',
+        'factory-evaluator': 'eval',
+        'factory-test-reviewer': 'tqr',
+        orchestrator: 'verdict',
+        cli: 'gate',
+      }
+      const CLI_MOVES = {
+        'job.started': { flash: 'wt', edges: [['start', 'wt']] },
+        'job.resumed': { flash: 'start', edges: [] },
+        'red.accepted': { flash: 'red', edges: [['red', 'build']] },
+        'red.rejected': { flash: 'red', edges: [['red', 'test']] },
+        'checks.started': { flash: 'checks', edges: [['build', 'checks']] },
+        'checks.passed': { flash: 'checks', edges: [['checks', 'gate']] },
+        'checks.failed': { flash: 'checks', edges: [['checks', 'build']] },
+        'gate.passed': {
+          flash: 'gate',
+          edges: [
+            ['gate', 'eval'],
+            ['gate', 'tqr'],
+          ],
+        },
+        'gate.rejected': { flash: 'gate', edges: [['gate', 'build']] },
+        round: { flash: 'verdict', edges: [['verdict', 'build']] },
+        atfix: { flash: 'atfix', edges: [['atfix', 'checks']] },
+        blocked: { flash: 'dr', edges: [['verdict', 'dr']] },
+        'pr.opened': { flash: 'pr', edges: [['verdict', 'pr']] },
+      }
+      const W = 120,
+        H = 34
+      const svgNS = 'http://www.w3.org/2000/svg'
+      const flow = document.getElementById('flow')
+      const el = (name, attrs = {}, parent) => {
+        const node = document.createElementNS(svgNS, name)
+        for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v)
+        if (parent) parent.appendChild(node)
+        return node
+      }
+      const edgeLayer = el('g', {}, flow),
+        stationLayer = el('g', {}, flow),
+        packetLayer = el('g', {}, flow)
+      for (const [from, to, dotted] of EDGES) {
+        const a = STATIONS[from],
+          b = STATIONS[to]
+        el(
+          'line',
+          { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: dotted ? 'edge dotted' : 'edge' },
+          edgeLayer,
+        )
+      }
+      const stationNodes = {}
+      for (const [id, s] of Object.entries(STATIONS)) {
+        const g = el('g', { class: `station ${s.kind}` }, stationLayer)
+        el('rect', { x: s.x - W / 2, y: s.y - H / 2, width: W, height: H, rx: 8 }, g)
+        const t = el('text', { x: s.x, y: s.y }, g)
+        t.textContent = s.label
+        stationNodes[id] = g
+      }
+      function flash(id) {
+        const g = stationNodes[id]
+        if (!g) return
+        g.classList.remove('flash')
+        void g.getBoundingClientRect()
+        g.classList.add('flash')
+      }
+      function send(from, to, info = false) {
+        const a = STATIONS[from],
+          b = STATIONS[to]
+        if (!a || !b || from === to) return
+        const dot = el(
+          'circle',
+          { r: info ? 6 : 5, class: info ? 'packet info' : 'packet' },
+          packetLayer,
+        )
+        const t0 = performance.now(),
+          duration = 900
+        const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
+        if (reduced) {
+          dot.setAttribute('cx', b.x)
+          dot.setAttribute('cy', b.y)
+          setTimeout(() => dot.remove(), 600)
+          return
+        }
+        const step = (now) => {
+          const k = Math.min((now - t0) / duration, 1),
+            e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2
+          const bend = info ? Math.sin(Math.PI * e) * 30 : 0
+          dot.setAttribute('cx', a.x + (b.x - a.x) * e)
+          dot.setAttribute('cy', a.y + (b.y - a.y) * e - bend)
+          if (k < 1) requestAnimationFrame(step)
+          else dot.remove()
+        }
+        requestAnimationFrame(step)
+      }
+
+      // ---- State ------------------------------------------------------------------------------
+      const jobs = new Map() // number -> { info, runs: Map, order: [], marks: [], breaches: [], handoffs: [] }
+      let selectedJob = replayJob ? Number(replayJob) : null
+      let selectedRun = null
+      let clock = replaying ? null : Date.now() // replay moves it; live follows real time
+
+      function jobOf(n) {
+        if (!jobs.has(n))
+          jobs.set(n, {
+            info: null,
+            runs: new Map(),
+            order: [],
+            marks: [],
+            breaches: [],
+            handoffs: [],
+          })
+        if (selectedJob === null) selectedJob = n
+        return jobs.get(n)
+      }
+      function runOf(job, ev) {
+        const id = ev.agent ? ev.agent.id : 'orchestrator'
+        if (!job.runs.has(id)) {
+          job.runs.set(id, {
+            id,
+            type: ev.agent ? ev.agent.type : 'orchestrator',
+            role: ev.role,
+            parent: ev.parent,
+            start: Date.parse(ev.t),
+            end: null,
+            prompt: null,
+            description: null,
+            instructions: [],
+            reads: [],
+            writes: [],
+            denied: [],
+            searches: [],
+            bash: [],
+            changed: [],
+          })
+          job.order.push(id)
+        }
+        const run = job.runs.get(id)
+        if (ev.role && !run.role) run.role = ev.role
+        if (ev.parent && !run.parent) run.parent = ev.parent
+        return run
+      }
+      const stationOfRun = (run) => ROLE_STATION[run.role || run.type] || null
+      const short = (p) => (p ? p.replace(/^.*\/\.claude\/worktrees\/[^/]+\//, '') : '')
+      const where = (target) =>
+        target
+          ? target.area === 'job'
+            ? `job:${target.path}`
+            : target.area === 'repo'
+              ? target.path
+              : `⚠ ${target.path}`
+          : ''
+
+      function apply(ev) {
+        const job = jobOf(ev.job)
+        const time = Date.parse(ev.t)
+        if (ev.source === 'cli') {
+          job.marks.push({ t: time, kind: ev.kind })
+          const move = CLI_MOVES[ev.kind]
+          if (move && ev.job === selectedJob) {
+            flash(move.flash)
+            for (const [a, b] of move.edges) send(a, b)
+          }
+          return
+        }
+        const run = runOf(job, ev)
+        switch (ev.kind) {
+          case 'agent.start':
+            run.start = time
+            run.prompt = ev.detail && ev.detail.prompt
+            run.description = ev.detail && ev.detail.description
+            if (ev.job === selectedJob && stationOfRun(run)) flash(stationOfRun(run))
+            break
+          case 'agent.stop':
+            run.end = time
+            run.changed = (ev.detail && ev.detail.changed) || []
+            break
+          case 'instructions':
+            run.instructions.push(ev)
+            break
+          case 'read':
+            run.reads.push(ev)
+            if (ev.breach) job.breaches.push({ ev, run })
+            if (ev.from) {
+              const toStation = stationOfRun(run),
+                fromStation = ROLE_STATION[ev.from]
+              job.handoffs.push({ ev, run })
+              if (ev.job === selectedJob && fromStation && toStation)
+                send(fromStation, toStation, true)
+            }
+            break
+          case 'write':
+            run.writes.push(ev)
+            break
+          case 'write.denied':
+            run.denied.push(ev)
+            break
+          case 'search':
+            run.searches.push(ev)
+            break
+          case 'bash':
+            run.bash.push(ev)
+            break
+          case 'bash.files':
+            run.changed.push(
+              ...((ev.detail && ev.detail.files) || []).map((path) => ({ status: 'B', path })),
+            )
+            break
+        }
+      }
+
+      // ---- Rendering ----------------------------------------------------------------------------
+      const esc = (s) =>
+        String(s ?? '').replace(
+          /[&<>"']/g,
+          (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+        )
+      let pending = false
+      function render() {
+        if (!pending) {
+          pending = true
+          requestAnimationFrame(() => {
+            pending = false
+            draw()
+          })
+        }
+      }
+
+      function draw() {
+        // Jobs
+        const jobsEl = document.getElementById('jobs')
+        jobsEl.innerHTML = ''
+        for (const [n, job] of [...jobs].sort((a, b) => a[0] - b[0])) {
+          const b = document.createElement('button')
+          b.type = 'button'
+          b.setAttribute('aria-pressed', String(n === selectedJob))
+          const state = job.info ? job.info.state.replace('_', ' ') : '…'
+          b.textContent = `#${n} · ${state}${job.breaches.length ? ` · ${job.breaches.length} ⚠` : ''}`
+          b.onclick = () => {
+            selectedJob = n
+            selectedRun = null
+            render()
+          }
+          jobsEl.appendChild(b)
+        }
+        const job = jobs.get(selectedJob)
+        document.getElementById('flow-job').textContent =
+          job && job.info ? `· #${selectedJob} ${job.info.title}` : ''
+
+        // Active stations
+        const active = new Set()
+        if (job)
+          for (const run of job.runs.values())
+            if (run.end === null && run.id !== 'orchestrator') {
+              const s = stationOfRun(run)
+              if (s) active.add(s)
+            }
+        if (job && job.info && job.info.state === 'blocked') active.add('dr')
+        if (job && job.info && job.info.state === 'pr_open') active.add('pr')
+        for (const [id, g] of Object.entries(stationNodes))
+          g.classList.toggle('active', active.has(id))
+
+        drawTimeline()
+        drawBreaches(job)
+        drawHandoffs(job)
+        drawContext(job)
+      }
+
+      function drawTimeline() {
+        const tl = document.getElementById('timeline')
+        const shown = [...jobs].sort((a, b) => a[0] - b[0]).slice(-3)
+        if (!shown.length) {
+          tl.innerHTML = '<p class="empty">No job yet.</p>'
+          return
+        }
+        // A job that is not building ends at its last event; only a running one follows the clock.
+        const edges = new Map()
+        let t0 = Infinity,
+          t1 = 0
+        for (const [n, job] of shown) {
+          let last = 0
+          for (const run of job.runs.values()) {
+            t0 = Math.min(t0, run.start)
+            last = Math.max(last, run.start, run.end || 0)
+          }
+          for (const m of job.marks) {
+            t0 = Math.min(t0, m.t)
+            last = Math.max(last, m.t)
+          }
+          const following =
+            clock !== null && (replaying || !job.info || job.info.state === 'building')
+          edges.set(n, following ? Math.max(last, clock) : last)
+          t1 = Math.max(t1, edges.get(n))
+        }
+        const span = Math.max(t1 - t0, 1000)
+        const pct = (t) => `${((t - t0) / span) * 100}%`
+        let html = ''
+        for (const [n, job] of shown) {
+          html += `<div class="job-title">#${n} ${esc(job.info ? job.info.title : '')}</div>`
+          const builds = [...job.runs.values()].filter(
+            (r) => r.role === 'factory-build' && !r.parent,
+          )
+          const ordered = []
+          const children = (id) =>
+            job.order.map((k) => job.runs.get(k)).filter((r) => r.parent === id)
+          for (const id of job.order) {
+            const run = job.runs.get(id)
+            if (!run.parent) {
+              ordered.push([run, 0])
+              for (const c of children(id)) ordered.push([c, 1])
+            }
+          }
+          for (const [run, depth] of ordered) {
+            const attempt =
+              run.role === 'factory-build' && !run.parent
+                ? ` · attempt ${builds.indexOf(run) + 1}`
+                : ''
+            const label = `${run.type.replace('factory-', '')}${attempt}`
+            const end = run.end || edges.get(n)
+            const ticks = run.reads
+              .filter((r) => r.breach)
+              .map(
+                (r) =>
+                  `<span class="tick" style="left:${pct(Date.parse(r.t))}" title="${esc(r.breach)}"></span>`,
+              )
+              .join('')
+            const marks =
+              depth === 0 && run.id === 'orchestrator'
+                ? job.marks
+                    .map(
+                      (m) =>
+                        `<span class="mark" style="left:${pct(m.t)}" title="${esc(m.kind)}"></span>`,
+                    )
+                    .join('')
+                : ''
+            html +=
+              `<div class="lane${depth ? ' nested' : ''}"><button type="button" class="lane-label" data-job="${n}" data-run="${esc(run.id)}" aria-pressed="${n === selectedJob && run.id === selectedRun}">${esc(label)}${run.reads.some((r) => r.breach) ? ' <span class="breach">⚠</span>' : ''}</button>` +
+              `<div class="track">${marks}<span class="bar${run.end ? '' : ' running'}${run.id === 'orchestrator' ? ' orch' : ''}" style="left:${pct(run.start)};width:calc(${((end - run.start) / span) * 100}% + 2px)" title="${esc(label)}"></span>${ticks}</div></div>`
+          }
+        }
+        tl.innerHTML = html
+        for (const b of tl.querySelectorAll('.lane-label'))
+          b.onclick = () => {
+            selectedJob = Number(b.dataset.job)
+            selectedRun = b.dataset.run
+            render()
+          }
+      }
+
+      function drawBreaches(job) {
+        const ul = document.getElementById('breaches')
+        const all = job ? job.breaches : []
+        document.getElementById('br-count').textContent = all.length ? `(${all.length})` : ''
+        ul.innerHTML = all.length
+          ? all
+              .slice(-50)
+              .reverse()
+              .map(
+                ({ ev, run }) =>
+                  `<li class="breach">${esc(new Date(ev.t).toLocaleTimeString())} · ${esc(run.type)}: ${esc(ev.breach)}</li>`,
+              )
+              .join('')
+          : '<li class="empty">None.</li>'
+      }
+
+      function drawHandoffs(job) {
+        const ul = document.getElementById('handoffs')
+        const all = job ? job.handoffs : []
+        ul.innerHTML = all.length
+          ? all
+              .slice(-30)
+              .reverse()
+              .map(
+                ({ ev, run }) =>
+                  `<li><span class="from">${esc(ev.from.replace('factory-', ''))} → ${esc(run.type.replace('factory-', ''))}</span> ${esc(where(ev.target))}</li>`,
+              )
+              .join('')
+          : '<li class="empty">None yet.</li>'
+      }
+
+      function drawContext(job) {
+        const box = document.getElementById('context')
+        const run = job && selectedRun ? job.runs.get(selectedRun) : null
+        if (!run) {
+          box.innerHTML = '<p class="empty">Select an agent run in the timeline.</p>'
+          return
+        }
+        const tokens = run.reads.reduce((sum, r) => sum + (r.tokens || 0), 0)
+        const list = (items, fmt) =>
+          items.length
+            ? `<ul class="list">${items.map(fmt).join('')}</ul>`
+            : '<p class="empty">None.</p>'
+        const lines = (r) =>
+          r.lines && (r.lines.offset || r.lines.limit)
+            ? ` [${r.lines.offset || 1}…${r.lines.limit ? (r.lines.offset || 1) + r.lines.limit - 1 : 'end'}]`
+            : ''
+        box.innerHTML = `
+    <p><strong>${esc(run.type)}</strong>${run.parent ? ` <span class="muted">launched by ${esc(job.runs.get(run.parent)?.type || run.parent)}</span>` : ''}<br>
+    <span class="muted">${esc(run.id)} · ${run.end ? 'finished' : 'running'} · ${run.reads.length} reads, ~${tokens.toLocaleString()} tokens</span></p>
+    <details ${run.prompt ? 'open' : ''}><summary>Prompt it received</summary>${run.prompt ? `<pre>${esc(run.prompt)}</pre>` : '<p class="empty">Not recorded.</p>'}</details>
+    <details><summary>Instructions loaded (${run.instructions.length})</summary>${list(run.instructions, (e) => `<li>${esc(where(e.target))} <span class="muted">${esc(e.detail && e.detail.reason)}</span></li>`)}</details>
+    <details open><summary>Read (${run.reads.length})</summary>${list(run.reads, (r) => `<li class="${r.breach ? 'breach' : ''}">${esc(where(r.target))}${esc(lines(r))} <span class="muted">~${r.tokens || 0} tok${r.input ? ` · ${esc(r.input)}` : ''}</span>${r.from ? ` <span class="from">from ${esc(r.from.replace('factory-', ''))}</span>` : ''}${r.breach ? `<br>⚠ ${esc(r.breach)}` : ''}</li>`)}</details>
+    <details open><summary>Changed (${run.writes.length + run.changed.length})</summary>${list([...run.writes.map((w) => where(w.target)), ...run.changed.map((c) => `${c.status} ${c.path}`)], (s) => `<li>${esc(s)}</li>`)}</details>
+    <details ${run.denied.length ? 'open' : ''}><summary>Writes denied (${run.denied.length})</summary>${list(run.denied, (d) => `<li class="breach">${esc(where(d.target))}<br>${esc(d.detail && d.detail.reason)}</li>`)}</details>
+    <details><summary>Searches (${run.searches.length})</summary>${list(run.searches, (s) => `<li>${esc(s.detail && s.detail.tool)} ${esc(s.detail && s.detail.pattern)} ${esc(where(s.target))}</li>`)}</details>
+    <details><summary>Commands (${run.bash.length})</summary>${list(run.bash, (b) => `<li>${esc(b.detail && b.detail.command)}</li>`)}</details>`
+      }
+
+      // ---- The stream ---------------------------------------------------------------------------
+      const queue = []
+      let replayStart = null
+      function connect() {
+        const source = new EventSource(
+          replayJob ? `/events?job=${encodeURIComponent(replayJob)}` : '/events',
+        )
+        source.addEventListener('open', () => {
+          document.getElementById('dot').className = 'dot on'
+          document.getElementById('mode').textContent = replaying
+            ? `Replaying #${replayJob} at ${speed}×`
+            : 'Live'
+        })
+        source.addEventListener('error', () => {
+          document.getElementById('dot').className = 'dot'
+          document.getElementById('mode').textContent = 'Reconnecting…'
+        })
+        source.addEventListener('job', (m) => {
+          const info = JSON.parse(m.data)
+          if (info) {
+            jobOf(info.number).info = info
+            render()
+          }
+        })
+        source.addEventListener('event', (m) => {
+          const ev = JSON.parse(m.data)
+          if (replaying) queue.push(ev)
+          else {
+            apply(ev)
+            render()
+          }
+        })
+        source.addEventListener('ready', () => {
+          if (replaying) startReplay(source)
+        })
+      }
+      function startReplay(source) {
+        source.close()
+        if (!queue.length) return
+        queue.sort((a, b) => Date.parse(a.t) - Date.parse(b.t))
+        const first = Date.parse(queue[0].t)
+        // Each run's state is rebuilt from scratch, so a replay reads like the live job did.
+        for (const job of jobs.values()) {
+          job.runs = new Map()
+          job.order = []
+          job.marks = []
+          job.breaches = []
+          job.handoffs = []
+        }
+        clock = first
+        replayStart = performance.now()
+        const tick = (now) => {
+          clock = first + (now - replayStart) * speed
+          while (queue.length && Date.parse(queue[0].t) <= clock) apply(queue.shift())
+          render()
+          if (queue.length) requestAnimationFrame(tick)
+          else document.getElementById('mode').textContent = `Replayed #${replayJob}`
+        }
+        requestAnimationFrame(tick)
+      }
+      if (!replaying)
+        setInterval(() => {
+          clock = Date.now()
+          render()
+        }, 1000)
+      connect()
+    </script>
+  </body>
+</html>

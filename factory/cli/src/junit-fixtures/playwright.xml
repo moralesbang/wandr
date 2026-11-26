@@ -1,0 +1,230 @@
+<testsuites id="" name="" tests="10" failures="4" skipped="0" errors="4" time="12.686075">
+<testsuite name="a.spec.ts" timestamp="2026-11-26T16:53:32.753Z" hostname="chromium" tests="5" failures="2" skipped="0" time="3.312" errors="2">
+<testcase name="assertion" classname="a.spec.ts" time="0.122">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|/repo/apps/web/test-results/a-assertion-chromium/error-context.md]]
+]]>
+</system-out>
+<failure message="expect(received).toBe(expected) // Object.is equality" type="expect.toBe">
+<![CDATA[  [chromium] › a.spec.ts:2:1 › assertion ───────────────────────────────────────────────────────────
+
+    Error: expect(received).toBe(expected) // Object.is equality
+
+    Expected: 2
+    Received: 1
+
+      1 | import { expect, test } from '@playwright/test'
+    > 2 | test('assertion', async ({ page }) => { await page.setContent('<p>hi</p>'); expect(1).toBe(2) })
+        |                                                                                       ^
+      3 | test('visible', async ({ page }) => { await page.setContent('<p>hi</p>'); await expect(page.getByRole('heading', { name: 'Walk' })).toBeVisible() })
+      4 | test('click missing', async ({ page }) => { await page.setContent('<p>hi</p>'); await page.getByRole('button', { name: 'Save' }).click() })
+      5 | test('throws', async () => { throw new Error('boom') })
+        at /repo/apps/web/zz-probe/e2e/a.spec.ts:2:87
+
+    Error Context: ../../test-results/a-assertion-chromium/error-context.md
+]]>
+</failure>
+</testcase>
+<testcase name="visible" classname="a.spec.ts" time="1.095">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|/repo/apps/web/test-results/a-visible-chromium/error-context.md]]
+]]>
+</system-out>
+<failure message="expect(locator).toBeVisible() failed" type="expect.toBeVisible">
+<![CDATA[  [chromium] › a.spec.ts:3:1 › visible ─────────────────────────────────────────────────────────────
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByRole('heading', { name: 'Walk' })
+    Expected: visible
+    Timeout: 1000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" getByRole('heading', { name: 'Walk' }) with timeout 1000ms
+      - waiting for getByRole('heading', { name: 'Walk' })
+
+
+      1 | import { expect, test } from '@playwright/test'
+      2 | test('assertion', async ({ page }) => { await page.setContent('<p>hi</p>'); expect(1).toBe(2) })
+    > 3 | test('visible', async ({ page }) => { await page.setContent('<p>hi</p>'); await expect(page.getByRole('heading', { name: 'Walk' })).toBeVisible() })
+        |                                                                                                                                     ^
+      4 | test('click missing', async ({ page }) => { await page.setContent('<p>hi</p>'); await page.getByRole('button', { name: 'Save' }).click() })
+      5 | test('throws', async () => { throw new Error('boom') })
+      6 | test('passes', async () => { expect(1).toBe(1) })
+        at /repo/apps/web/zz-probe/e2e/a.spec.ts:3:133
+
+    Error Context: ../../test-results/a-visible-chromium/error-context.md
+]]>
+</failure>
+</testcase>
+<testcase name="click missing" classname="a.spec.ts" time="2.091">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|/repo/apps/web/test-results/a-click-missing-chromium/error-context.md]]
+]]>
+</system-out>
+<error message="locator.click: Timeout 2000ms exceeded." type="TimeoutError">
+<![CDATA[  [chromium] › a.spec.ts:4:1 › click missing ───────────────────────────────────────────────────────
+
+    TimeoutError: locator.click: Timeout 2000ms exceeded.
+    Call log:
+      - waiting for getByRole('button', { name: 'Save' })
+
+
+      2 | test('assertion', async ({ page }) => { await page.setContent('<p>hi</p>'); expect(1).toBe(2) })
+      3 | test('visible', async ({ page }) => { await page.setContent('<p>hi</p>'); await expect(page.getByRole('heading', { name: 'Walk' })).toBeVisible() })
+    > 4 | test('click missing', async ({ page }) => { await page.setContent('<p>hi</p>'); await page.getByRole('button', { name: 'Save' }).click() })
+        |                                                                                                                                  ^
+      5 | test('throws', async () => { throw new Error('boom') })
+      6 | test('passes', async () => { expect(1).toBe(1) })
+      7 |
+        at /repo/apps/web/zz-probe/e2e/a.spec.ts:4:130
+
+    Error Context: ../../test-results/a-click-missing-chromium/error-context.md
+]]>
+</error>
+</testcase>
+<testcase name="throws" classname="a.spec.ts" time="0.001">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|/repo/apps/web/test-results/a-throws-chromium/error-context.md]]
+]]>
+</system-out>
+<error message="boom" type="Error">
+<![CDATA[  [chromium] › a.spec.ts:5:1 › throws ──────────────────────────────────────────────────────────────
+
+    Error: boom
+
+      3 | test('visible', async ({ page }) => { await page.setContent('<p>hi</p>'); await expect(page.getByRole('heading', { name: 'Walk' })).toBeVisible() })
+      4 | test('click missing', async ({ page }) => { await page.setContent('<p>hi</p>'); await page.getByRole('button', { name: 'Save' }).click() })
+    > 5 | test('throws', async () => { throw new Error('boom') })
+        |                                    ^
+      6 | test('passes', async () => { expect(1).toBe(1) })
+      7 |
+        at /repo/apps/web/zz-probe/e2e/a.spec.ts:5:36
+
+    Error Context: ../../test-results/a-throws-chromium/error-context.md
+]]>
+</error>
+</testcase>
+<testcase name="passes" classname="a.spec.ts" time="0.003">
+</testcase>
+</testsuite>
+<testsuite name="a.spec.ts" timestamp="2026-11-26T16:53:32.753Z" hostname="webkit" tests="5" failures="2" skipped="0" time="4.477" errors="2">
+<testcase name="assertion" classname="a.spec.ts" time="0.75">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|/repo/apps/web/test-results/a-assertion-webkit/error-context.md]]
+]]>
+</system-out>
+<failure message="expect(received).toBe(expected) // Object.is equality" type="expect.toBe">
+<![CDATA[  [webkit] › a.spec.ts:2:1 › assertion ─────────────────────────────────────────────────────────────
+
+    Error: expect(received).toBe(expected) // Object.is equality
+
+    Expected: 2
+    Received: 1
+
+      1 | import { expect, test } from '@playwright/test'
+    > 2 | test('assertion', async ({ page }) => { await page.setContent('<p>hi</p>'); expect(1).toBe(2) })
+        |                                                                                       ^
+      3 | test('visible', async ({ page }) => { await page.setContent('<p>hi</p>'); await expect(page.getByRole('heading', { name: 'Walk' })).toBeVisible() })
+      4 | test('click missing', async ({ page }) => { await page.setContent('<p>hi</p>'); await page.getByRole('button', { name: 'Save' }).click() })
+      5 | test('throws', async () => { throw new Error('boom') })
+        at /repo/apps/web/zz-probe/e2e/a.spec.ts:2:87
+
+    Error Context: ../../test-results/a-assertion-webkit/error-context.md
+]]>
+</failure>
+</testcase>
+<testcase name="visible" classname="a.spec.ts" time="1.344">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|/repo/apps/web/test-results/a-visible-webkit/error-context.md]]
+]]>
+</system-out>
+<failure message="expect(locator).toBeVisible() failed" type="expect.toBeVisible">
+<![CDATA[  [webkit] › a.spec.ts:3:1 › visible ───────────────────────────────────────────────────────────────
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByRole('heading', { name: 'Walk' })
+    Expected: visible
+    Timeout: 1000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" getByRole('heading', { name: 'Walk' }) with timeout 1000ms
+      - waiting for getByRole('heading', { name: 'Walk' })
+
+
+      1 | import { expect, test } from '@playwright/test'
+      2 | test('assertion', async ({ page }) => { await page.setContent('<p>hi</p>'); expect(1).toBe(2) })
+    > 3 | test('visible', async ({ page }) => { await page.setContent('<p>hi</p>'); await expect(page.getByRole('heading', { name: 'Walk' })).toBeVisible() })
+        |                                                                                                                                     ^
+      4 | test('click missing', async ({ page }) => { await page.setContent('<p>hi</p>'); await page.getByRole('button', { name: 'Save' }).click() })
+      5 | test('throws', async () => { throw new Error('boom') })
+      6 | test('passes', async () => { expect(1).toBe(1) })
+        at /repo/apps/web/zz-probe/e2e/a.spec.ts:3:133
+
+    Error Context: ../../test-results/a-visible-webkit/error-context.md
+]]>
+</failure>
+</testcase>
+<testcase name="click missing" classname="a.spec.ts" time="2.379">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|/repo/apps/web/test-results/a-click-missing-webkit/error-context.md]]
+]]>
+</system-out>
+<error message="locator.click: Timeout 2000ms exceeded." type="TimeoutError">
+<![CDATA[  [webkit] › a.spec.ts:4:1 › click missing ─────────────────────────────────────────────────────────
+
+    TimeoutError: locator.click: Timeout 2000ms exceeded.
+    Call log:
+      - waiting for getByRole('button', { name: 'Save' })
+
+
+      2 | test('assertion', async ({ page }) => { await page.setContent('<p>hi</p>'); expect(1).toBe(2) })
+      3 | test('visible', async ({ page }) => { await page.setContent('<p>hi</p>'); await expect(page.getByRole('heading', { name: 'Walk' })).toBeVisible() })
+    > 4 | test('click missing', async ({ page }) => { await page.setContent('<p>hi</p>'); await page.getByRole('button', { name: 'Save' }).click() })
+        |                                                                                                                                  ^
+      5 | test('throws', async () => { throw new Error('boom') })
+      6 | test('passes', async () => { expect(1).toBe(1) })
+      7 |
+        at /repo/apps/web/zz-probe/e2e/a.spec.ts:4:130
+
+    Error Context: ../../test-results/a-click-missing-webkit/error-context.md
+]]>
+</error>
+</testcase>
+<testcase name="throws" classname="a.spec.ts" time="0.001">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|/repo/apps/web/test-results/a-throws-webkit/error-context.md]]
+]]>
+</system-out>
+<error message="boom" type="Error">
+<![CDATA[  [webkit] › a.spec.ts:5:1 › throws ────────────────────────────────────────────────────────────────
+
+    Error: boom
+
+      3 | test('visible', async ({ page }) => { await page.setContent('<p>hi</p>'); await expect(page.getByRole('heading', { name: 'Walk' })).toBeVisible() })
+      4 | test('click missing', async ({ page }) => { await page.setContent('<p>hi</p>'); await page.getByRole('button', { name: 'Save' }).click() })
+    > 5 | test('throws', async () => { throw new Error('boom') })
+        |                                    ^
+      6 | test('passes', async () => { expect(1).toBe(1) })
+      7 |
+        at /repo/apps/web/zz-probe/e2e/a.spec.ts:5:36
+
+    Error Context: ../../test-results/a-throws-webkit/error-context.md
+]]>
+</error>
+</testcase>
+<testcase name="passes" classname="a.spec.ts" time="0.003">
+</testcase>
+</testsuite>
+</testsuites>
