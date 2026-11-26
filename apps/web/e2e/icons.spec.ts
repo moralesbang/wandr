@@ -44,14 +44,28 @@ async function declaredIcons(page: Page): Promise<Icon[]> {
 async function pixels(page: Page, url: string) {
   return page.evaluate(async (u) => {
     const blob = await (await fetch(u)).blob()
-    const bmp = await createImageBitmap(blob)
+    let bmp: { width: number; height: number }
+    let source: CanvasImageSource
+    if (blob.type.includes('svg')) {
+      const objectUrl = URL.createObjectURL(blob)
+      const img = new Image()
+      img.src = objectUrl
+      await img.decode()
+      URL.revokeObjectURL(objectUrl)
+      bmp = { width: img.naturalWidth, height: img.naturalHeight }
+      source = img
+    } else {
+      const decoded = await createImageBitmap(blob)
+      bmp = decoded
+      source = decoded
+    }
     const w = bmp.width || 64
     const h = bmp.height || 64
     const canvas = document.createElement('canvas')
     canvas.width = w
     canvas.height = h
     const ctx = canvas.getContext('2d')!
-    ctx.drawImage(bmp, 0, 0, w, h)
+    ctx.drawImage(source, 0, 0, w, h)
     const at = (x: number, y: number) => [...ctx.getImageData(x, y, 1, 1).data]
     const all = ctx.getImageData(0, 0, w, h).data
     let minAlpha = 255
