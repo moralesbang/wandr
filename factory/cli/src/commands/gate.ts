@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { handoffDir, saveJob, type Job } from '../job.ts'
 import { protectedFromBuild } from '../paths.ts'
@@ -10,7 +10,8 @@ export type GateResult = { passed: boolean; problems: string[]; tests: TestChang
 
 /**
  * The independent gate before review: the last checks were green on exactly HEAD, nothing is left
- * uncommitted, and no commit the CLI didn't make touches a protected path.
+ * uncommitted, and no commit the CLI didn't make touches a protected path. Commits already on main
+ * aren't the job's: a job that merges main doesn't answer for them.
  */
 export async function gate(
   root: string,
@@ -20,6 +21,9 @@ export async function gate(
   const cwd = job.worktree
   const head = await git(cwd, 'rev-parse', 'HEAD')
   const headTree = await git(cwd, 'rev-parse', 'HEAD^{tree}')
+  // Fetched now rather than read from the local ref, which a Bash command could move.
+  await git(cwd, 'fetch', '--quiet', 'origin', 'main')
+  const main = await git(cwd, 'rev-parse', 'FETCH_HEAD')
   const problems: string[] = []
 
   if (!job.redCommit) problems.push('There is no red commit yet. Run factory red first.')
@@ -36,7 +40,7 @@ export async function gate(
     problems.push('The last green checks ran on other code than HEAD. Run factory check again.')
   }
 
-  const agentCommits = lines(await git(cwd, 'rev-list', `${job.base}..HEAD`)).filter(
+  const agentCommits = lines(await git(cwd, 'rev-list', 'HEAD', `^${job.base}`, `^${main}`)).filter(
     (sha) => !job.cliCommits.includes(sha),
   )
   for (const sha of agentCommits) {
@@ -51,11 +55,12 @@ export async function gate(
   }
 
   const tests = testChanges(
-    await git(cwd, 'diff', '--name-status', `${job.base}...HEAD`),
-    await git(cwd, 'diff', '--unified=0', `${job.base}...HEAD`),
+    await git(cwd, 'diff', '--name-status', `${main}...HEAD`),
+    await git(cwd, 'diff', '--unified=0', `${main}...HEAD`),
   )
   const result: GateResult = { passed: problems.length === 0, problems, tests, head }
   // The reviewers read the gate's test changes from the handoff folder.
+  mkdirSync(handoffDir(job), { recursive: true })
   writeFileSync(join(handoffDir(job), 'gate.json'), `${JSON.stringify(result, null, 2)}\n`)
   const updated: Job = {
     ...job,

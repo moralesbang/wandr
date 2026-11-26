@@ -270,7 +270,7 @@ flowchart LR
     p -->|yes| pr(["PR"])
 ```
 
-**Protected paths.** `factory gate` rejects a build whose diff since the red commit touches any of these, and the hook denies the build agent writing them:
+**Protected paths.** `factory gate` rejects a build whose diff since the red commit touches any of these, and the hook denies the build agent writing them. Commits already on `main`, fetched by the gate itself, aren't the job's: a job that merges `main` to pick up a fix doesn't answer for them.
 
 | What | Paths |
 | --- | --- |
