@@ -1,14 +1,17 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { readCiSteps, shellOf, withChecksLock } from '../checks.ts'
-import { jobDir, saveJob, type Job } from '../job.ts'
+import { handoffDir, saveJob, type Job } from '../job.ts'
 import { runLogged, workingTree } from '../shell.ts'
 import { record, requireJob } from './common.ts'
 
-/** Runs CI's steps in the job's worktree, in order, stopping at the first that fails. */
+/**
+ * Runs CI's steps in the job's worktree, in order, stopping at the first that fails. The log goes
+ * to the handoff folder's checks/, where the build agent and the reviewers read it.
+ */
 export async function check(root: string, number: number): Promise<Job> {
   const job = requireJob(root, number)
-  const dir = join(jobDir(root, number), 'checks')
+  const dir = join(handoffDir(job), 'checks')
   mkdirSync(dir, { recursive: true })
   const log = join(dir, `${new Date().toISOString().replaceAll(':', '-')}.log`)
   const { steps, skipped } = readCiSteps(job.worktree)

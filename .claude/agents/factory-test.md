@@ -9,7 +9,7 @@ You write the acceptance tests for one issue: tests that check what a user or ca
 
 ## Inputs
 
-Read only these. Paths are in your prompt; `<worktree>` is your working directory.
+Read only these. Paths are in your prompt; `<worktree>` is your working directory. `<job>` is the job's folder, `factory/.jobs/<n>/` inside your worktree. Read and write the job's files there; the main checkout is outside your reach.
 
 - The issue and its ACs: `<job>/issue.md`.
 - `CLAUDE.md` and `knowledge/README.md`, and `knowledge/standards/testing.md` (every standard in it binds you).

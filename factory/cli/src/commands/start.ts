@@ -1,7 +1,16 @@
 import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseCriteria, slugify } from '../issue.ts'
-import { canStartAnother, jobDir, listJobs, loadJob, saveJob, type Job } from '../job.ts'
+import {
+  canStartAnother,
+  handoffDir,
+  listJobs,
+  loadJob,
+  migrateHandoff,
+  saveJob,
+  stateDir,
+  type Job,
+} from '../job.ts'
 import { gh, git, runLogged } from '../shell.ts'
 import { LABELS, record, Refusal } from './common.ts'
 
@@ -53,6 +62,9 @@ const viewIssue = async (number: number) =>
     await gh('issue', 'view', String(number), '--json', 'number,title,body,state,labels,comments'),
   ) as Issue
 
+const writeIssue = (handoff: string, issue: Issue) =>
+  writeFileSync(join(handoff, 'issue.md'), `# ${issue.title} (#${issue.number})\n\n${issue.body}\n`)
+
 export async function start(root: string, number: number, session: string): Promise<Job> {
   const existing = loadJob(root, number)
   if (existing) return resume(root, existing, session)
@@ -79,16 +91,19 @@ export async function start(root: string, number: number, session: string): Prom
   const env = join(root, 'apps', 'api', '.env')
   if (existsSync(env)) copyFileSync(env, join(worktree, 'apps', 'api', '.env'))
 
-  const dir = jobDir(root, number)
-  mkdirSync(dir, { recursive: true })
+  const state = stateDir(root, number)
+  mkdirSync(state, { recursive: true })
   const install = await runLogged(
     'bun install --frozen-lockfile',
     worktree,
-    join(dir, 'install.log'),
+    join(state, 'install.log'),
   )
-  if (install !== 0) throw new Refusal(`bun install failed in ${worktree}; see ${dir}/install.log`)
+  if (install !== 0)
+    throw new Refusal(`bun install failed in ${worktree}; see ${state}/install.log`)
 
-  writeFileSync(join(dir, 'issue.md'), `# ${issue.title} (#${number})\n\n${issue.body}\n`)
+  const handoff = handoffDir({ number, worktree })
+  mkdirSync(handoff, { recursive: true })
+  writeIssue(handoff, issue)
   const job: Job = {
     number,
     title: issue.title,
@@ -118,10 +133,21 @@ export async function start(root: string, number: number, session: string): Prom
   return job
 }
 
-/** Takes a job back up in a new or the same session; a blocked job returns to building. */
+/**
+ * Takes a job back up in a new or the same session; a blocked job returns to building. A job
+ * started before the handoff folder moved into the worktree gets its handoff files copied there.
+ */
 async function resume(root: string, job: Job, session: string): Promise<Job> {
   if (job.state === 'pr_open') {
     throw new Refusal(`Job #${job.number} already opened its PR: ${job.pr}`)
+  }
+  if (!existsSync(job.worktree)) {
+    throw new Refusal(`Job #${job.number}'s worktree is gone: ${job.worktree}`)
+  }
+  const migrated = migrateHandoff(root, job)
+  if (migrated.length) record(root, job.number, 'job.migrated', { files: migrated })
+  if (!existsSync(join(handoffDir(job), 'issue.md'))) {
+    writeIssue(handoffDir(job), await viewIssue(job.number))
   }
   let resumed = { ...job, session }
   if (job.state === 'blocked') {

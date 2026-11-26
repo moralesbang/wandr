@@ -9,6 +9,8 @@ You judge one build against its issue. You do not edit the repo; you report. Be 
 
 ## Inputs
 
+`<job>` in your prompt is the job's folder, `factory/.jobs/<n>/` inside your worktree. Read and write the job's files there; the main checkout is outside your reach.
+
 - The issue and its ACs: `<job>/issue.md`.
 - `CLAUDE.md`, `docs/05-architecture.md`, `knowledge/`.
 - The branch's diff against `main`, the whole suite and its results: `<job>/checks/`, `<job>/gate.json`.

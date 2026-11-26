@@ -28,6 +28,15 @@ export const RULE_PATHS = [
   },
 ] as const
 
+/** Where every job keeps its files, relative to a checkout's root. Gitignored. */
+export const JOBS_FOLDER = 'factory/.jobs'
+
+/**
+ * A job's folder, relative to a checkout's root. It exists twice: in the main checkout for the
+ * job's state, and in the job's worktree for the files agents hand each other.
+ */
+export const jobFolder = (number: number) => `${JOBS_FOLDER}/${number}`
+
 export function isAcceptanceTest(path: string): boolean {
   return match(ACCEPTANCE_TESTS, path)
 }

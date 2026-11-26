@@ -1,8 +1,14 @@
-// A job's state, kept in factory/.jobs/<n>/job.json in the main checkout.
+// A job's files live in two folders named factory/.jobs/<n>/:
+// - the state folder, in the main checkout: job.json and events.jsonl, written only by the CLI and
+//   the hooks, so the job's record outlives its worktree;
+// - the handoff folder, in the job's worktree: the files agents and the orchestrator hand each
+//   other. Claude Code confines a session that entered a worktree, and its subagents, to that
+//   worktree, so this is the only place they can write.
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { z } from 'zod'
+import { JOBS_FOLDER, jobFolder } from './paths.ts'
 
 export const MAX_JOBS = 3
 export const MAX_BUILD_ATTEMPTS = 3
@@ -56,16 +62,54 @@ export function mainRoot(from: string = import.meta.dir): string {
   return at === -1 ? resolve(from, '../../..') : from.slice(0, at)
 }
 
-export const jobsDir = (root: string) => join(root, 'factory', '.jobs')
-export const jobDir = (root: string, number: number) => join(jobsDir(root), String(number))
+/** Every job's state folder, in the main checkout; also holds the checks lock. */
+export const jobsDir = (root: string) => join(root, JOBS_FOLDER)
+/** A job's state folder, in the main checkout: job.json, events.jsonl and the CLI's own logs. */
+export const stateDir = (root: string, number: number) => join(root, jobFolder(number))
+/** A job's handoff folder, in its worktree: what agents and the orchestrator read and write. */
+export const handoffDir = (job: Pick<Job, 'number' | 'worktree'>) =>
+  join(job.worktree, jobFolder(job.number))
+
+/** The files and folders agents and the orchestrator hand each other, in the handoff folder. */
+export const HANDOFF_FILES = [
+  'issue.md',
+  'acceptance.md',
+  'build-notes.md',
+  'checks',
+  'gate.json',
+  'reviews',
+  'decision-requests',
+  'diagnosis.md',
+  'summary.md',
+] as const
+
+/**
+ * Copies into the worktree's handoff folder every handoff file that exists only in the main
+ * checkout's job folder, where jobs started before the split kept them. Never overwrites.
+ */
+export function migrateHandoff(root: string, job: Pick<Job, 'number' | 'worktree'>): string[] {
+  const from = stateDir(root, job.number)
+  const to = handoffDir(job)
+  mkdirSync(to, { recursive: true })
+  const copied: string[] = []
+  for (const name of HANDOFF_FILES) {
+    const source = join(from, name)
+    if (!existsSync(source)) continue
+    const target = join(to, name)
+    const missing = !existsSync(target)
+    cpSync(source, target, { recursive: true, force: false, errorOnExist: false })
+    if (missing) copied.push(name)
+  }
+  return copied
+}
 
 export function loadJob(root: string, number: number): Job | null {
-  const file = join(jobDir(root, number), 'job.json')
+  const file = join(stateDir(root, number), 'job.json')
   return existsSync(file) ? Job.parse(JSON.parse(readFileSync(file, 'utf8'))) : null
 }
 
 export function saveJob(root: string, job: Job): void {
-  const dir = jobDir(root, job.number)
+  const dir = stateDir(root, job.number)
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'job.json'), `${JSON.stringify(Job.parse(job), null, 2)}\n`)
 }

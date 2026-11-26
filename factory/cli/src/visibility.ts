@@ -1,8 +1,9 @@
 // "Who sees what", as data: each agent's inputs, the moment each becomes visible, and what it may
 // write. factory watch flags reads against it; the guard hook enforces the writes.
 //
-// A target is a path in one of three areas: `repo` (the job's worktree), `job` (the job's folder,
-// factory/.jobs/<n>/) or `outside` (anything else, the main checkout included).
+// A target is a path in one of three areas: `job` (the job's handoff folder, factory/.jobs/<n>/
+// inside its worktree), `repo` (the rest of the worktree) or `outside` (anything else, the main
+// checkout and its copy of the job's folder included).
 
 import { isAcceptanceTest, protectedFromBuild, ruleProtecting } from './paths.ts'
 

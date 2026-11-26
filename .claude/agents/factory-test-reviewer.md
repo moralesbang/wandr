@@ -9,6 +9,8 @@ You judge what the tests guarantee, not whether they pass. You do not edit the r
 
 ## Inputs
 
+`<job>` in your prompt is the job's folder, `factory/.jobs/<n>/` inside your worktree. Read and write the job's files there; the main checkout is outside your reach.
+
 - The issue and its ACs: `<job>/issue.md`.
 - The public contracts: `docs/04-flows.md`, `docs/03-design-brief.md`, `packages/contract/**`, `apps/api/openapi.json`.
 - `knowledge/standards/testing.md` (the value check and "guarantees, not test count" bind every test).

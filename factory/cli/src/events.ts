@@ -1,10 +1,11 @@
-// The event log, factory/.jobs/<n>/events.jsonl: written only by the CLI and by Claude Code hooks.
+// The event log, factory/.jobs/<n>/events.jsonl in the main checkout: written only by the CLI and
+// by Claude Code hooks.
 // It keeps paths, line ranges and sizes, never file contents.
 
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { z } from 'zod'
-import { jobDir, type Job } from './job.ts'
+import { stateDir, type Job } from './job.ts'
 import type { Area, Target } from './visibility.ts'
 
 export type AgentRef = { id: string; type: string }
@@ -24,7 +25,7 @@ export type FactoryEvent = {
 }
 
 export function appendEvent(root: string, event: FactoryEvent): void {
-  const dir = jobDir(root, event.job)
+  const dir = stateDir(root, event.job)
   mkdirSync(dir, { recursive: true })
   appendFileSync(join(dir, 'events.jsonl'), `${JSON.stringify(event)}\n`)
 }
@@ -50,13 +51,20 @@ export const HookInput = z.looseObject({
 })
 export type HookInput = z.infer<typeof HookInput>
 
-/** Places an absolute path in its area: the job's worktree, the job's folder, or outside both. */
-export function locate(path: string, places: { worktree: string; jobDir: string }): Target {
+/** Where a job's areas are on disk: its worktree, and the handoff folder inside it. */
+export type Places = { worktree: string; handoffDir: string }
+
+/**
+ * Places an absolute path in its area: the job's handoff folder, the rest of its worktree, or
+ * outside both. The handoff folder sits inside the worktree, so it is matched first. The main
+ * checkout, its copy of the job's folder included, is outside.
+ */
+export function locate(path: string, places: Places): Target {
   const inside = (dir: string) => {
     const rel = relative(dir, path)
     return rel && !rel.startsWith('..') && !rel.startsWith(sep) ? rel.split(sep).join('/') : null
   }
-  const asJob = inside(places.jobDir)
+  const asJob = inside(places.handoffDir)
   if (asJob) return { area: 'job', path: asJob }
   const asRepo = inside(places.worktree)
   if (asRepo) return { area: 'repo', path: asRepo }
@@ -74,7 +82,8 @@ export function approximateTokens(content: string, offset = 1, limit = 2000): nu
 
 export type HookContext = {
   job: Job
-  jobDir: string
+  /** The job's handoff folder, in its worktree. */
+  handoffDir: string
   now: string
   /** Reads a file's text to size it; returns null when it can't. Never logged. */
   readText: (path: string) => string | null
@@ -82,7 +91,7 @@ export type HookContext = {
 
 /** Turns one hook input into the events it logs; an event of no interest logs nothing. */
 export function eventsFromHook(input: HookInput, context: HookContext): FactoryEvent[] {
-  const places = { worktree: context.job.worktree, jobDir: context.jobDir }
+  const places: Places = { worktree: context.job.worktree, handoffDir: context.handoffDir }
   const base = {
     t: context.now,
     job: context.job.number,
@@ -125,7 +134,7 @@ function preToolEvents(
   input: HookInput,
   toolInput: Record<string, unknown>,
   base: Base,
-  places: { worktree: string; jobDir: string },
+  places: Places,
   context: HookContext,
 ): FactoryEvent[] {
   const path = str(toolInput.file_path) ?? str(toolInput.notebook_path)
@@ -192,7 +201,7 @@ function postToolEvents(
   input: HookInput,
   toolInput: Record<string, unknown>,
   base: Base,
-  places: { worktree: string; jobDir: string },
+  places: Places,
 ): FactoryEvent[] {
   const response = (input.tool_response ?? {}) as Record<string, unknown>
   const path = str(toolInput.file_path) ?? str(toolInput.notebook_path)
