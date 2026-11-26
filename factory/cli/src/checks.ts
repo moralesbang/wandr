@@ -37,9 +37,19 @@ export function ciSteps(workflowYaml: string): { steps: Step[]; skipped: Step[] 
 export const readCiSteps = (repo: string) =>
   ciSteps(readFileSync(join(repo, '.github', 'workflows', 'ci.yml'), 'utf8'))
 
-/** GitHub Actions runs `run` scripts with bash -e and pipefail. */
-export const shellOf = (run: string) =>
-  `bash --noprofile --norc -eo pipefail -c ${JSON.stringify(run)}`
+/**
+ * GitHub Actions runs `run` scripts with bash -e and pipefail. The script is one argv element, so
+ * bash alone reads it: its newlines, line continuations, `$VAR`s and backticks arrive untouched.
+ */
+export const shellOf = (run: string) => [
+  'bash',
+  '--noprofile',
+  '--norc',
+  '-eo',
+  'pipefail',
+  '-c',
+  run,
+]
 
 const alive = (pid: number) => {
   try {

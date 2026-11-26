@@ -1,5 +1,6 @@
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { $ } from 'bun'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { basename, join } from 'node:path'
 import {
   countAttempt,
   countRound,
@@ -130,6 +131,94 @@ export function status(root: string): string {
         `#${job.number}  ${job.state.padEnd(8)}  attempts ${job.attempts}/3  rounds ${job.rounds}/3  ${job.branch}${job.pr ? `  ${job.pr}` : ''}`,
     )
     .join('\n')
+}
+
+/** The compose project every checkout shares: `name:` in docker-compose.yml. */
+export const SHARED_COMPOSE_PROJECT = 'wandr'
+
+/**
+ * The compose project a worktree started before docker-compose.yml set `name:`: compose named it
+ * after the folder, lowercased, keeping only letters, digits, `_` and `-`.
+ */
+export const composeProjectOf = (worktree: string) =>
+  basename(worktree)
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9_-]/g, '')
+    .replace(/^[^a-z0-9]+/, '')
+
+/**
+ * Takes down the worktree's own compose stack, with its volumes, if one is left. Never the shared
+ * stack. Returns what it did, or why it couldn't look.
+ */
+async function downWorktreeStack(root: string, worktree: string): Promise<string> {
+  const project = composeProjectOf(worktree)
+  if (!project || project === SHARED_COMPOSE_PROJECT) return 'No compose stack of its own.'
+  const label = `label=com.docker.compose.project=${project}`
+  const containers = await $`docker ps -aq --filter ${label}`.nothrow().quiet()
+  const volumes = await $`docker volume ls -q --filter ${label}`.nothrow().quiet()
+  if (containers.exitCode !== 0 || volumes.exitCode !== 0) {
+    return `Docker isn't reachable, so a compose stack "${project}" may be left: docker compose -p ${project} down --volumes`
+  }
+  if (!`${containers.stdout}${volumes.stdout}`.trim()) return 'No compose stack of its own.'
+  await $`docker compose -p ${project} down --volumes --remove-orphans`.cwd(root).quiet()
+  return `Took down the compose stack "${project}" and its volumes.`
+}
+
+const exitsZero = async (command: ReturnType<typeof $>) =>
+  (await command.nothrow().quiet()).exitCode === 0
+
+/**
+ * Discards a job that never merged, so its issue can start again from scratch: takes down any
+ * compose stack its worktree started, removes the worktree and the branch, local and remote,
+ * deletes the job's state and puts the issue's label back to factory:ready, as it was before
+ * factory start. Refused while the branch has an open PR (close it first) or a merged one (that's
+ * plain clean). Returns each step's outcome.
+ */
+export async function abandon(root: string, number: number): Promise<string[]> {
+  const job = requireJob(root, number)
+  const prs = JSON.parse(
+    await gh('pr', 'list', '--head', job.branch, '--state', 'all', '--json', 'url,state'),
+  ) as { url: string; state: string }[]
+  const open = prs.find((pr) => pr.state === 'OPEN')
+  if (open) {
+    throw new Refusal(`Job #${number} has an open PR, ${open.url}. Close it first, then abandon.`)
+  }
+  const merged = prs.find((pr) => pr.state === 'MERGED')
+  if (merged) {
+    throw new Refusal(
+      `Job #${number}'s PR is merged, ${merged.url}: run factory clean ${number} without --abandon.`,
+    )
+  }
+  // The last event of the job's log, before the log goes with its folder; factory watch shows it.
+  record(root, number, 'job.abandoned', {
+    from: job.state,
+    branch: job.branch,
+    worktree: job.worktree,
+    closedPrs: prs.map((pr) => pr.url),
+  })
+
+  const done = [await downWorktreeStack(root, job.worktree)]
+
+  if (existsSync(job.worktree)) {
+    await git(root, 'worktree', 'remove', '--force', job.worktree)
+    done.push(`Removed the worktree ${job.worktree}.`)
+  }
+  await git(root, 'worktree', 'prune')
+  if (await exitsZero($`git -C ${root} show-ref --verify --quiet refs/heads/${job.branch}`)) {
+    await git(root, 'branch', '-D', job.branch)
+    done.push(`Deleted the branch ${job.branch}.`)
+  }
+  if (await git(root, 'ls-remote', '--heads', 'origin', job.branch)) {
+    await git(root, 'push', '--quiet', 'origin', '--delete', job.branch)
+    done.push(`Deleted the remote branch origin/${job.branch}.`)
+  }
+
+  rmSync(stateDir(root, number), { recursive: true, force: true })
+  done.push(`Deleted the job's state, ${stateDir(root, number)}.`)
+
+  await moveLabel(number, LABELS.ready)
+  done.push(`Issue #${number} is back to ${LABELS.ready}.`)
+  return done
 }
 
 /** Removes a merged job's worktree (its handoff folder with it), branch and state folder. */

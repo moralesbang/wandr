@@ -30,7 +30,10 @@ function poll(
   only: number | null,
   send: (chunk: Uint8Array) => void,
 ) {
-  for (const number of jobNumbers(root)) {
+  const numbers = jobNumbers(root)
+  // An abandoned job's folder is gone; if its issue starts again, its new log starts from zero.
+  for (const number of tails.keys()) if (!numbers.includes(number)) tails.delete(number)
+  for (const number of numbers) {
     if (only !== null && number !== only) continue
     const dir = join(jobsDir(root), String(number))
     let tail = tails.get(number)

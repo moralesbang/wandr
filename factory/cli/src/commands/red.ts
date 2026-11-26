@@ -14,23 +14,21 @@ import {
   type TestRun,
 } from '../report.ts'
 import { commitAll, runLogged, uncommitted } from '../shell.ts'
+import { styleProblems } from '../style.ts'
 import { record, Refusal, requireJob } from './common.ts'
-
-const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
 
 const reporter = (runner: 'vitest' | 'playwright') =>
   fileURLToPath(new URL(`../reporters/${runner}.ts`, import.meta.url))
 
 /** Runs a group's files; Vitest and Playwright write our common report, bun writes JUnit. */
-function command(runner: Runner, names: string[], report: string): string {
-  const files = names.map(quote).join(' ')
+function command(runner: Runner, names: string[], report: string): string[] {
   switch (runner) {
     case 'bun':
-      return `bun test ${files} --reporter=junit --reporter-outfile=${quote(report)}`
+      return ['bun', 'test', ...names, '--reporter=junit', `--reporter-outfile=${report}`]
     case 'vitest':
-      return `bunx vitest run ${files} --reporter=${quote(reporter('vitest'))}`
+      return ['bunx', 'vitest', 'run', ...names, `--reporter=${reporter('vitest')}`]
     case 'playwright':
-      return `bunx playwright test ${files} --reporter=${quote(reporter('playwright'))}`
+      return ['bunx', 'playwright', 'test', ...names, `--reporter=${reporter('playwright')}`]
   }
 }
 
@@ -42,8 +40,8 @@ function readRun(runner: Runner, path: string): Report {
 }
 
 /**
- * Runs the new or changed acceptance tests and, when every one fails on an assertion, commits the
- * test agent's work as the red commit.
+ * Runs the new or changed acceptance tests and, when every one fails on an assertion and passes
+ * lint and format, commits the test agent's work as the red commit.
  */
 export async function red(root: string, number: number): Promise<{ job: Job; problems: string[] }> {
   const job = requireJob(root, number)
@@ -80,15 +78,20 @@ export async function red(root: string, number: number): Promise<{ job: Job; pro
 
   const needs = (runner: Runner) => [...groups.values()].some((runs) => runs[0]?.runner === runner)
 
-  const problems = await withChecksLock(
+  // Lint and format first: a red CI would fail on its own files isn't a red to build on.
+  const style = await styleProblems(
+    job.worktree,
+    acceptance.filter((path) => /\.[cm]?[jt]sx?$/.test(path)),
+  )
+  const runProblems = await withChecksLock(
     root,
     number,
     async () => {
       const needsServices = needs('playwright') || acceptance.some((p) => p.startsWith('apps/api/'))
-      if (needsServices) await runLogged('bun run services', job.worktree, log)
+      if (needsServices) await runLogged(['bun', 'run', 'services'], job.worktree, log)
       if (needs('playwright')) {
-        await runLogged('bun run --cwd apps/api db:migrate:test', job.worktree, log)
-        await runLogged('bunx turbo run build --filter=@wandr/web', job.worktree, log)
+        await runLogged(['bun', 'run', '--cwd', 'apps/api', 'db:migrate:test'], job.worktree, log)
+        await runLogged(['bunx', 'turbo', 'run', 'build', '--filter=@wandr/web'], job.worktree, log)
       }
       const found: string[] = []
       let index = 0
@@ -121,6 +124,7 @@ export async function red(root: string, number: number): Promise<{ job: Job; pro
     (holder) => console.error(`Waiting for job #${holder}'s checks to finish…`),
   )
 
+  const problems = [...style, ...runProblems]
   if (problems.length) {
     const rejected = { ...job, redRejections: job.redRejections + 1 }
     saveJob(root, rejected)

@@ -34,6 +34,7 @@ Name: `*.acceptance.test.ts(x)` beside the code, and every test in `apps/web/e2e
 - An end-to-end test asserts that an element is visible before it acts on it.
 - Component tests query by role and accessible name (T-007). Test through public contracts, never DOM structure or internals.
 - One guarantee per test: the smallest set that covers the ACs.
+- Before you finish, run lint and format on every file you wrote or changed: `bunx oxfmt <files>` to format them, then `bunx oxlint --deny-warnings <files>`. Fix every lint error without changing what the test checks. `factory red` rejects a file that fails either, as CI would.
 - Run your tests with the repo's runner for a first look. Do not commit; the CLI commits the red, and later your fixes (`factory atfix`) and any rewrite the user authorized (`factory rewrite`).
 
 When the orchestrator sends back a rejected red, fix exactly what it names. A fix to an acceptance test keeps its guarantee; changing the guarantee needs the user's authorization on the issue, which the orchestrator tells you.
