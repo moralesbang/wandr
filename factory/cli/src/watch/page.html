@@ -4,939 +4,1986 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Factory watch</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <style>
-      :root {
-        --bg: #fafaf9;
-        --panel: #ffffff;
-        --ink: #1c1917;
-        --muted: #57534e;
-        --line: #d6d3d1;
-        --user: #fde68a;
-        --user-s: #92400e;
-        --orch: #e9d5ff;
-        --orch-s: #6b21a8;
-        --cli: #bfdbfe;
-        --cli-s: #1e40af;
-        --agent: #bbf7d0;
-        --agent-s: #166534;
-        --wait: #fecaca;
-        --wait-s: #991b1b;
-        --breach: #dc2626;
-        --flow: #d97706;
-        --focus: #2563eb;
-        color-scheme: light;
-      }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --bg: #0c0a09;
-          --panel: #1c1917;
-          --ink: #f5f5f4;
-          --muted: #a8a29e;
-          --line: #44403c;
-          --user: #78350f;
-          --user-s: #fcd34d;
-          --orch: #4c1d95;
-          --orch-s: #d8b4fe;
-          --cli: #1e3a8a;
-          --cli-s: #93c5fd;
-          --agent: #14532d;
-          --agent-s: #86efac;
-          --wait: #7f1d1d;
-          --wait-s: #fca5a5;
-          --breach: #f87171;
-          --flow: #fbbf24;
-          --focus: #60a5fa;
-          color-scheme: dark;
-        }
-      }
-      * {
-        box-sizing: border-box;
-      }
       body {
         margin: 0;
-        background: var(--bg);
-        color: var(--ink);
+        background: #07090d;
+        color: #e7ecf3;
+        font-family: Inter, system-ui, sans-serif;
+      }
+      button {
+        font-family: inherit;
+      }
+      .k-user {
+        --k: #ffc145;
+      }
+      .k-orch {
+        --k: #b794ff;
+      }
+      .k-cli {
+        --k: #4ca8ff;
+      }
+      .k-agent {
+        --k: #34d399;
+      }
+      .k-explore {
+        --k: #7fd8b6;
+      }
+      .k-wait {
+        --k: #ff5d5d;
+      }
+      .k-hand {
+        --k: #f472b6;
+      }
+      .page {
+        min-height: 100vh;
+        box-sizing: border-box;
+        padding: 20px 24px 36px;
+      }
+      .wrap {
+        max-width: 1440px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .row2 {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        align-items: stretch;
+      }
+      .panel {
+        background: #0b0f16;
+        border: 1px solid #1a2230;
+        border-radius: 14px;
+        padding: 16px 18px;
+        box-sizing: border-box;
+        min-width: 0;
+      }
+      .ph {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 14px;
+      }
+      .ph h2 {
+        margin: 0;
         font:
-          14px/1.45 ui-sans-serif,
-          system-ui,
+          600 12px/1 'Space Grotesk',
           sans-serif;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #8b96a8;
+      }
+      .ph h2 span {
+        color: #5e6a7e;
+        letter-spacing: 0.04em;
+        text-transform: none;
+        font:
+          400 12px/1 Inter,
+          sans-serif;
+        margin-left: 8px;
+      }
+      .count {
+        font:
+          500 11px/1 'JetBrains Mono',
+          monospace;
+        color: #7c879b;
       }
       header {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 12px;
-        padding: 12px 16px;
-        border-bottom: 1px solid var(--line);
+        gap: 14px 24px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid #141b26;
       }
-      h1 {
-        font-size: 16px;
-        margin: 0;
-      }
-      h2 {
-        font-size: 13px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--muted);
-        margin: 0 0 8px;
-      }
-      .status {
-        font-size: 12px;
-        color: var(--muted);
-      }
-      .dot {
-        display: inline-block;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--muted);
-        margin-right: 6px;
-        vertical-align: middle;
-      }
-      .dot.on {
-        background: #16a34a;
-      }
-      .jobs {
+      .brand {
         display: flex;
-        gap: 6px;
-        flex-wrap: wrap;
-      }
-      .jobs button,
-      .lane-label {
-        font: inherit;
-        color: inherit;
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        padding: 4px 10px;
-        cursor: pointer;
-      }
-      .jobs button[aria-pressed='true'] {
-        border-color: var(--focus);
-        box-shadow: inset 0 0 0 1px var(--focus);
-      }
-      button:focus-visible {
-        outline: 2px solid var(--focus);
-        outline-offset: 2px;
-      }
-      main {
-        display: grid;
-        grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
-        gap: 16px;
-        padding: 16px;
-      }
-      @media (max-width: 900px) {
-        main {
-          grid-template-columns: minmax(0, 1fr);
-        }
-      }
-      section {
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 12px;
-        min-width: 0;
-      }
-      .stack {
-        display: grid;
-        gap: 16px;
-        align-content: start;
-        min-width: 0;
-      }
-      svg {
-        display: block;
-        width: 100%;
-        height: auto;
-      }
-      .station rect {
-        stroke-width: 1.5;
-        transition: stroke-width 0.2s;
-      }
-      .station text {
-        font-size: 12px;
-        fill: var(--ink);
-        text-anchor: middle;
-        dominant-baseline: middle;
-        pointer-events: none;
-      }
-      .station.active rect {
-        stroke-width: 4;
-      }
-      .station.flash rect {
-        animation: flash 0.9s ease-out;
-      }
-      @keyframes flash {
-        from {
-          stroke-width: 6;
-        }
-        to {
-          stroke-width: 1.5;
-        }
-      }
-      .edge {
-        stroke: var(--line);
-        stroke-width: 1.5;
-        fill: none;
-      }
-      .edge.dotted {
-        stroke-dasharray: 4 4;
-      }
-      .user rect {
-        fill: var(--user);
-        stroke: var(--user-s);
-      }
-      .orch rect {
-        fill: var(--orch);
-        stroke: var(--orch-s);
-      }
-      .cli rect {
-        fill: var(--cli);
-        stroke: var(--cli-s);
-      }
-      .agent rect {
-        fill: var(--agent);
-        stroke: var(--agent-s);
-      }
-      .wait rect {
-        fill: var(--wait);
-        stroke: var(--wait-s);
-      }
-      .packet {
-        fill: var(--focus);
-      }
-      .packet.info {
-        fill: var(--flow);
-      }
-      .timeline {
-        position: relative;
-      }
-      .lane {
-        display: grid;
-        grid-template-columns: 190px minmax(0, 1fr);
-        gap: 8px;
         align-items: center;
-        margin: 3px 0;
+        gap: 12px;
       }
-      .lane-label {
-        text-align: left;
-        font-size: 12px;
-        padding: 3px 8px;
+      .brand svg {
+        fill: none;
+        stroke: #b794ff;
+        stroke-width: 1.6;
+      }
+      .wm {
+        font:
+          700 15px/1 'Space Grotesk',
+          sans-serif;
+        letter-spacing: 0.18em;
+        color: #e7ecf3;
+      }
+      .wm span {
+        color: #b794ff;
+      }
+      .live {
+        --c: #34d399;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font:
+          600 11px/1 'JetBrains Mono',
+          monospace;
+        letter-spacing: 0.12em;
+        color: var(--c);
+        padding: 5px 9px;
+        border: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--c) 7%, transparent);
+        white-space: nowrap;
+      }
+      .live i {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--c);
+        animation: ping 1.6s ease-out infinite;
+      }
+      .live.replay {
+        --c: #b794ff;
+      }
+      .live.recon {
+        --c: #ffc145;
+      }
+      .live.over {
+        --c: #8b96a8;
+      }
+      .live.over i,
+      .live.recon i {
+        animation: none;
+      }
+      .live.recon i {
+        animation: ping 0.8s ease-out infinite;
+      }
+      @keyframes ping {
+        0% {
+          box-shadow: 0 0 0 0 color-mix(in srgb, var(--c) 70%, transparent);
+        }
+        70% {
+          box-shadow: 0 0 0 7px color-mix(in srgb, var(--c) 0%, transparent);
+        }
+        100% {
+          box-shadow: 0 0 0 0 color-mix(in srgb, var(--c) 0%, transparent);
+        }
+      }
+      .jobline {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex: 1 1 320px;
+        min-width: 0;
+      }
+      .jobno {
+        font:
+          600 13px/1 'JetBrains Mono',
+          monospace;
+        color: #0b0714;
+        background: #e7ecf3;
+        padding: 5px 7px;
+        border-radius: 5px;
+      }
+      .jobtitle {
+        font:
+          500 15px/1.3 Inter,
+          sans-serif;
+        color: #e7ecf3;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        min-width: 0;
       }
-      .lane-label[aria-pressed='true'] {
-        border-color: var(--focus);
+      .state {
+        font:
+          600 11px/1 'JetBrains Mono',
+          monospace;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        padding: 5px 8px;
+        border-radius: 5px;
+        white-space: nowrap;
+        color: #8b96a8;
+        border: 1px solid #2a3446;
       }
-      .lane.nested .lane-label {
-        margin-left: 16px;
-        width: calc(100% - 16px);
+      .state.building {
+        color: #4ca8ff;
+        background: rgba(76, 168, 255, 0.12);
+        border-color: rgba(76, 168, 255, 0.35);
       }
-      .track {
-        position: relative;
-        height: 18px;
-        background: color-mix(in srgb, var(--line) 35%, transparent);
-        border-radius: 4px;
+      .state.pr {
+        color: #34d399;
+        background: rgba(52, 211, 153, 0.12);
+        border-color: rgba(52, 211, 153, 0.35);
       }
-      .bar {
-        position: absolute;
-        top: 2px;
-        height: 14px;
-        border-radius: 3px;
-        background: var(--agent);
-        border: 1px solid var(--agent-s);
+      .state.blocked {
+        color: #ff8a8a;
+        background: rgba(255, 93, 93, 0.12);
+        border-color: rgba(255, 93, 93, 0.4);
       }
-      .bar.running {
-        background: repeating-linear-gradient(
-          45deg,
-          var(--agent),
-          var(--agent) 6px,
-          color-mix(in srgb, var(--agent) 60%, var(--panel)) 6px,
-          color-mix(in srgb, var(--agent) 60%, var(--panel)) 12px
-        );
+      .stats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
       }
-      .bar.orch {
-        background: var(--orch);
-        border-color: var(--orch-s);
+      .stat {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        padding: 8px 12px;
+        border: 1px solid #1a2230;
+        border-radius: 10px;
+        background: #0b0f16;
+        min-width: 76px;
       }
-      .tick {
-        position: absolute;
-        top: 0;
-        width: 2px;
-        height: 18px;
-        background: var(--breach);
+      .stat span {
+        font:
+          500 10px/1 'JetBrains Mono',
+          monospace;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: #8b96a8;
       }
-      .mark {
-        position: absolute;
-        top: -2px;
-        width: 1px;
-        height: 22px;
-        background: var(--cli-s);
-        opacity: 0.6;
+      .stat b {
+        font:
+          600 17px/1 'JetBrains Mono',
+          monospace;
+        color: #e7ecf3;
+        font-variant-numeric: tabular-nums;
       }
-      .job-title {
-        font-weight: 600;
-        margin: 10px 0 4px;
+      .stat.alert {
+        border-color: rgba(255, 93, 93, 0.55);
+        background: rgba(255, 93, 93, 0.08);
+        animation: alertin 1.2s ease-out;
       }
-      .muted {
-        color: var(--muted);
+      .stat.alert b,
+      .stat.alert span {
+        color: #ff8a8a;
       }
-      .breach {
-        color: var(--breach);
+      @keyframes alertin {
+        0% {
+          box-shadow: 0 0 0 0 rgba(255, 93, 93, 0.8);
+        }
+        100% {
+          box-shadow: 0 0 0 14px rgba(255, 93, 93, 0);
+        }
       }
-      .list {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        font-size: 12px;
-        font-family: ui-monospace, monospace;
+      .jobs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        flex: 1 1 100%;
       }
-      .list li {
-        padding: 2px 0;
-        border-bottom: 1px dashed color-mix(in srgb, var(--line) 60%, transparent);
-        overflow-wrap: anywhere;
+      .jobs:empty {
+        display: none;
       }
-      .list li.breach {
-        font-weight: 600;
-      }
-      .from {
-        color: var(--flow);
-      }
-      details {
-        margin: 6px 0;
-      }
-      summary {
+      .jobs button {
+        font:
+          500 11px/1 'JetBrains Mono',
+          monospace;
+        color: #aeb8c8;
+        background: transparent;
+        border: 1px solid #2a3446;
+        border-radius: 999px;
+        padding: 7px 11px;
         cursor: pointer;
-        font-weight: 600;
       }
-      pre {
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-        font-size: 12px;
-        background: color-mix(in srgb, var(--line) 25%, transparent);
-        padding: 8px;
-        border-radius: 6px;
-        max-height: 260px;
-        overflow: auto;
-        margin: 6px 0;
+      .jobs button[aria-pressed='true'] {
+        color: #b794ff;
+        border-color: rgba(183, 148, 255, 0.5);
+        background: rgba(183, 148, 255, 0.09);
+      }
+      .jobs button:focus-visible,
+      .follow:focus-visible,
+      .lbtn:focus-visible {
+        outline: 2px solid #b794ff;
+        outline-offset: 2px;
       }
       .legend {
         display: flex;
         flex-wrap: wrap;
-        gap: 10px;
-        font-size: 12px;
-        color: var(--muted);
-        margin-top: 8px;
+        gap: 6px 14px;
+        font:
+          500 11.5px/1 Inter,
+          sans-serif;
+        color: #8b96a8;
       }
-      .legend span::before {
+      .lg {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .lg::before {
         content: '';
-        display: inline-block;
-        width: 10px;
-        height: 10px;
+        width: 9px;
+        height: 9px;
         border-radius: 2px;
-        margin-right: 4px;
-        vertical-align: -1px;
-        border: 1px solid;
+        background: var(--k);
       }
-      .legend .l-user::before {
-        background: var(--user);
-        border-color: var(--user-s);
+      .lg.k-user::before {
+        border-radius: 5px;
       }
-      .legend .l-orch::before {
-        background: var(--orch);
-        border-color: var(--orch-s);
-      }
-      .legend .l-cli::before {
-        background: var(--cli);
-        border-color: var(--cli-s);
-      }
-      .legend .l-agent::before {
-        background: var(--agent);
-        border-color: var(--agent-s);
-      }
-      .legend .l-wait::before {
-        background: var(--wait);
-        border-color: var(--wait-s);
-      }
-      .legend .l-info::before {
-        background: var(--flow);
-        border-color: var(--flow);
+      .lg.k-agent::before {
         border-radius: 50%;
       }
+      .lg.k-wait::before {
+        background: transparent;
+        border: 1.5px dashed var(--k);
+        width: 7px;
+        height: 7px;
+      }
+      .lg.k-hand::before {
+        border-radius: 50%;
+        box-shadow: 0 0 6px var(--k);
+      }
+      .lg.lg-ret::before {
+        background: transparent;
+        border: 2px solid #b794ff;
+        border-right-color: transparent;
+        border-bottom-color: transparent;
+        border-radius: 0;
+        width: 6px;
+        height: 6px;
+      }
+      .scroller {
+        overflow-x: auto;
+        overflow-y: hidden;
+        margin: 0 -6px;
+        padding: 0 6px;
+      }
+      .host {
+        position: relative;
+        width: 960px;
+        height: 392px;
+        margin: 0 auto;
+        background-color: #090c12;
+        background-image: radial-gradient(#1a2230 1px, transparent 1px);
+        background-size: 16px 16px;
+        border-radius: 10px;
+      }
+      .host > svg.edges {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 960px;
+        height: 392px;
+        overflow: visible;
+      }
+      .band {
+        position: absolute;
+        box-sizing: border-box;
+        border: 1px solid #1e2838;
+        border-radius: 14px;
+        background: rgba(183, 148, 255, 0.025);
+      }
+      .band.inner {
+        border-style: dashed;
+        border-color: #26324a;
+        background: rgba(52, 211, 153, 0.03);
+      }
+      .bandlbl {
+        position: absolute;
+        font:
+          600 9.5px/1 'JetBrains Mono',
+          monospace;
+        letter-spacing: 0.16em;
+        color: #7c879b;
+      }
+      .elbl {
+        position: absolute;
+        font:
+          500 10.5px/14px 'JetBrains Mono',
+          monospace;
+        color: #8b96a8;
+        white-space: nowrap;
+      }
+      .e path {
+        fill: none;
+        stroke: #2a3446;
+        stroke-width: 1.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        transition:
+          stroke 0.5s,
+          stroke-width 0.3s;
+      }
+      .e.dotted path {
+        stroke-dasharray: 3 4;
+      }
+      .e.trail path {
+        stroke: rgba(183, 148, 255, 0.45);
+      }
+      .e.on path {
+        stroke: #b794ff;
+        stroke-width: 2;
+        stroke-dasharray: 3 6;
+        animation: flow 0.45s linear infinite;
+        filter: drop-shadow(0 0 3px rgba(183, 148, 255, 0.95));
+      }
+      @keyframes flow {
+        from {
+          stroke-dashoffset: 9;
+        }
+        to {
+          stroke-dashoffset: 0;
+        }
+      }
+      .st {
+        position: absolute;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        padding: 4px 8px;
+        text-align: center;
+        font:
+          500 12.5px/1.2 Inter,
+          sans-serif;
+        color: #aeb8c8;
+        background: #0f141d;
+        border: 1px solid color-mix(in srgb, var(--k) 28%, #1c2430);
+        border-radius: 10px;
+        transition:
+          background 0.5s,
+          border-color 0.5s,
+          color 0.5s;
+      }
+      .st.k-cli {
+        border-radius: 4px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11.5px;
+      }
+      .st.k-user {
+        border-radius: 22px;
+      }
+      .st.k-wait {
+        border-style: dashed;
+        border-color: color-mix(in srgb, var(--k) 55%, #1c2430);
+      }
+      .st span {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+      }
+      .st small {
+        font:
+          400 10px/1.1 'JetBrains Mono',
+          monospace;
+        color: #7c879b;
+      }
+      .st .g {
+        display: block;
+        width: 7px;
+        height: 7px;
+        flex: none;
+        border-radius: 50%;
+        background: var(--k);
+        opacity: 0.55;
+      }
+      .st.k-cli .g {
+        border-radius: 1px;
+      }
+      .st.k-user .g {
+        border-radius: 3px;
+      }
+      .st.done {
+        color: #e7ecf3;
+        border-color: color-mix(in srgb, var(--k) 60%, #1c2430);
+        background: color-mix(in srgb, var(--k) 7%, #0f141d);
+      }
+      .st.done .g {
+        opacity: 0.9;
+      }
+      .st.active {
+        color: #fff;
+        border-color: var(--k);
+        background: color-mix(in srgb, var(--k) 17%, #0f141d);
+        animation: breathe 2.2s ease-in-out infinite;
+      }
+      .st.active small {
+        color: #c9d2df;
+      }
+      .st.active .g {
+        opacity: 1;
+        animation: dot 1.1s ease-in-out infinite;
+      }
+      .st.active::before,
+      .st.active::after {
+        content: '';
+        position: absolute;
+        inset: -1px;
+        border-radius: inherit;
+        border: 1px solid var(--k);
+        pointer-events: none;
+        animation: ripple 2.2s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+      }
+      .st.active::after {
+        animation-delay: 1.1s;
+      }
+      @keyframes breathe {
+        0%,
+        100% {
+          box-shadow:
+            0 0 0 1px var(--k),
+            0 0 12px color-mix(in srgb, var(--k) 30%, transparent);
+        }
+        50% {
+          box-shadow:
+            0 0 0 1px var(--k),
+            0 0 30px color-mix(in srgb, var(--k) 62%, transparent);
+        }
+      }
+      @keyframes ripple {
+        from {
+          inset: -1px;
+          opacity: 0.85;
+        }
+        to {
+          inset: -18px;
+          opacity: 0;
+        }
+      }
+      @keyframes dot {
+        0%,
+        100% {
+          transform: scale(1);
+        }
+        50% {
+          transform: scale(1.6);
+        }
+      }
+      .st.fail {
+        --k: #ff5d5d;
+        color: #fff;
+        border-color: #ff5d5d;
+        background: rgba(255, 93, 93, 0.16);
+        animation:
+          shake 0.45s ease-in-out,
+          failglow 1.4s ease-out;
+      }
+      @keyframes shake {
+        0%,
+        100% {
+          transform: translateX(0);
+        }
+        25% {
+          transform: translateX(-4px);
+        }
+        75% {
+          transform: translateX(4px);
+        }
+      }
+      @keyframes failglow {
+        0% {
+          box-shadow:
+            0 0 0 1px #ff5d5d,
+            0 0 36px rgba(255, 93, 93, 0.8);
+        }
+        100% {
+          box-shadow:
+            0 0 0 1px #ff5d5d,
+            0 0 6px rgba(255, 93, 93, 0.2);
+        }
+      }
+      .st.breach {
+        --k: #ff5d5d;
+        border-color: #ff5d5d;
+        background: rgba(255, 93, 93, 0.16);
+      }
+      .st.flagged {
+        border-color: #ff5d5d;
+      }
+      .ret {
+        position: absolute;
+        z-index: 5;
+        pointer-events: none;
+        transition:
+          left 0.75s cubic-bezier(0.65, 0, 0.35, 1),
+          top 0.75s cubic-bezier(0.65, 0, 0.35, 1),
+          width 0.75s cubic-bezier(0.65, 0, 0.35, 1),
+          height 0.75s cubic-bezier(0.65, 0, 0.35, 1),
+          opacity 0.4s;
+      }
+      .ret.hidden {
+        opacity: 0;
+      }
+      .ret .rf {
+        position: absolute;
+        inset: 0;
+        display: block;
+        border-radius: 14px;
+        background: rgba(183, 148, 255, 0.07);
+        box-shadow: inset 0 0 0 1px rgba(183, 148, 255, 0.18);
+      }
+      .ret .c {
+        position: absolute;
+        display: block;
+        width: 13px;
+        height: 13px;
+        border: 0 solid #b794ff;
+        filter: drop-shadow(0 0 4px rgba(183, 148, 255, 0.9));
+        animation: brk 1.6s ease-in-out infinite;
+      }
+      .ret .tl {
+        left: 0;
+        top: 0;
+        border-left-width: 2px;
+        border-top-width: 2px;
+        border-top-left-radius: 6px;
+        --dx: -3px;
+        --dy: -3px;
+      }
+      .ret .tr {
+        right: 0;
+        top: 0;
+        border-right-width: 2px;
+        border-top-width: 2px;
+        border-top-right-radius: 6px;
+        --dx: 3px;
+        --dy: -3px;
+      }
+      .ret .bl {
+        left: 0;
+        bottom: 0;
+        border-left-width: 2px;
+        border-bottom-width: 2px;
+        border-bottom-left-radius: 6px;
+        --dx: -3px;
+        --dy: 3px;
+      }
+      .ret .br {
+        right: 0;
+        bottom: 0;
+        border-right-width: 2px;
+        border-bottom-width: 2px;
+        border-bottom-right-radius: 6px;
+        --dx: 3px;
+        --dy: 3px;
+      }
+      @keyframes brk {
+        0%,
+        100% {
+          transform: translate(0, 0);
+        }
+        50% {
+          transform: translate(var(--dx), var(--dy));
+        }
+      }
+      .ret .tag {
+        position: absolute;
+        left: -2px;
+        bottom: calc(100% + 7px);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
+        font:
+          500 10.5px/1 'JetBrains Mono',
+          monospace;
+        color: #120a22;
+        background: #b794ff;
+        padding: 4px 7px 4px 5px;
+        border-radius: 5px;
+        box-shadow: 0 0 18px rgba(183, 148, 255, 0.55);
+      }
+      .ret .tag b {
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        background: #120a22;
+        color: #b794ff;
+        padding: 2px 4px;
+        border-radius: 3px;
+      }
+      .pkt {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 9px;
+        height: 9px;
+        margin: -4px 0 0 -4px;
+        border-radius: 50%;
+        background: #f472b6;
+        box-shadow: 0 0 12px 3px rgba(244, 114, 182, 0.75);
+        offset-rotate: 0deg;
+        opacity: 0;
+        z-index: 4;
+        animation: travel 1.5s cubic-bezier(0.45, 0, 0.25, 1) forwards;
+      }
+      .pkt.t2 {
+        width: 5px;
+        height: 5px;
+        margin: -2px 0 0 -2px;
+        animation-delay: 0.09s;
+        box-shadow: 0 0 8px 2px rgba(244, 114, 182, 0.5);
+      }
+      @keyframes travel {
+        0% {
+          offset-distance: 0%;
+          opacity: 0;
+        }
+        12% {
+          opacity: 1;
+        }
+        85% {
+          opacity: 1;
+        }
+        100% {
+          offset-distance: 100%;
+          opacity: 0;
+        }
+      }
+      .feed {
+        display: flex;
+        flex-direction: column-reverse;
+        justify-content: flex-end;
+        height: 452px;
+        overflow: hidden;
+        -webkit-mask-image: linear-gradient(to bottom, #000 78%, transparent);
+        mask-image: linear-gradient(to bottom, #000 78%, transparent);
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 62px 70px minmax(0, 1fr);
+        gap: 8px;
+        align-items: start;
+        padding: 8px 6px;
+        border-bottom: 1px solid #141b26;
+        font:
+          12px/1.4 'JetBrains Mono',
+          monospace;
+        animation: enter 0.55s cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+      @keyframes enter {
+        0% {
+          opacity: 0;
+          transform: translateY(-12px);
+          background: rgba(183, 148, 255, 0.16);
+        }
+        60% {
+          opacity: 1;
+          transform: none;
+        }
+        100% {
+          background: transparent;
+        }
+      }
+      .row .time {
+        color: #7c879b;
+        font-variant-numeric: tabular-nums;
+      }
+      .chip {
+        justify-self: start;
+        padding: 1px 6px;
+        border-radius: 4px;
+        font:
+          500 11px/1.5 'JetBrains Mono',
+          monospace;
+        color: var(--k);
+        background: color-mix(in srgb, var(--k) 13%, transparent);
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .row .msg {
+        color: #c9d2df;
+        overflow-wrap: anywhere;
+      }
+      .row .msg b {
+        font-weight: 600;
+        color: #8b96a8;
+        margin-right: 6px;
+      }
+      .row.ok .msg b {
+        color: #34d399;
+      }
+      .row.fail .msg b {
+        color: #ff8a8a;
+      }
+      .row.hand .msg b {
+        color: #f472b6;
+      }
+      .row.breach {
+        background: rgba(255, 93, 93, 0.09);
+        animation:
+          enter 0.55s cubic-bezier(0.2, 0.8, 0.2, 1),
+          breachrow 1.2s ease-out;
+      }
+      .row.breach .msg {
+        color: #ffb0b0;
+      }
+      .row.breach .msg b {
+        color: #ff5d5d;
+      }
+      @keyframes breachrow {
+        0% {
+          box-shadow: inset 0 0 0 1px #ff5d5d;
+        }
+        100% {
+          box-shadow: inset 0 0 0 1px rgba(255, 93, 93, 0);
+        }
+      }
+      .lanes {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .lane {
+        display: grid;
+        grid-template-columns: 172px minmax(0, 1fr);
+        gap: 14px;
+        align-items: center;
+        min-height: 36px;
+      }
+      .lbtn {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        min-height: 36px;
+        box-sizing: border-box;
+        padding: 0 10px;
+        font:
+          500 12px/1.2 Inter,
+          sans-serif;
+        color: #c9d2df;
+        background: transparent;
+        border: 1px solid #1a2230;
+        border-radius: 8px;
+        text-align: left;
+        cursor: pointer;
+        transition:
+          border-color 0.2s,
+          background 0.2s;
+      }
+      .lbtn .g {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--k);
+        flex: none;
+      }
+      .lbtn:hover {
+        border-color: #2a3446;
+        background: #0f141d;
+      }
+      .lbtn.sel {
+        border-color: #b794ff;
+        color: #fff;
+        background: rgba(183, 148, 255, 0.09);
+      }
+      .lbtn.nest {
+        margin-left: 18px;
+        width: calc(100% - 18px);
+      }
+      .lbtn span.t {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .lbtn .warn-g {
+        margin-left: auto;
+        color: #ff5d5d;
+      }
+      .track {
+        position: relative;
+        height: 16px;
+        background: #0f141d;
+        border-radius: 4px;
+        box-shadow: inset 0 0 0 1px #151c27;
+      }
+      .bar {
+        position: absolute;
+        top: 3px;
+        height: 10px;
+        border-radius: 3px;
+        background: var(--k);
+        opacity: 0.9;
+        min-width: 3px;
+      }
+      .bar.run {
+        background-image: repeating-linear-gradient(
+          -45deg,
+          rgba(255, 255, 255, 0.28) 0 4px,
+          transparent 4px 8px
+        );
+        background-size: 11.31px 11.31px;
+        animation: stripes 0.55s linear infinite;
+        box-shadow: 0 0 10px color-mix(in srgb, var(--k) 55%, transparent);
+      }
+      .bar.run::after {
+        content: '';
+        position: absolute;
+        right: -2px;
+        top: -3px;
+        width: 3px;
+        height: 16px;
+        border-radius: 2px;
+        background: #fff;
+        box-shadow: 0 0 8px var(--k);
+      }
+      @keyframes stripes {
+        to {
+          background-position: 11.31px 0;
+        }
+      }
+      .seg {
+        position: absolute;
+        top: 3px;
+        height: 10px;
+        background: var(--k);
+        opacity: 0.9;
+        min-width: 2px;
+      }
+      .mark {
+        position: absolute;
+        top: 1px;
+        width: 3px;
+        height: 14px;
+        margin-left: -1px;
+        border-radius: 1px;
+        background: #4ca8ff;
+      }
+      .mark.fail {
+        background: #ff5d5d;
+        box-shadow: 0 0 6px #ff5d5d;
+      }
+      .tick {
+        position: absolute;
+        top: -3px;
+        width: 3px;
+        height: 22px;
+        margin-left: -1px;
+        border-radius: 1px;
+        background: #ff5d5d;
+        box-shadow: 0 0 8px #ff5d5d;
+      }
+      .now {
+        position: absolute;
+        top: -5px;
+        bottom: -5px;
+        width: 1px;
+        background: #b794ff;
+        box-shadow: 0 0 6px #b794ff;
+        opacity: 0.8;
+      }
+      .axis {
+        position: relative;
+        height: 14px;
+        font:
+          500 10px/14px 'JetBrains Mono',
+          monospace;
+        color: #7c879b;
+      }
+      .axis span {
+        position: absolute;
+        top: 0;
+        transform: translateX(-50%);
+      }
+      .axis span:first-child {
+        transform: none;
+      }
+      .axis span:last-child {
+        transform: translateX(-100%);
+      }
+      .follow {
+        font:
+          500 11px/1 'JetBrains Mono',
+          monospace;
+        color: #c9d2df;
+        background: transparent;
+        border: 1px solid #2a3446;
+        border-radius: 999px;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+      .follow.on {
+        color: #b794ff;
+        border-color: rgba(183, 148, 255, 0.5);
+      }
+      .pill {
+        font:
+          600 10px/1 'JetBrains Mono',
+          monospace;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        padding: 4px 6px;
+        border-radius: 4px;
+      }
+      .pill.run {
+        color: #34d399;
+        background: rgba(52, 211, 153, 0.13);
+      }
+      .pill.fin {
+        color: #aeb8c8;
+        background: #161d28;
+      }
+      .pill.idle {
+        color: #7c879b;
+        background: #11161f;
+      }
+      .stack {
+        flex: 1 1 340px;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .rtitle {
+        font:
+          600 16px/1.2 'Space Grotesk',
+          sans-serif;
+        color: #e7ecf3;
+      }
+      .rline {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .muted {
+        font:
+          12px/1.3 'JetBrains Mono',
+          monospace;
+        color: #7c879b;
+      }
+      .kv {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 18px;
+        font:
+          12px/1.3 'JetBrains Mono',
+          monospace;
+        color: #8b96a8;
+      }
+      .kv b {
+        color: #e7ecf3;
+        font-weight: 500;
+        font-variant-numeric: tabular-nums;
+      }
+      .prompt {
+        margin: 0;
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: #0f141d;
+        border: 1px solid #161d28;
+        font:
+          12px/1.5 'JetBrains Mono',
+          monospace;
+        color: #c9d2df;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        max-height: 200px;
+        overflow: auto;
+      }
+      .sub {
+        font:
+          600 10px/1 'JetBrains Mono',
+          monospace;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #7c879b;
+      }
+      .files {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font:
+          12px/1.4 'JetBrains Mono',
+          monospace;
+        color: #c9d2df;
+        overflow-wrap: anywhere;
+      }
+      .files li {
+        animation: enter 0.5s ease-out;
+      }
+      .files.plus li::before {
+        content: '+ ';
+        color: #34d399;
+      }
+      .files .from {
+        color: #f472b6;
+      }
+      .files .bad {
+        color: #ffb0b0;
+      }
+      details {
+        border-top: 1px solid #141b26;
+        padding-top: 8px;
+      }
+      summary {
+        cursor: pointer;
+        font:
+          600 10px/1.4 'JetBrains Mono',
+          monospace;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #7c879b;
+        margin-bottom: 8px;
+      }
+      details .files {
+        max-height: 220px;
+        overflow: auto;
+      }
+      .warn {
+        padding: 9px 11px;
+        border-radius: 8px;
+        font:
+          12px/1.45 'JetBrains Mono',
+          monospace;
+        overflow-wrap: anywhere;
+      }
+      .warn.red {
+        background: rgba(255, 93, 93, 0.09);
+        border: 1px solid rgba(255, 93, 93, 0.35);
+        color: #ffb0b0;
+      }
+      .warn.amber {
+        background: rgba(255, 193, 69, 0.07);
+        border: 1px solid rgba(255, 193, 69, 0.3);
+        color: #ffd88a;
+      }
+      .iso {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+      .iso b {
+        font:
+          600 40px/1 'Space Grotesk',
+          sans-serif;
+        color: #34d399;
+        font-variant-numeric: tabular-nums;
+        transition: color 0.4s;
+      }
+      .iso span {
+        font:
+          500 12px/1.4 Inter,
+          sans-serif;
+        color: #8b96a8;
+      }
+      .iso.bad b {
+        color: #ff5d5d;
+        animation: numpop 0.6s cubic-bezier(0.2, 1.6, 0.4, 1);
+      }
+      @keyframes numpop {
+        0% {
+          transform: scale(0.6);
+        }
+        100% {
+          transform: scale(1);
+        }
+      }
       .empty {
-        color: var(--muted);
-        font-style: italic;
+        margin: 0;
+        font:
+          12px/1.4 'JetBrains Mono',
+          monospace;
+        color: #7c879b;
+      }
+      .sr {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+      }
+      @media (max-width: 640px) {
+        .page {
+          padding: 14px 12px 28px;
+        }
+        .lane {
+          grid-template-columns: 116px minmax(0, 1fr);
+          gap: 8px;
+        }
+        .panel {
+          padding: 14px 12px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation: none !important;
+          transition: none !important;
+        }
       }
     </style>
   </head>
   <body>
-    <header>
-      <h1>Factory watch</h1>
-      <span class="status"
-        ><span id="dot" class="dot"></span><span id="mode">Connecting…</span></span
-      >
-      <div class="jobs" id="jobs" role="group" aria-label="Jobs"></div>
-    </header>
-    <main>
-      <div class="stack">
-        <section aria-labelledby="flow-h">
-          <h2 id="flow-h">Flow <span id="flow-job" class="muted"></span></h2>
-          <svg
-            id="flow"
-            viewBox="0 0 900 300"
-            role="img"
-            aria-label="The factory's stations, the active one highlighted"
-          ></svg>
-          <div class="legend">
-            <span class="l-user">User</span><span class="l-orch">Orchestrator</span
-            ><span class="l-cli">CLI</span> <span class="l-agent">Agent</span
-            ><span class="l-wait">Waiting for the user</span
-            ><span class="l-info">Information moving between agents</span>
+    <div class="page">
+      <div class="wrap">
+        <header>
+          <div class="brand">
+            <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+              <path d="M11 1.8 L19 6.4 L19 15.6 L11 20.2 L3 15.6 L3 6.4 Z"></path>
+              <circle cx="11" cy="11" r="3" style="fill: #b794ff; stroke: none"></circle>
+            </svg>
+            <span class="wm">FACTORY<span>/</span>WATCH</span>
+            <span class="live" id="mode"
+              ><i></i><em id="mode-text" style="font-style: normal">CONNECTING</em></span
+            >
           </div>
-        </section>
-        <section aria-labelledby="tl-h">
-          <h2 id="tl-h">Timeline</h2>
-          <div id="timeline" class="timeline"><p class="empty">No job yet.</p></div>
-        </section>
+          <div class="jobline">
+            <span class="jobno" id="jobno">#–</span>
+            <span class="jobtitle" id="jobtitle">No job yet</span>
+            <span class="state" id="jobstate">–</span>
+          </div>
+          <div class="stats">
+            <div class="stat"><span>Elapsed</span><b id="s-elapsed">00:00</b></div>
+            <div class="stat"><span>Attempt</span><b id="s-attempt">0/3</b></div>
+            <div class="stat"><span>Round</span><b id="s-round">0/3</b></div>
+            <div class="stat"><span>Reads</span><b id="s-reads">0</b></div>
+            <div class="stat"><span>Tokens</span><b id="s-tokens">~0</b></div>
+            <div class="stat" id="s-breach-box"><span>Breaches</span><b id="s-breaches">0</b></div>
+          </div>
+          <div class="jobs" id="jobs" role="group" aria-label="Jobs"></div>
+        </header>
+
+        <div class="row2">
+          <section class="panel" aria-labelledby="flow-h" style="flex: 999 1 680px">
+            <div class="ph">
+              <h2 id="flow-h">
+                Flow<span>the orchestrator is wherever the violet brackets are</span>
+              </h2>
+              <div class="legend">
+                <span class="lg k-user">You</span>
+                <span class="lg lg-ret">Orchestrator</span>
+                <span class="lg k-cli">CLI</span>
+                <span class="lg k-agent">Agent</span>
+                <span class="lg k-wait">Waiting on you</span>
+                <span class="lg k-hand">Handoff</span>
+              </div>
+            </div>
+            <p class="sr" id="ret-sr" aria-live="polite"></p>
+            <div class="scroller">
+              <div
+                class="host"
+                id="host"
+                role="img"
+                aria-label="The factory flow, with the active stations lit and the orchestrator marked by violet brackets"
+              ></div>
+            </div>
+          </section>
+
+          <section
+            class="panel"
+            aria-labelledby="feed-h"
+            style="flex: 1 1 340px; display: flex; flex-direction: column"
+          >
+            <div class="ph">
+              <h2 id="feed-h">Live feed</h2>
+              <span class="count" id="feed-count">0 events</span>
+            </div>
+            <div class="feed" id="feed" aria-live="polite"></div>
+          </section>
+        </div>
+
+        <div class="row2">
+          <section class="panel" aria-labelledby="tl-h" style="flex: 999 1 680px">
+            <div class="ph">
+              <h2 id="tl-h">Timeline<span>pick a run to inspect it</span></h2>
+              <span class="count" id="tl-time">job time 00:00</span>
+            </div>
+            <div class="lanes" id="lanes"></div>
+          </section>
+
+          <div class="stack">
+            <section class="panel col" aria-labelledby="run-h">
+              <div class="ph" style="margin-bottom: 0">
+                <h2 id="run-h">Run</h2>
+                <button type="button" class="follow on" id="follow">Following live</button>
+              </div>
+              <div class="col" id="run"></div>
+            </section>
+            <section class="panel col" aria-labelledby="iso-h">
+              <div class="ph" style="margin-bottom: 0"><h2 id="iso-h">Isolation</h2></div>
+              <div class="iso" id="iso">
+                <b id="iso-n">0</b
+                ><span id="iso-text">reads outside an agent's allowed context</span>
+              </div>
+              <ul class="files" id="breaches"></ul>
+            </section>
+          </div>
+        </div>
       </div>
-      <div class="stack">
-        <section aria-labelledby="br-h">
-          <h2 id="br-h">Isolation breaches <span id="br-count"></span></h2>
-          <ul id="breaches" class="list">
-            <li class="empty">None.</li>
-          </ul>
-        </section>
-        <section aria-labelledby="ctx-h">
-          <h2 id="ctx-h">Context</h2>
-          <div id="context"><p class="empty">Select an agent run in the timeline.</p></div>
-        </section>
-        <section aria-labelledby="ho-h">
-          <h2 id="ho-h">Handoffs</h2>
-          <ul id="handoffs" class="list">
-            <li class="empty">None yet.</li>
-          </ul>
-        </section>
-      </div>
-    </main>
-    <script>
-      'use strict'
+    </div>
+
+    <script type="module">
+      import {
+        STATIONS,
+        STATION_IDS,
+        CARD,
+        EDGE_IDS,
+        createJobView,
+        applyEvent,
+        edgeState,
+        phaseOf,
+        reticleBox,
+        runLabel,
+        runTokens,
+        where,
+        actorOf,
+        describe,
+      } from '/state.js'
+
       const params = new URLSearchParams(location.search)
       const replayJob = params.get('job')
       const speed = Number(params.get('speed') || 0)
       const replaying = Boolean(replayJob && speed > 0)
-
-      // ---- The flow: stations and edges, as in factory/README.md -------------------------------
-      const STATIONS = {
-        ready: { label: 'factory:ready', x: 70, y: 40, kind: 'user' },
-        start: { label: '/factory', x: 200, y: 40, kind: 'orch' },
-        wt: { label: 'Worktree', x: 330, y: 40, kind: 'cli' },
-        test: { label: 'Test agent', x: 460, y: 40, kind: 'agent' },
-        red: { label: 'Valid red?', x: 600, y: 40, kind: 'cli' },
-        build: { label: 'Build agent', x: 600, y: 140, kind: 'agent' },
-        checks: { label: 'Checks', x: 460, y: 140, kind: 'cli' },
-        gate: { label: 'Gate', x: 330, y: 140, kind: 'cli' },
-        eval: { label: 'Evaluator', x: 200, y: 105, kind: 'agent' },
-        tqr: { label: 'Test reviewer', x: 200, y: 175, kind: 'agent' },
-        verdict: { label: 'Findings?', x: 70, y: 140, kind: 'orch' },
-        atfix: { label: 'AT fix', x: 460, y: 245, kind: 'agent' },
-        pr: { label: 'PR', x: 70, y: 245, kind: 'cli' },
-        dr: { label: 'Decision Request', x: 790, y: 140, kind: 'wait' },
-      }
-      const EDGES = [
-        ['ready', 'start'],
-        ['start', 'wt'],
-        ['wt', 'test'],
-        ['test', 'red'],
-        ['red', 'build'],
-        ['red', 'test'],
-        ['build', 'checks'],
-        ['checks', 'build'],
-        ['checks', 'gate'],
-        ['gate', 'build'],
-        ['gate', 'eval'],
-        ['gate', 'tqr'],
-        ['eval', 'verdict'],
-        ['tqr', 'verdict'],
-        ['verdict', 'build'],
-        ['verdict', 'atfix'],
-        ['atfix', 'checks'],
-        ['verdict', 'pr'],
-        ['build', 'dr', true],
-        ['verdict', 'dr', true],
-      ]
-      const ROLE_STATION = {
-        'factory-test': 'test',
-        'factory-build': 'build',
-        'factory-evaluator': 'eval',
-        'factory-test-reviewer': 'tqr',
-        orchestrator: 'verdict',
-        cli: 'gate',
-      }
-      const CLI_MOVES = {
-        'job.started': { flash: 'wt', edges: [['start', 'wt']] },
-        'job.resumed': { flash: 'start', edges: [] },
-        'red.accepted': { flash: 'red', edges: [['red', 'build']] },
-        'red.rejected': { flash: 'red', edges: [['red', 'test']] },
-        'checks.started': { flash: 'checks', edges: [['build', 'checks']] },
-        'checks.passed': { flash: 'checks', edges: [['checks', 'gate']] },
-        'checks.failed': { flash: 'checks', edges: [['checks', 'build']] },
-        'gate.passed': {
-          flash: 'gate',
-          edges: [
-            ['gate', 'eval'],
-            ['gate', 'tqr'],
-          ],
-        },
-        'gate.rejected': { flash: 'gate', edges: [['gate', 'build']] },
-        round: { flash: 'verdict', edges: [['verdict', 'build']] },
-        atfix: { flash: 'atfix', edges: [['atfix', 'checks']] },
-        blocked: { flash: 'dr', edges: [['verdict', 'dr']] },
-        'pr.opened': { flash: 'pr', edges: [['verdict', 'pr']] },
-      }
-      const W = 120,
-        H = 34
-      const svgNS = 'http://www.w3.org/2000/svg'
-      const flow = document.getElementById('flow')
-      const el = (name, attrs = {}, parent) => {
-        const node = document.createElementNS(svgNS, name)
-        for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v)
-        if (parent) parent.appendChild(node)
-        return node
-      }
-      const edgeLayer = el('g', {}, flow),
-        stationLayer = el('g', {}, flow),
-        packetLayer = el('g', {}, flow)
-      for (const [from, to, dotted] of EDGES) {
-        const a = STATIONS[from],
-          b = STATIONS[to]
-        el(
-          'line',
-          { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: dotted ? 'edge dotted' : 'edge' },
-          edgeLayer,
-        )
-      }
-      const stationNodes = {}
-      for (const [id, s] of Object.entries(STATIONS)) {
-        const g = el('g', { class: `station ${s.kind}` }, stationLayer)
-        el('rect', { x: s.x - W / 2, y: s.y - H / 2, width: W, height: H, rx: 8 }, g)
-        const t = el('text', { x: s.x, y: s.y }, g)
-        t.textContent = s.label
-        stationNodes[id] = g
-      }
-      function flash(id) {
-        const g = stationNodes[id]
-        if (!g) return
-        g.classList.remove('flash')
-        void g.getBoundingClientRect()
-        g.classList.add('flash')
-      }
-      function send(from, to, info = false) {
-        const a = STATIONS[from],
-          b = STATIONS[to]
-        if (!a || !b || from === to) return
-        const dot = el(
-          'circle',
-          { r: info ? 6 : 5, class: info ? 'packet info' : 'packet' },
-          packetLayer,
-        )
-        const t0 = performance.now(),
-          duration = 900
-        const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
-        if (reduced) {
-          dot.setAttribute('cx', b.x)
-          dot.setAttribute('cy', b.y)
-          setTimeout(() => dot.remove(), 600)
-          return
-        }
-        const step = (now) => {
-          const k = Math.min((now - t0) / duration, 1),
-            e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2
-          const bend = info ? Math.sin(Math.PI * e) * 30 : 0
-          dot.setAttribute('cx', a.x + (b.x - a.x) * e)
-          dot.setAttribute('cy', a.y + (b.y - a.y) * e - bend)
-          if (k < 1) requestAnimationFrame(step)
-          else dot.remove()
-        }
-        requestAnimationFrame(step)
-      }
-
-      // ---- State ------------------------------------------------------------------------------
-      const jobs = new Map() // number -> { info, runs: Map, order: [], marks: [], breaches: [], handoffs: [] }
-      let selectedJob = replayJob ? Number(replayJob) : null
-      let selectedRun = null
-      let clock = replaying ? null : Date.now() // replay moves it; live follows real time
-
-      function jobOf(n) {
-        if (!jobs.has(n))
-          jobs.set(n, {
-            info: null,
-            runs: new Map(),
-            order: [],
-            marks: [],
-            breaches: [],
-            handoffs: [],
-          })
-        if (selectedJob === null) selectedJob = n
-        return jobs.get(n)
-      }
-      function runOf(job, ev) {
-        const id = ev.agent ? ev.agent.id : 'orchestrator'
-        if (!job.runs.has(id)) {
-          job.runs.set(id, {
-            id,
-            type: ev.agent ? ev.agent.type : 'orchestrator',
-            role: ev.role,
-            parent: ev.parent,
-            start: Date.parse(ev.t),
-            end: null,
-            prompt: null,
-            description: null,
-            instructions: [],
-            reads: [],
-            writes: [],
-            denied: [],
-            searches: [],
-            bash: [],
-            changed: [],
-          })
-          job.order.push(id)
-        }
-        const run = job.runs.get(id)
-        if (ev.role && !run.role) run.role = ev.role
-        if (ev.parent && !run.parent) run.parent = ev.parent
-        return run
-      }
-      const stationOfRun = (run) => ROLE_STATION[run.role || run.type] || null
-      const short = (p) => (p ? p.replace(/^.*\/\.claude\/worktrees\/[^/]+\//, '') : '')
-      const where = (target) =>
-        target
-          ? target.area === 'job'
-            ? `job:${target.path}`
-            : target.area === 'repo'
-              ? target.path
-              : `⚠ ${target.path}`
-          : ''
-
-      function apply(ev) {
-        const job = jobOf(ev.job)
-        const time = Date.parse(ev.t)
-        if (ev.source === 'cli') {
-          job.marks.push({ t: time, kind: ev.kind })
-          const move = CLI_MOVES[ev.kind]
-          if (move && ev.job === selectedJob) {
-            flash(move.flash)
-            for (const [a, b] of move.edges) send(a, b)
-          }
-          return
-        }
-        const run = runOf(job, ev)
-        switch (ev.kind) {
-          case 'agent.start':
-            run.start = time
-            run.prompt = ev.detail && ev.detail.prompt
-            run.description = ev.detail && ev.detail.description
-            if (ev.job === selectedJob && stationOfRun(run)) flash(stationOfRun(run))
-            break
-          case 'agent.stop':
-            run.end = time
-            run.changed = (ev.detail && ev.detail.changed) || []
-            break
-          case 'instructions':
-            run.instructions.push(ev)
-            break
-          case 'read':
-            run.reads.push(ev)
-            if (ev.breach) job.breaches.push({ ev, run })
-            if (ev.from) {
-              const toStation = stationOfRun(run),
-                fromStation = ROLE_STATION[ev.from]
-              job.handoffs.push({ ev, run })
-              if (ev.job === selectedJob && fromStation && toStation)
-                send(fromStation, toStation, true)
-            }
-            break
-          case 'write':
-            run.writes.push(ev)
-            break
-          case 'write.denied':
-            run.denied.push(ev)
-            break
-          case 'search':
-            run.searches.push(ev)
-            break
-          case 'bash':
-            run.bash.push(ev)
-            break
-          case 'bash.files':
-            run.changed.push(
-              ...((ev.detail && ev.detail.files) || []).map((path) => ({ status: 'B', path })),
-            )
-            break
-        }
-      }
-
-      // ---- Rendering ----------------------------------------------------------------------------
+      const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
+      const $ = (id) => document.getElementById(id)
       const esc = (s) =>
         String(s ?? '').replace(
           /[&<>"']/g,
           (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
         )
-      let pending = false
-      function render() {
-        if (!pending) {
-          pending = true
-          requestAnimationFrame(() => {
-            pending = false
-            draw()
-          })
+
+      // ---- The map ---------------------------------------------------------------------------
+      // Each edge is a few orthogonal segments in map pixels; an arrow marks where it ends.
+      const EDGE_PATHS = {
+        e1: [['M136 56H180', 1]],
+        e2: [['M296 56H340', 1]],
+        e3: [['M456 56H500', 1]],
+        e4: [['M616 49H660', 1]],
+        e5: [['M664 63H620', 1]],
+        e6: [['M720 78V170', 1]],
+        e7: [['M664 189H620', 1]],
+        e8: [['M616 203H660', 1]],
+        e9: [['M504 196H460', 1]],
+        e10: [['M344 196H320'], ['M320 160V232'], ['M320 160H300', 1], ['M320 232H300', 1]],
+        e11: [['M184 160H160'], ['M184 232H160'], ['M160 160V232'], ['M160 196H140', 1]],
+        e12: [['M99 218V286'], ['M99 286H720'], ['M720 286V222', 1]],
+        e13: [['M440 286V340'], ['M440 340H500', 1]],
+        e14: [['M560 318V222', 1]],
+        e15: [['M61 218V314', 1]],
+        e16: [['M136 340H180', 1]],
+        e17: [['M776 196H820', 1]],
+        e18: [['M776 56H880'], ['M880 56V170', 1]],
+      }
+      const DOTTED = new Set(['e17', 'e18'])
+      const SVG = 'http://www.w3.org/2000/svg'
+      const host = $('host')
+      const add = (html) => host.insertAdjacentHTML('beforeend', html)
+
+      add(`<div class="band" style="left:8px;top:118px;width:792px;height:194px"></div>
+        <div class="band inner" style="left:488px;top:150px;width:300px;height:92px"></div>
+        <div class="bandlbl" style="left:20px;top:128px">OUTER LOOP · INDEPENDENT REVIEW</div>
+        <div class="bandlbl" style="left:498px;top:158px">INNER LOOP</div>`)
+
+      const edges = document.createElementNS(SVG, 'svg')
+      edges.setAttribute('class', 'edges')
+      edges.setAttribute('aria-hidden', 'true')
+      edges.innerHTML =
+        '<defs><marker id="ah" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#2A3446" stroke="none" style="fill:context-stroke"></path></marker></defs>'
+      const edgeNodes = {}
+      for (const id of EDGE_IDS) {
+        const g = document.createElementNS(SVG, 'g')
+        g.setAttribute('class', `e${DOTTED.has(id) ? ' dotted' : ''}`)
+        for (const [d, arrow] of EDGE_PATHS[id]) {
+          const path = document.createElementNS(SVG, 'path')
+          path.setAttribute('d', d)
+          if (arrow) path.setAttribute('marker-end', 'url(#ah)')
+          g.appendChild(path)
+        }
+        edges.appendChild(g)
+        edgeNodes[id] = g
+      }
+      host.appendChild(edges)
+
+      const stationNodes = {}
+      const stationClass = {}
+      for (const id of STATION_IDS) {
+        const s = STATIONS[id]
+        const node = document.createElement('div')
+        node.className = `st k-${s.kind}`
+        node.style.cssText = `left:${s.x}px;top:${s.y}px;width:${CARD.w}px;height:${CARD.h}px`
+        node.innerHTML = `<i class="g"></i><span>${esc(s.label)}${s.sub ? `<small data-sub>${esc(s.sub)}</small>` : ''}</span>`
+        host.appendChild(node)
+        stationNodes[id] = node
+        stationClass[id] = node.className
+      }
+      add(`<div class="elbl" style="left:732px;top:118px">red commit</div>
+        <div class="elbl" style="left:73px;top:252px">approve</div>
+        <div class="elbl" style="left:300px;top:294px">findings with evidence</div>`)
+      const ret = document.createElement('div')
+      ret.className = 'ret hidden'
+      ret.setAttribute('aria-hidden', 'true')
+      ret.innerHTML =
+        '<span class="rf"></span><span class="c tl"></span><span class="c tr"></span><span class="c bl"></span><span class="c br"></span><span class="tag"><b>ORCH</b><em id="ret-what" style="font-style:normal"></em></span>'
+      host.appendChild(ret)
+      const retWhat = $('ret-what')
+
+      // A handoff comet: pink, along a curve from the station that wrote to the one that reads.
+      const centre = (id) => ({ x: STATIONS[id].x + CARD.w / 2, y: STATIONS[id].y + CARD.h / 2 })
+      function comet(from, to) {
+        if (reduced) return
+        const a = centre(from)
+        const b = centre(to)
+        const dx = b.x - a.x
+        const dy = b.y - a.y
+        const path =
+          Math.abs(dy) < 10
+            ? `M ${a.x} ${a.y} C ${a.x + dx * 0.25} ${a.y - 70}, ${a.x + dx * 0.75} ${b.y - 70}, ${b.x} ${b.y}`
+            : `M ${a.x} ${a.y} C ${a.x} ${a.y + dy * 0.5}, ${b.x} ${a.y + dy * 0.5}, ${b.x} ${b.y}`
+        for (const extra of ['', ' t2']) {
+          const dot = document.createElement('span')
+          dot.className = `pkt${extra}`
+          dot.style.offsetPath = `path('${path}')`
+          host.appendChild(dot)
+          setTimeout(() => dot.remove(), 1900)
         }
       }
 
-      function draw() {
-        // Jobs
-        const jobsEl = document.getElementById('jobs')
-        jobsEl.innerHTML = ''
-        for (const [n, job] of [...jobs].sort((a, b) => a[0] - b[0])) {
-          const b = document.createElement('button')
-          b.type = 'button'
-          b.setAttribute('aria-pressed', String(n === selectedJob))
-          const state = job.info ? job.info.state.replace('_', ' ') : '…'
-          b.textContent = `#${n} · ${state}${job.breaches.length ? ` · ${job.breaches.length} ⚠` : ''}`
-          b.onclick = () => {
-            selectedJob = n
-            selectedRun = null
-            render()
-          }
-          jobsEl.appendChild(b)
-        }
-        const job = jobs.get(selectedJob)
-        document.getElementById('flow-job').textContent =
-          job && job.info ? `· #${selectedJob} ${job.info.title}` : ''
+      // ---- State -----------------------------------------------------------------------------
+      const views = new Map()
+      let selectedJob = replayJob ? Number(replayJob) : null
+      let selectedRun = null // null: follow the live agent
+      let connection = 'connecting' // connecting | open | recon
+      let replayDone = false
+      let clock = Date.now() // replay time while replaying, wall time otherwise
+      const viewOf = (n) => {
+        if (!views.has(n)) views.set(n, createJobView(n))
+        return views.get(n)
+      }
 
-        // Active stations
-        const active = new Set()
-        if (job)
-          for (const run of job.runs.values())
-            if (run.end === null && run.id !== 'orchestrator') {
-              const s = stationOfRun(run)
-              if (s) active.add(s)
+      function ingest(ev) {
+        const view = viewOf(ev.job)
+        const effects = applyEvent(view, ev)
+        const fresh = replaying || Date.now() - Date.parse(ev.t) < 15000
+        if (effects.comet && fresh && ev.job === selectedJob) {
+          comet(effects.comet.from, effects.comet.to)
+        }
+        dirty = true
+      }
+
+      // ---- Drawing ---------------------------------------------------------------------------
+      const pad = (n) => String(n).padStart(2, '0')
+      const mmss = (ms) => {
+        const s = Math.max(0, Math.floor(ms / 1000))
+        const h = Math.floor(s / 3600)
+        return h
+          ? `${h}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`
+          : `${pad(Math.floor(s / 60))}:${pad(s % 60)}`
+      }
+      const clockTime = (t) =>
+        new Date(t).toLocaleTimeString([], { hour12: false, timeZone: undefined })
+      const tokensText = (n) =>
+        n >= 1000 ? `~${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : `~${n}`
+      const STATE_LABEL = { building: 'Building', blocked: 'Blocked', pr_open: 'PR open' }
+      const STATE_CLASS = { building: 'building', blocked: 'blocked', pr_open: 'pr' }
+      const edgeWindow = replaying ? Math.max(3000, 3000 * speed) : 6000
+
+      let dirty = true
+      let shown = { job: null, rev: -1, run: undefined, follow: undefined }
+
+      function drawMode() {
+        const el = $('mode')
+        const text = $('mode-text')
+        if (connection === 'recon') {
+          el.className = 'live recon'
+          text.textContent = 'RECONNECTING'
+        } else if (replaying) {
+          const done = replayDone
+          el.className = `live ${done ? 'over' : 'replay'}`
+          text.textContent = done ? `REPLAYED #${replayJob}` : `REPLAYING #${replayJob} · ${speed}×`
+        } else if (connection === 'open') {
+          el.className = 'live'
+          text.textContent = 'LIVE'
+        } else {
+          el.className = 'live recon'
+          text.textContent = 'CONNECTING'
+        }
+      }
+
+      const running = (view) => phaseOf(view) === 'building'
+      const endOf = (view) => (running(view) ? Math.max(clock, view.last) : view.last)
+
+      function drawHeader(view) {
+        const jobsEl = $('jobs')
+        const key = [...views]
+          .map(([n, v]) => `${n}:${v.info?.state ?? ''}:${phaseOf(v)}:${v.breaches.length}`)
+          .join('|')
+        if (jobsEl.dataset.key !== `${key}@${selectedJob}`) {
+          jobsEl.dataset.key = `${key}@${selectedJob}`
+          jobsEl.innerHTML = ''
+          if (views.size > 1 || !replaying) {
+            for (const [n, v] of [...views].toSorted((a, b) => a[0] - b[0])) {
+              if (views.size < 2) break
+              const b = document.createElement('button')
+              b.type = 'button'
+              b.setAttribute('aria-pressed', String(n === selectedJob))
+              const phase = v.rev || v.info ? phaseOf(v).replace('_', ' ') : '…'
+              b.textContent = `#${n} · ${phase}${v.breaches.length ? ` · ${v.breaches.length} ⚠` : ''}`
+              b.onclick = () => {
+                selectedJob = n
+                selectedRun = null
+                dirty = true
+                drawAll()
+              }
+              jobsEl.appendChild(b)
             }
-        if (job && job.info && job.info.state === 'blocked') active.add('dr')
-        if (job && job.info && job.info.state === 'pr_open') active.add('pr')
-        for (const [id, g] of Object.entries(stationNodes))
-          g.classList.toggle('active', active.has(id))
-
-        drawTimeline()
-        drawBreaches(job)
-        drawHandoffs(job)
-        drawContext(job)
+          }
+        }
+        $('jobno').textContent = view ? `#${view.number}` : '#–'
+        $('jobtitle').textContent = view?.info?.title ?? (view ? '' : 'No job yet')
+        const phase = view ? phaseOf(view) : null
+        const st = $('jobstate')
+        st.textContent = phase ? STATE_LABEL[phase] : '–'
+        st.className = `state ${phase ? STATE_CLASS[phase] : ''}`
+        const t0 = view?.t0
+        $('s-elapsed').textContent = t0 === null || !view ? '00:00' : mmss(endOf(view) - t0)
+        $('s-attempt').textContent = `${view?.attempt ?? 0}/3`
+        $('s-round').textContent = `${view?.round ?? 0}/3`
+        $('s-reads').textContent = String(view?.readCount ?? 0)
+        $('s-tokens').textContent = tokensText(view?.tokens ?? 0)
+        const breaches = view?.breaches.length ?? 0
+        $('s-breaches').textContent = String(breaches)
+        const box = $('s-breach-box')
+        const wasAlert = box.classList.contains('alert')
+        box.classList.toggle('alert', breaches > 0)
+        if (breaches > 0 && !wasAlert) {
+          box.style.animation = 'none'
+          void box.offsetWidth
+          box.style.animation = ''
+        }
       }
 
-      function drawTimeline() {
-        const tl = document.getElementById('timeline')
-        const shown = [...jobs].sort((a, b) => a[0] - b[0]).slice(-3)
-        if (!shown.length) {
-          tl.innerHTML = '<p class="empty">No job yet.</p>'
+      function drawMap(view) {
+        const t = view ?? createJobView(0)
+        for (const id of EDGE_IDS) {
+          const state = view ? edgeState(view, id, clock, edgeWindow) : 'idle'
+          const cls = `e${DOTTED.has(id) ? ' dotted' : ''}${state === 'idle' ? '' : ` ${state}`}`
+          if (edgeNodes[id].getAttribute('class') !== cls) edgeNodes[id].setAttribute('class', cls)
+        }
+        for (const id of STATION_IDS) {
+          const base = `st k-${STATIONS[id].kind}`
+          const state = t.stations[id]
+          const flagged = t.flagged.has(id)
+          let cls = base
+          if (state === 'active') cls += flagged ? ' active breach' : ' active'
+          else if (state === 'done') cls += flagged ? ' done flagged' : ' done'
+          else if (state === 'fail') cls += ' fail'
+          else if (flagged) cls += ' flagged'
+          if (stationClass[id] !== cls) {
+            stationClass[id] = cls
+            stationNodes[id].className = cls
+          }
+          if (id === 'build') {
+            const small = stationNodes[id].querySelector('[data-sub]')
+            const text = t.attempt ? `sonnet · ${t.attempt}/3` : 'sonnet'
+            if (small && small.textContent !== text) small.textContent = text
+          }
+        }
+        const live = view && view.rev > 0
+        ret.classList.toggle('hidden', !live)
+        if (live) {
+          const box = reticleBox(t.reticle.at)
+          ret.style.left = `${box.x}px`
+          ret.style.top = `${box.y}px`
+          ret.style.width = `${box.w}px`
+          ret.style.height = `${box.h}px`
+          if (retWhat.textContent !== t.reticle.what) {
+            retWhat.textContent = t.reticle.what
+            $('ret-sr').textContent =
+              `Orchestrator at ${t.reticle.at.map((id) => STATIONS[id].label).join(' and ')}: ${t.reticle.what}`
+          }
+        }
+      }
+
+      // The feed keeps the newest rows at the top: it is a column-reverse flex, so the DOM holds
+      // them oldest first and a new row is appended.
+      const feedEl = $('feed')
+      let feedShown = { job: null, total: 0 }
+      const FEED_DOM_CAP = 300
+      function feedRow(ev) {
+        const actor = actorOf(ev)
+        const d = describe(ev)
+        const row = document.createElement('div')
+        row.className = `row${d.cls ? ` ${d.cls}` : ''}`
+        row.innerHTML = `<span class="time">${esc(clockTime(Date.parse(ev.t)))}</span><span class="chip ${actor.k}">${esc(actor.who)}</span><span class="msg"><b>${esc(d.kind)}</b>${esc(d.msg)}</span>`
+        return row
+      }
+      function drawFeed(view) {
+        if (!view) return
+        if (feedShown.job !== view.number || view.feedTotal < feedShown.total) {
+          feedEl.replaceChildren(...view.feed.map(feedRow))
+        } else if (view.feedTotal > feedShown.total) {
+          const fresh = Math.min(view.feedTotal - feedShown.total, view.feed.length)
+          for (const ev of view.feed.slice(view.feed.length - fresh)) {
+            const row = feedRow(ev)
+            feedEl.appendChild(row)
+          }
+          while (feedEl.childElementCount > FEED_DOM_CAP) feedEl.firstElementChild.remove()
+        }
+        feedShown = { job: view.number, total: view.feedTotal }
+        $('feed-count').textContent = `${view.feedTotal} events`
+      }
+
+      // ---- Timeline --------------------------------------------------------------------------
+      const lanesEl = $('lanes')
+      let laneKey = ''
+      let laneNodes = {}
+      function lanesOf(view) {
+        const runs = [...view.runs.values()].filter((r) => r.started && r.id !== 'orchestrator')
+        const out = []
+        const ids = new Set(runs.map((r) => r.id))
+        for (const run of runs) {
+          if (run.parent && ids.has(run.parent)) continue
+          out.push({ run, depth: 0 })
+          for (const child of runs) if (child.parent === run.id) out.push({ run: child, depth: 1 })
+        }
+        return out
+      }
+      const trackHtml = (cls) => `<div class="track" data-track="${cls}"></div>`
+      function drawTimeline(view) {
+        if (!view || view.t0 === null) {
+          if (laneKey !== 'none') {
+            laneKey = 'none'
+            lanesEl.innerHTML = '<p class="empty">No job yet.</p>'
+          }
+          $('tl-time').textContent = 'job time 00:00'
           return
         }
-        // A job that is not building ends at its last event; only a running one follows the clock.
-        const edges = new Map()
-        let t0 = Infinity,
-          t1 = 0
-        for (const [n, job] of shown) {
-          let last = 0
-          for (const run of job.runs.values()) {
-            t0 = Math.min(t0, run.start)
-            last = Math.max(last, run.start, run.end || 0)
-          }
-          for (const m of job.marks) {
-            t0 = Math.min(t0, m.t)
-            last = Math.max(last, m.t)
-          }
-          const following =
-            clock !== null && (replaying || !job.info || job.info.state === 'building')
-          edges.set(n, following ? Math.max(last, clock) : last)
-          t1 = Math.max(t1, edges.get(n))
-        }
-        const span = Math.max(t1 - t0, 1000)
-        const pct = (t) => `${((t - t0) / span) * 100}%`
-        let html = ''
-        for (const [n, job] of shown) {
-          html += `<div class="job-title">#${n} ${esc(job.info ? job.info.title : '')}</div>`
-          const builds = [...job.runs.values()].filter(
-            (r) => r.role === 'factory-build' && !r.parent,
+        const lanes = lanesOf(view)
+        const selId = shown.activeRun
+        const key = `${view.number}|${lanes.map((l) => `${l.run.id}:${l.depth}`).join(',')}|${selId}`
+        if (key !== laneKey) {
+          laneKey = key
+          laneNodes = {}
+          const lane = (label, track) => `<div class="lane">${label}${track}</div>`
+          let html = lane(
+            `<button type="button" class="lbtn k-orch${selId === 'orchestrator' ? ' sel' : ''}" data-run="orchestrator"><i class="g"></i><span class="t">Orchestrator</span></button>`,
+            trackHtml('orch'),
           )
-          const ordered = []
-          const children = (id) =>
-            job.order.map((k) => job.runs.get(k)).filter((r) => r.parent === id)
-          for (const id of job.order) {
-            const run = job.runs.get(id)
-            if (!run.parent) {
-              ordered.push([run, 0])
-              for (const c of children(id)) ordered.push([c, 1])
+          html += lane(
+            '<div class="lbtn k-cli" style="cursor:default"><i class="g"></i><span class="t">CLI steps</span></div>',
+            trackHtml('cli'),
+          )
+          for (const { run, depth } of lanes) {
+            const k = depth ? 'k-explore' : 'k-agent'
+            html += lane(
+              `<button type="button" class="lbtn ${k}${depth ? ' nest' : ''}${selId === run.id ? ' sel' : ''}" data-run="${esc(run.id)}"><i class="g"></i><span class="t">${esc(runLabel(view, run))}</span><span class="warn-g" data-warn="${esc(run.id)}"></span></button>`,
+              trackHtml(`run:${run.id}`),
+            )
+          }
+          html += '<div class="lane"><div></div><div class="axis" id="axis"></div></div>'
+          lanesEl.innerHTML = html
+          for (const b of lanesEl.querySelectorAll('button[data-run]'))
+            b.onclick = () => {
+              selectedRun = b.dataset.run
+              dirty = true
+              drawAll()
             }
-          }
-          for (const [run, depth] of ordered) {
-            const attempt =
-              run.role === 'factory-build' && !run.parent
-                ? ` · attempt ${builds.indexOf(run) + 1}`
-                : ''
-            const label = `${run.type.replace('factory-', '')}${attempt}`
-            const end = run.end || edges.get(n)
-            const ticks = run.reads
-              .filter((r) => r.breach)
-              .map(
-                (r) =>
-                  `<span class="tick" style="left:${pct(Date.parse(r.t))}" title="${esc(r.breach)}"></span>`,
-              )
-              .join('')
-            const marks =
-              depth === 0 && run.id === 'orchestrator'
-                ? job.marks
-                    .map(
-                      (m) =>
-                        `<span class="mark" style="left:${pct(m.t)}" title="${esc(m.kind)}"></span>`,
-                    )
-                    .join('')
-                : ''
-            html +=
-              `<div class="lane${depth ? ' nested' : ''}"><button type="button" class="lane-label" data-job="${n}" data-run="${esc(run.id)}" aria-pressed="${n === selectedJob && run.id === selectedRun}">${esc(label)}${run.reads.some((r) => r.breach) ? ' <span class="breach">⚠</span>' : ''}</button>` +
-              `<div class="track">${marks}<span class="bar${run.end ? '' : ' running'}${run.id === 'orchestrator' ? ' orch' : ''}" style="left:${pct(run.start)};width:calc(${((end - run.start) / span) * 100}% + 2px)" title="${esc(label)}"></span>${ticks}</div></div>`
-          }
+          for (const t of lanesEl.querySelectorAll('[data-track]')) laneNodes[t.dataset.track] = t
         }
-        tl.innerHTML = html
-        for (const b of tl.querySelectorAll('.lane-label'))
-          b.onclick = () => {
-            selectedJob = Number(b.dataset.job)
-            selectedRun = b.dataset.run
-            render()
+        const t0 = view.t0
+        const end = endOf(view)
+        const span = Math.max(end - t0, 30000)
+        const pct = (t) => `${(Math.max(0, Math.min(span, t - t0)) / span) * 100}%`
+        const widthPct = (a, b) => `${(Math.max(0, Math.min(span, b - a)) / span) * 100}%`
+        const nowLine = running(view) ? `<span class="now" style="left:${pct(end)}"></span>` : ''
+
+        laneNodes.orch.innerHTML =
+          view.segments
+            .map(
+              (s) =>
+                `<span class="seg ${{ orch: 'k-orch', cli: 'k-cli', agent: 'k-agent', wait: 'k-wait' }[s.mode]}" style="left:${pct(s.from)};width:${widthPct(s.from, s.to ?? end)}"></span>`,
+            )
+            .join('') + nowLine
+        laneNodes.cli.innerHTML =
+          view.marks
+            .map(
+              (m) =>
+                `<span class="mark${m.fail ? ' fail' : ''}" style="left:${pct(m.t)}" title="${esc(m.kind)}"></span>`,
+            )
+            .join('') + nowLine
+        for (const { run, depth } of lanes) {
+          const track = laneNodes[`run:${run.id}`]
+          if (!track) continue
+          let bar = track.querySelector('.bar')
+          if (!bar) {
+            track.innerHTML =
+              '<span class="bar"></span><span data-ticks></span><span data-now></span>'
+            bar = track.querySelector('.bar')
           }
+          const live = run.end === null && running(view)
+          const cls = `bar ${depth ? 'k-explore' : 'k-agent'}${live ? ' run' : ''}`
+          if (bar.className !== cls) bar.className = cls
+          const to = run.end ?? end
+          bar.style.left = pct(run.start)
+          bar.style.width = widthPct(run.start, to)
+          const bad = run.reads.filter((r) => r.breach)
+          track.querySelector('[data-ticks]').innerHTML = bad
+            .map(
+              (r) =>
+                `<span class="tick" style="left:${pct(Date.parse(r.t))}" title="${esc(r.breach)}"></span>`,
+            )
+            .join('')
+          track.querySelector('[data-now]').innerHTML = nowLine
+          const warn = lanesEl.querySelector(`[data-warn="${CSS.escape(run.id)}"]`)
+          if (warn) warn.textContent = bad.length ? '⚠' : ''
+        }
+        $('axis').innerHTML = [0, 1 / 3, 2 / 3, 1]
+          .map((f) => `<span style="left:${f * 100}%">${mmss(span * f)}</span>`)
+          .join('')
+        $('tl-time').textContent = `job time ${mmss(end - t0)}`
       }
 
-      function drawBreaches(job) {
-        const ul = document.getElementById('breaches')
-        const all = job ? job.breaches : []
-        document.getElementById('br-count').textContent = all.length ? `(${all.length})` : ''
-        ul.innerHTML = all.length
-          ? all
-              .slice(-50)
-              .reverse()
-              .map(
-                ({ ev, run }) =>
-                  `<li class="breach">${esc(new Date(ev.t).toLocaleTimeString())} · ${esc(run.type)}: ${esc(ev.breach)}</li>`,
-              )
-              .join('')
-          : '<li class="empty">None.</li>'
+      // ---- Run inspector and isolation ---------------------------------------------------------
+      const openState = {}
+      $('run').addEventListener(
+        'toggle',
+        (e) => {
+          if (e.target.dataset?.sec) openState[e.target.dataset.sec] = e.target.open
+        },
+        true,
+      )
+      $('follow').onclick = () => {
+        selectedRun = null
+        dirty = true
+        drawAll()
       }
-
-      function drawHandoffs(job) {
-        const ul = document.getElementById('handoffs')
-        const all = job ? job.handoffs : []
-        ul.innerHTML = all.length
-          ? all
-              .slice(-30)
-              .reverse()
-              .map(
-                ({ ev, run }) =>
-                  `<li><span class="from">${esc(ev.from.replace('factory-', ''))} → ${esc(run.type.replace('factory-', ''))}</span> ${esc(where(ev.target))}</li>`,
-              )
-              .join('')
-          : '<li class="empty">None yet.</li>'
+      function liveRun(view) {
+        const agents = [...view.runs.values()].filter((r) => r.started && r.id !== 'orchestrator')
+        const open = agents.filter((r) => r.end === null && !r.parent)
+        return (open.at(-1) ?? agents.filter((r) => !r.parent).at(-1) ?? agents.at(-1))?.id ?? null
       }
+      const list = (items, fmt, cls = '') =>
+        items.length
+          ? `<ul class="files ${cls}">${items.map(fmt).join('')}</ul>`
+          : '<p class="empty">None.</p>'
+      const lineRange = (r) =>
+        r.lines && (r.lines.offset || r.lines.limit)
+          ? ` [${r.lines.offset || 1}…${r.lines.limit ? (r.lines.offset || 1) + r.lines.limit - 1 : 'end'}]`
+          : ''
+      const section = (name, title, body, openDefault) =>
+        `<details data-sec="${name}"${(openState[name] ?? openDefault) ? ' open' : ''}><summary>${title}</summary>${body}</details>`
 
-      function drawContext(job) {
-        const box = document.getElementById('context')
-        const run = job && selectedRun ? job.runs.get(selectedRun) : null
+      function drawRun(view) {
+        const el = $('run')
+        const followed = !selectedRun
+        $('follow').textContent = followed ? 'Following live' : 'Follow live'
+        $('follow').className = `follow${followed ? ' on' : ''}`
+        const id = view ? (selectedRun ?? liveRun(view)) : null
+        const run = view && id ? view.runs.get(id) : undefined
+        shown.activeRun = run?.id ?? null
         if (!run) {
-          box.innerHTML = '<p class="empty">Select an agent run in the timeline.</p>'
+          el.innerHTML = '<p class="empty">No agent run yet.</p>'
           return
         }
-        const tokens = run.reads.reduce((sum, r) => sum + (r.tokens || 0), 0)
-        const list = (items, fmt) =>
-          items.length
-            ? `<ul class="list">${items.map(fmt).join('')}</ul>`
-            : '<p class="empty">None.</p>'
-        const lines = (r) =>
-          r.lines && (r.lines.offset || r.lines.limit)
-            ? ` [${r.lines.offset || 1}…${r.lines.limit ? (r.lines.offset || 1) + r.lines.limit - 1 : 'end'}]`
-            : ''
-        box.innerHTML = `
-    <p><strong>${esc(run.type)}</strong>${run.parent ? ` <span class="muted">launched by ${esc(job.runs.get(run.parent)?.type || run.parent)}</span>` : ''}<br>
-    <span class="muted">${esc(run.id)} · ${run.end ? 'finished' : 'running'} · ${run.reads.length} reads, ~${tokens.toLocaleString()} tokens</span></p>
-    <details ${run.prompt ? 'open' : ''}><summary>Prompt it received</summary>${run.prompt ? `<pre>${esc(run.prompt)}</pre>` : '<p class="empty">Not recorded.</p>'}</details>
-    <details><summary>Instructions loaded (${run.instructions.length})</summary>${list(run.instructions, (e) => `<li>${esc(where(e.target))} <span class="muted">${esc(e.detail && e.detail.reason)}</span></li>`)}</details>
-    <details open><summary>Read (${run.reads.length})</summary>${list(run.reads, (r) => `<li class="${r.breach ? 'breach' : ''}">${esc(where(r.target))}${esc(lines(r))} <span class="muted">~${r.tokens || 0} tok${r.input ? ` · ${esc(r.input)}` : ''}</span>${r.from ? ` <span class="from">from ${esc(r.from.replace('factory-', ''))}</span>` : ''}${r.breach ? `<br>⚠ ${esc(r.breach)}` : ''}</li>`)}</details>
-    <details open><summary>Changed (${run.writes.length + run.changed.length})</summary>${list([...run.writes.map((w) => where(w.target)), ...run.changed.map((c) => `${c.status} ${c.path}`)], (s) => `<li>${esc(s)}</li>`)}</details>
-    <details ${run.denied.length ? 'open' : ''}><summary>Writes denied (${run.denied.length})</summary>${list(run.denied, (d) => `<li class="breach">${esc(where(d.target))}<br>${esc(d.detail && d.detail.reason)}</li>`)}</details>
-    <details><summary>Searches (${run.searches.length})</summary>${list(run.searches, (s) => `<li>${esc(s.detail && s.detail.tool)} ${esc(s.detail && s.detail.pattern)} ${esc(where(s.target))}</li>`)}</details>
-    <details><summary>Commands (${run.bash.length})</summary>${list(run.bash, (b) => `<li>${esc(b.detail && b.detail.command)}</li>`)}</details>`
+        const parent = run.parent ? view.runs.get(run.parent) : undefined
+        const station = !run.parent && run.station ? STATIONS[run.station] : undefined
+        const status =
+          run.id === 'orchestrator' ? 'session' : run.end === null ? 'running' : 'finished'
+        const written = run.writes.map((w) => where(w.target))
+        const writes = [
+          ...new Set([
+            ...written,
+            ...run.changed
+              .filter((c) => !written.includes(c.path))
+              .map((c) => `${c.status} ${c.path}`),
+          ]),
+        ]
+        el.innerHTML = `
+          <div class="rline"><span class="rtitle">${esc(runLabel(view, run))}</span><span class="pill ${status === 'running' ? 'run' : status === 'finished' ? 'fin' : 'idle'}">${status}</span>${parent ? `<span class="muted">launched by ${esc(runLabel(view, parent))}</span>` : ''}</div>
+          <div class="kv">${station?.sub ? `<span>model <b>${esc(station.sub)}</b></span>` : ''}<span>reads <b>${run.reads.length}</b></span><span>tokens <b>${tokensText(runTokens(run))}</b></span></div>
+          ${run.id === 'orchestrator' ? '' : `<p class="prompt">${run.prompt ? esc(run.prompt) : 'Prompt not recorded.'}</p>`}
+          ${run.denied.map((d) => `<div class="warn amber">write denied · ${esc(where(d.target))}${d.detail?.reason ? ` · ${esc(d.detail.reason)}` : ''}</div>`).join('')}
+          ${run.reads
+            .filter((r) => r.breach)
+            .map(
+              (r) =>
+                `<div class="warn red">breach · ${esc(where(r.target))} · ${esc(r.breach)}</div>`,
+            )
+            .join('')}
+          <div class="sub">Changed</div>
+          ${list(writes, (s) => `<li>${esc(s)}</li>`, 'plus')}
+          ${section(
+            'instr',
+            `Instructions loaded (${run.instructions.length})`,
+            list(
+              run.instructions,
+              (e) =>
+                `<li>${esc(where(e.target))} <span class="muted">${esc(e.detail?.reason ?? '')}</span></li>`,
+            ),
+            false,
+          )}
+          ${section(
+            'reads',
+            `Reads (${run.reads.length})`,
+            list(
+              run.reads.slice(-100),
+              (r) =>
+                `<li class="${r.breach ? 'bad' : ''}">${esc(where(r.target))}${esc(lineRange(r))} <span class="muted">~${r.tokens ?? 0} tok${r.input ? ` · ${esc(r.input)}` : ''}</span>${r.from ? ` <span class="from">from ${esc(r.from.replace('factory-', ''))}</span>` : ''}</li>`,
+            ),
+            false,
+          )}
+          ${section(
+            'searches',
+            `Searches (${run.searches.length})`,
+            list(
+              run.searches,
+              (s) =>
+                `<li>${esc(s.detail?.tool)} ${esc(s.detail?.pattern)} ${esc(where(s.target))}</li>`,
+            ),
+            false,
+          )}
+          ${section(
+            'bash',
+            `Commands (${run.bash.length})`,
+            list(run.bash.slice(-50), (b) => `<li>${esc(b.detail?.command)}</li>`),
+            false,
+          )}`
       }
 
-      // ---- The stream ---------------------------------------------------------------------------
+      function drawIsolation(view) {
+        const n = view?.breaches.length ?? 0
+        const denied = view?.deniedCount ?? 0
+        const iso = $('iso')
+        const prev = iso.dataset.n
+        iso.className = `iso${n ? ' bad' : ''}`
+        $('iso-n').textContent = String(n)
+        if (prev !== String(n)) {
+          iso.dataset.n = String(n)
+          const b = $('iso-n')
+          b.style.animation = 'none'
+          void b.offsetWidth
+          b.style.animation = ''
+        }
+        $('iso-text').textContent =
+          `read${n === 1 ? '' : 's'} outside an agent's allowed context · ${denied} write${denied === 1 ? '' : 's'} denied at the boundary`
+        $('breaches').innerHTML = (view?.breaches ?? [])
+          .slice(-50)
+          .reverse()
+          .map(
+            ({ ev, run }) =>
+              `<li class="bad">${esc(clockTime(Date.parse(ev.t)))} · ${esc(runLabel(view, run))}: ${esc(ev.breach)}</li>`,
+          )
+          .join('')
+      }
+
+      function drawAll() {
+        const view = selectedJob === null ? undefined : views.get(selectedJob)
+        drawMode()
+        drawHeader(view)
+        drawMap(view)
+        drawFeed(view)
+        // The inspector and the lists only change with events, selection or a new live run.
+        const sig = view
+          ? `${view.number}:${view.rev}:${selectedRun}:${view.info?.title ?? ''}`
+          : ''
+        if (sig !== shown.sig) {
+          shown.sig = sig
+          drawRun(view)
+          drawIsolation(view)
+        }
+        drawTimeline(view)
+        dirty = false
+      }
+
+      // ---- The stream ------------------------------------------------------------------------
       const queue = []
-      let replayStart = null
       function connect() {
         const source = new EventSource(
           replayJob ? `/events?job=${encodeURIComponent(replayJob)}` : '/events',
         )
         source.addEventListener('open', () => {
-          document.getElementById('dot').className = 'dot on'
-          document.getElementById('mode').textContent = replaying
-            ? `Replaying #${replayJob} at ${speed}×`
-            : 'Live'
+          connection = 'open'
+          dirty = true
         })
         source.addEventListener('error', () => {
-          document.getElementById('dot').className = 'dot'
-          document.getElementById('mode').textContent = 'Reconnecting…'
+          connection = 'recon'
+          dirty = true
         })
         source.addEventListener('job', (m) => {
           const info = JSON.parse(m.data)
           if (info) {
-            jobOf(info.number).info = info
-            render()
+            viewOf(info.number).info = info
+            dirty = true
           }
         })
         source.addEventListener('event', (m) => {
           const ev = JSON.parse(m.data)
           if (replaying) queue.push(ev)
-          else {
-            apply(ev)
-            render()
-          }
+          else ingest(ev)
         })
-        source.addEventListener('ready', () => {
+        source.addEventListener('ready', (m) => {
+          if (selectedJob === null) {
+            const numbers = JSON.parse(m.data).jobs ?? []
+            const building = numbers.filter((n) => views.get(n)?.info?.state === 'building')
+            selectedJob = building.at(-1) ?? numbers.at(-1) ?? null
+          }
+          dirty = true
           if (replaying) startReplay(source)
         })
       }
+
+      // Replay: events come out at the log's own pace times the speed, except that a quiet stretch
+      // longer than eight seconds is cut to a second and a half, so the page never sits idle.
       function startReplay(source) {
         source.close()
-        if (!queue.length) return
+        if (!queue.length) {
+          replayDone = true
+          return
+        }
         queue.sort((a, b) => Date.parse(a.t) - Date.parse(b.t))
         const first = Date.parse(queue[0].t)
-        // Each run's state is rebuilt from scratch, so a replay reads like the live job did.
-        for (const job of jobs.values()) {
-          job.runs = new Map()
-          job.order = []
-          job.marks = []
-          job.breaches = []
-          job.handoffs = []
-        }
-        clock = first
-        replayStart = performance.now()
+        let skipped = 0
+        const started = performance.now()
         const tick = (now) => {
-          clock = first + (now - replayStart) * speed
-          while (queue.length && Date.parse(queue[0].t) <= clock) apply(queue.shift())
-          render()
+          clock = first + (now - started) * speed + skipped
+          const next = queue[0] && Date.parse(queue[0].t)
+          if (next !== undefined && next - clock > 8000 * speed) {
+            skipped += next - clock - 1500 * speed
+            clock = next - 1500 * speed
+          }
+          while (queue.length && Date.parse(queue[0].t) <= clock) ingest(queue.shift())
+          drawAll()
           if (queue.length) requestAnimationFrame(tick)
-          else document.getElementById('mode').textContent = `Replayed #${replayJob}`
+          else {
+            replayDone = true
+            drawAll()
+          }
         }
         requestAnimationFrame(tick)
       }
-      if (!replaying)
+
+      if (!replaying) {
+        // Live: the clock follows real time, and a redraw each second keeps the time-based parts moving.
         setInterval(() => {
           clock = Date.now()
-          render()
+          drawAll()
         }, 1000)
+        const frame = () => {
+          if (dirty) {
+            clock = Date.now()
+            drawAll()
+          }
+          requestAnimationFrame(frame)
+        }
+        requestAnimationFrame(frame)
+      }
+      drawAll()
       connect()
     </script>
   </body>
