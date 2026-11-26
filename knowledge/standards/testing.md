@@ -6,7 +6,7 @@ Make the privacy promise and the map editor's rule provable: each is defended by
 
 ## Scope
 
-Applies to every test file (`*.test.ts`, `*.test.tsx`, `apps/web/e2e/**`) and to every change to code a test below covers.
+Applies to every test file (`*.test.ts(x)`, `apps/web/e2e/**`) and to every change to code a test below covers.
 
 **MUST**, **MUST NOT**, **SHOULD** and **MAY** follow RFC 2119.
 
@@ -19,6 +19,8 @@ Tests in `apps/api` and `packages/` MUST run with `bun test`, except `packages/o
 ### T-002 — Tests sit beside their code
 
 A unit, API or component test MUST sit next to the file it tests, named `<file>.test.ts(x)`.
+
+An acceptance test, one that checks behavior a user or caller can observe against the issue's acceptance criteria or a rule written in `docs/`, MUST be named `<file>.acceptance.test.ts(x)`. Every Playwright spec in `apps/web/e2e/` is an acceptance test. The name is what protects it: the factory's CLI rejects any build that edits a file with it.
 
 ## Rules written as tables
 
@@ -34,7 +36,7 @@ API tests MUST call the app through `app.request()` against the Postgres and S3-
 
 ### T-005 — The privacy tests
 
-These MUST exist and pass before M1, M3 or M6 is done:
+These are acceptance tests (T-002) and MUST exist and pass before M1, M3 or M6 is done:
 
 - **Ownership:** for every journal route in `openapi.json`, account B gets 404 for what account A owns.
 - **Allowlist:** the keys of a shared response equal the allowed set exactly.
@@ -54,3 +56,13 @@ Component tests MUST query by role and accessible name, and cover every state th
 ### T-008 — The demo is one end-to-end test
 
 The [scope's demo](../../docs/02-mvp-scope.md#2-the-demo-this-scope-must-deliver) MUST run as one Playwright test with two browser contexts, the walker's and the friend's, and every journal page MUST pass an axe check in light and dark mode.
+
+## Value
+
+### T-009 — A test records what it guarantees
+
+Before writing a test, record the behavior, contract or invariant it protects; the concrete defect it would catch; whether another test already gives that guarantee; and the level that fits (unit, API, component, end to end). A test whose only target is framework behavior, an internal detail, a coverage number or a guarantee another test already gives MUST NOT be written. Coverage is a diagnostic, never evidence.
+
+### T-010 — Guarantees, not test count
+
+The suite MUST stay the smallest one that covers the risks that matter. Every test costs runtime and maintenance, and earns its place by the defect it would catch.

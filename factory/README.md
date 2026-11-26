@@ -43,6 +43,7 @@ flowchart TD
     verdict -->|"none: both approve"| pr["CLI: opens the PR,<br/>label factory:pr-open"]
     pr --> merged(["User reviews and merges"])
 
+    red -.->|"3 rejected reds"| dr
     build -.->|"escalation or 3 build attempts"| dr
     verdict -.->|"a 4th round or a guarantee change"| dr
     dr["Decision Request on the issue,<br/>label factory:blocked"] -.-> decide(["User answers on the issue"])
@@ -112,17 +113,17 @@ sequenceDiagram
     C-->>O: passed, plus removed, skipped and focused tests
     par blind first pass
         O->>E: the issue, the diff, the suite and its results
-        E-->>O: round-1.evaluator.blind.md
+        E-->>O: reviews/1.evaluator.blind.md
     and
         O->>R: the issue, the contracts, the diff, the suite, the removed tests
-        R-->>O: round-1.test-reviewer.blind.md
+        R-->>O: reviews/1.test-reviewer.blind.md
     end
     O->>E: now build-notes.md
     O->>R: now build-notes.md
-    E-->>O: round-1.evaluator.md
-    R-->>O: round-1.test-reviewer.md
+    E-->>O: reviews/1.evaluator.md
+    R-->>O: reviews/1.test-reviewer.md
     alt findings
-        O->>B: round-1.findings.md (both lists, merged)
+        O->>B: reviews/1.findings.md (both lists, merged)
     else both approve
         O->>C: factory pr 42
         C->>GH: PR "Closes #42", notes and reports as a comment, label factory:pr-open
@@ -149,7 +150,15 @@ flowchart LR
     o4 -->|"no"| done(["factory pr 42"])
 ```
 
-**Inner loop.** The build agent implements, runs the checks, diagnoses and fixes, red–green–refactor where it pays, until `factory check` is green or it stops. One run of the build agent until it stops is one **build attempt**.
+**Build attempts.** A job has one budget of 3 build attempts, shared by both loops. A **build attempt** is one run of the build agent until it stops, and it counts when:
+
+- it is the first run, after the red commit;
+- it reruns after a red `factory check`, or after a rejected `factory gate`;
+- it reruns because a review round's fix run did not reach green.
+
+A review round's fix run that reaches green costs nothing. Past 3 the job blocks with a Decision Request: `factory attempt` refuses the 4th.
+
+**Inner loop.** The build agent implements, runs the checks, diagnoses and fixes, red–green–refactor where it pays, until `factory check` is green or it stops.
 
 | Attempt | Who runs it | With |
 | --- | --- | --- |
@@ -159,12 +168,12 @@ flowchart LR
 | 3 | Build agent (Sonnet), fresh context | The orchestrator's diagnosis |
 | 4 | — | The job blocks with a Decision Request |
 
-**Outer loop.** A **round** is: both reviewers report findings, the build agent fixes them, both review again. Up to 3 rounds with findings; a fourth blocks the job. A fix that doesn't reach green spends the build attempts above. Every finding carries its evidence: the command, its output, `file:line`.
+**Outer loop.** A **round** is: both reviewers report findings, the fixes are made, both review again. Up to 3 rounds with findings; a fourth blocks the job. The build agent's fix run follows the attempt rules above. Every finding carries its evidence: the command, its output, `file:line`.
 
 A finding about an acceptance test goes one of two ways:
 
-- **Same guarantee** (a wrong selector, a typo): the test agent fixes it, `factory atfix 42` checks that only acceptance tests changed and commits, and the PR comment lists the fix.
-- **A different guarantee**: the job raises a Decision Request, and the test agent rewrites the test once the user authorizes it on the issue.
+- **Same guarantee** (a wrong selector, a typo): the test agent fixes it, `factory atfix 42` checks that only acceptance tests changed and commits, and the PR lists the fix. When the acceptance-test fixes are the round's only findings, they still count as a round (`factory round 42`), but no build attempt.
+- **A different guarantee**: the job raises a Decision Request. Once the user authorizes the change on the issue, the test agent rewrites the test and `factory rewrite 42 --note <the authorization>` commits it. The PR lists it apart, under "Authorized guarantee changes".
 
 ## Who sees what
 
@@ -206,12 +215,12 @@ flowchart LR
     class T,B,E,R agent
 ```
 
-| Agent | Receives | Starts without | May write |
-| --- | --- | --- | --- |
-| Test agent | The issue and its ACs, the public contracts, `knowledge/standards/testing.md`, the test infrastructure | Any implementation plan: it runs before the build agent | Acceptance tests and their scaffolding, anywhere outside the rule files below; `acceptance.md` |
-| Build agent | The issue, `docs/05-architecture.md`, the repo and `knowledge/`, the acceptance tests (read and run only), the check results, the reviewers' findings | The test agent's reasoning | Anything outside the protected paths; `build-notes.md` |
-| Evaluator | The issue and its ACs, `docs/05-architecture.md` and `knowledge/`, the diff against `main`, the whole suite and its results | The build notes, until its blind first pass is written | Its own reports in the job's folder |
-| Test reviewer | The issue and its ACs, the public contracts, `knowledge/standards/testing.md`, the diff against `main`, the whole suite and its results, the CLI's list of removed, skipped and focused tests | The build notes, including each technical test's value check, until its blind first pass is written | Its own reports in the job's folder |
+| Agent         | Receives                                                                                                                                                                                      | Starts without                                                                                      | May write                                                                                      |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Test agent    | The issue and its ACs, the public contracts, `knowledge/standards/testing.md`, the test infrastructure                                                                                        | Any implementation plan: it runs before the build agent                                             | Acceptance tests and their scaffolding, anywhere outside the rule files below; `acceptance.md` |
+| Build agent   | The issue, `docs/05-architecture.md`, the repo and `knowledge/`, the acceptance tests (read and run only), the check results, the reviewers' findings                                         | The test agent's reasoning                                                                          | Anything outside the protected paths; `build-notes.md`                                         |
+| Evaluator     | The issue and its ACs, `docs/05-architecture.md` and `knowledge/`, the diff against `main`, the whole suite and its results                                                                   | The build notes, until its blind first pass is written                                              | Its own reports in the job's folder                                                            |
+| Test reviewer | The issue and its ACs, the public contracts, `knowledge/standards/testing.md`, the diff against `main`, the whole suite and its results, the CLI's list of removed, skipped and focused tests | The build notes, including each technical test's value check, until its blind first pass is written | Its own reports in the job's folder                                                            |
 
 Inputs and the moment each becomes visible are declared once, as data, in [`cli/src/visibility.ts`](cli/src/visibility.ts). The write column is enforced; the read columns are watched:
 
@@ -241,7 +250,7 @@ The name keeps an acceptance test protected after its job, so no later build age
 | Vitest | `type="AssertionError"` | A test named after its file (a load error) |
 | Playwright | A `<failure>` of type `expect.*` | An empty run, a timeout |
 
-Any other error rejects the red and the test agent fixes it. So scaffolding is stubs with the right signature that return an empty value and never throw, plus empty routes or screens; an end-to-end test asserts that an element is visible before acting on it.
+Any other error rejects the red and the test agent fixes it. `factory red` records each rejection: after 3 rejected reds the job raises a Decision Request and `red` refuses a 4th. So scaffolding is stubs with the right signature that return an empty value and never throw, plus empty routes or screens; an end-to-end test asserts that an element is visible before acting on it.
 
 ## The gates
 
@@ -313,12 +322,13 @@ Run from the repo root as `bun run factory <command>`. The orchestrator runs eve
 | Command | What it does | Refuses when |
 | --- | --- | --- |
 | `start <n> --session <id>` | Creates `.claude/worktrees/<n>-<slug>` on `feat/<n>-<slug>`, installs, writes `factory/.jobs/<n>/job.json`, moves the label to `factory:building`. On a blocked job, moves it back and prints the user's answer. | The issue lacks `factory:ready` or numbered ACs; 3 jobs already run |
-| `red <n>` | Runs the new or changed acceptance tests with a JUnit report and commits them as the red commit | A test passes, or fails on anything but an assertion |
+| `red <n>` | Runs the new or changed acceptance tests with a JUnit report and commits them as the red commit | A test passes, or fails on anything but an assertion; 3 reds were already rejected |
 | `check <n>` | Runs the CI commands under the lock and saves the output in the job's folder | — (exits non-zero on red) |
-| `attempt <n>` | Records a new build attempt | It would be the 4th |
+| `attempt <n>` | Records a build attempt (see "The two loops" for which runs count) | It would be the 4th |
 | `gate <n>` | Checks the last `check` was green on `HEAD`, the tree is clean and no protected path changed; writes the list of removed, skipped and focused tests | Any of those fails |
-| `round <n>` | Records a new outer-loop round with findings | It would be the 4th |
-| `atfix <n>` | Commits a same-guarantee fix to an acceptance test and records it for the PR comment | Anything but acceptance tests changed |
+| `round <n>` | Records a new outer-loop round with findings, acceptance-test fixes included | It would be the 4th |
+| `atfix <n> --note <text>` | Commits a same-guarantee fix to an acceptance test and records it for the PR | Anything but acceptance tests changed, or no note |
+| `rewrite <n> --note <text>` | Commits the test agent's rewrite of acceptance tests after the user authorized a change of guarantee on the issue; the note cites the authorization (the issue comment's URL) and the PR lists it | The job has no Decision Request, anything but acceptance tests changed, or no note |
 | `block <n> <file>` | Posts the Decision Request in `<file>` on the issue, label `factory:blocked` | — |
 | `pr <n>` | Pushes the branch, opens the PR, posts the build notes and both final reports as a comment, label `factory:pr-open` | The gate didn't pass on `HEAD`, or a final report doesn't approve |
 | `status` | Lists the jobs and where each stands | — |
@@ -326,7 +336,7 @@ Run from the repo root as `bun run factory <command>`. The orchestrator runs eve
 | `clean <n>` | Removes a merged job's worktree, branch and folder | The PR isn't merged |
 | `hook log` · `hook guard` | Entry points for Claude Code's hooks; not run by hand | — |
 
-**The pull request** is titled after the issue and its body holds `Closes #<n>`, a summary of the change, each AC with the acceptance tests that check it (from `acceptance.md`), the result of the local checks, and any same-guarantee fixes to acceptance tests. The comment beside it holds the build notes and both reviewers' final reports, so they stay on record in GitHub.
+**The pull request** is titled after the issue and its body holds `Closes #<n>`, a summary of the change, each AC with the acceptance tests that check it (from `acceptance.md`), the result of the local checks, any same-guarantee fixes to acceptance tests, and, in a separate section, any authorized guarantee changes with the note that cites each authorization. The comment beside it holds the build notes and both reviewers' final reports, so they stay on record in GitHub.
 
 ## Watching a job
 
@@ -381,7 +391,7 @@ factory/
   cli/                               the CLI, a Bun workspace, tested with bun test
   versions/                          one file per version: v1.md…
   .jobs/<n>/                         gitignored: one folder per job
-    job.json                         state: session, branch, red commit, attempts, rounds, gate
+    job.json                         state: session, branch, red commit, attempts, rounds, rejected reds, gate
     events.jsonl                     the event log
     acceptance.md                    the test agent's map of each AC to its tests
     build-notes.md                   decisions and each technical test's value check

@@ -16,6 +16,8 @@ Applies to every change that adds or moves a package, adds a dependency, touches
 
 A new package under `packages/` MUST be used by both `apps/web` and `apps/api`; the lint plugin and the TypeScript configuration count, since both apps are linted and compiled with them. Code one app uses lives in that app.
 
+`factory/cli` is tooling, not a package: a Bun workspace (`@wandr/factory`) that extends `packages/tsconfig` and is linted, type-checked and tested by turbo like the rest.
+
 ### WS-002 — Apps never import each other
 
 An app MUST NOT depend on another app. `apps/web` reads the API's shape only from its generated types ([WS-005](#ws-005--generated-files-are-committed-never-edited)).
