@@ -20,6 +20,7 @@ The factory **delegates execution, not authority**. Use these to judge every des
 - **Guarantees, not test count**: keep the smallest suite that covers the risks that matter. Every test costs runtime and maintenance, and earns its place by the defect it would catch.
 - **Human by exception**: the user approves the spec and its acceptance criteria, sets the risk tolerance, resolves functional ambiguity, authorizes any change to an acceptance guarantee, approves any exception to a gate, and merges. The user never approves technical tests one by one. Agents decide what is local, reversible and verifiable, and never widen their scope, their permissions or the rules they're judged by.
 - **Traceability**: every decision the user makes for a job stays on record in GitHub.
+- **Visible, not assumed**: the user watches every job live: which station runs, what runs in parallel, what each agent reads and changes, and where information moves from one agent to another. Isolation is a claim the factory must show, not one the user takes on trust.
 
 ## Two kinds of tests
 
@@ -107,6 +108,26 @@ flowchart TD
 
 Yellow is the user, purple the orchestrator (the `/factory` skill), blue the CLI's deterministic steps, green the agents, each in its own context, and red a job waiting for the user. Solid lines are the path to a PR; dotted lines leave it.
 
+## Watching a job
+
+The user runs `factory watch` and opens a local page that shows every running job live, animated, with no reload. Its purpose is to make the factory's inner workings checkable: to spot an agent doing something the user doesn't want, reading more than it should, or seeing work it should be blind to.
+
+**The event log.** Every job appends events to `factory/.jobs/<n>/events.jsonl`, written by two sources the agents can't change (`.claude/` and `factory/` are protected paths):
+
+- **Claude Code hooks**, async so they never slow an agent down. `PreToolUse` and `PostToolUse` fire inside subagents too and carry `agent_id` and `agent_type`, so every `Read`, `Grep`, `Glob`, `Edit`, `Write` and `Bash` call is tied to the agent that made it. `PreToolUse` on the Agent tool carries the `prompt` the orchestrator hands each agent: the context it starts with. `SubagentStart` and `SubagentStop` mark when each agent runs.
+- **The CLI**, for every deterministic step: the job starts, the label moves, the red is accepted or rejected, the gate passes or rejects, the PR opens, a Decision Request is raised.
+
+Each event records its time, job, source, agent run, kind, and for a file the path, the lines read and an approximate size in tokens. The log keeps paths and sizes, never file contents: the subagents' transcripts already hold those.
+
+**The page.** One self-contained HTML file with inline SVG and no build step, served by `factory watch` (`Bun.serve`, events pushed over server-sent events as the logs grow). It shows:
+
+- **The flow**: the stations of the diagram above, the active one highlighted, and each handoff animated along its edge: the red commit to the build agent, the gate's verdict, the findings back to the inner loop.
+- **The timeline**: one lane per agent run (each build attempt is its own run) for up to 3 jobs, so overlapping bars show what runs in parallel, the two reviewers included.
+- **Each agent's context**: the prompt it received, every file it read with its lines and size, every file it changed. When an agent reads a file another agent wrote (the acceptance tests, the build notes, the findings), the page animates that information from one agent to the other.
+- **Isolation breaches, in red**: a read outside the agent's inputs in "Who sees what", or before they become visible to it (a reviewer reading the build notes before its blind first pass is written). The page flags it and the log keeps it; nothing blocks it in V1.
+
+A finished job replays from its log at any speed, so a run can be studied after the fact.
+
 ## Decided
 
 | Topic | Decision |
@@ -135,31 +156,33 @@ Yellow is the user, purple the orchestrator (the `/factory` skill), blue the CLI
 | Testing standards | The value check and "guarantees, not test count" become standards in `knowledge/standards/testing.md` in the V1 PR: they bind every test, written by a person or an agent, and the agents read them there. |
 | Escalation | The build agent stops and asks instead of deciding when the change would touch a public contract, the architecture, an acceptance test, or anything outside the issue's ACs. V1 enforces this by instruction only. |
 | Decision Requests | Whenever a job needs the user (an escalation or a block), the orchestrator comments on the issue with context, evidence, alternatives, a recommendation, impact and risks, and moves the job to the blocked label. The user's answer on the issue is the decision's record. |
+| Observability | In V1: the event log, `factory watch` and its page, as described in "Watching a job". Hooks and the CLI write the log, never the agents. Each agent's allowed inputs, and the moment each becomes visible to it, are declared once as data in the CLI; the page flags breaches against that data, and the CLI's tests cover the breach rule. |
 | Risk tolerance | One level for every V1 job: the repo's standards define the risks (the privacy tests, T-005). |
 | Models | Haiku explores code, Sonnet writes code (test and build agents), Opus does what matters: the orchestrator, the diagnosis of a failed build, the evaluator and the test reviewer. |
-| `factory/README.md` | Explains the flow **visually** first: the overview diagram above, then diagrams of the stations, both loops, the job's states and labels, who runs each step and who sees what; then the commands. It describes the current version only. |
+| `factory/README.md` | Explains the flow **visually** first: the overview diagram above, then diagrams of the stations, both loops, the job's states and labels, who runs each step and who sees what; then the commands, `factory watch` included. It describes the current version only. |
 | Versions | Each version is a git tag (`factory-v1`) plus `factory/versions/v1.md`: the need that motivated it, what it does, what the user learned, and the V2 candidates. `factory/versions/` is an explicit exception to the repo rule that docs hold only the current definition; record that exception in `CLAUDE.md`. |
 
 ## Open: settle with the user before designing
 
-Whatever the design needs that isn't decided above, for example: whether the CLI follows `knowledge/standards/workspace.md` (it lives outside `apps/` and `packages/`), the CLI's subcommands, the exact protected files, whether agent permissions or hooks can block edits to acceptance tests before the CLI ever sees the diff, the PR body (link `Closes #<n>`), how the user learns a job finished, how the local checks match CI (`.github/workflows/ci.yml`).
+Whatever the design needs that isn't decided above, for example: whether the CLI follows `knowledge/standards/workspace.md` (it lives outside `apps/` and `packages/`), the CLI's subcommands, the exact protected files, whether agent permissions or hooks can block edits to acceptance tests before the CLI ever sees the diff, the PR body (link `Closes #<n>`), how the user learns a job finished, how the local checks match CI (`.github/workflows/ci.yml`). For the event log: where the hooks are declared (project settings, the skill's frontmatter or each agent's) and whether skill hooks fire inside its subagents; how a hook maps a session or agent to its job; whether `InstructionsLoaded` carries `agent_id`, so the page can show the instructions each agent loads without reading them (`CLAUDE.md`); how the page attributes files a `Bash` command changes.
 
 ## How to run this session
 
 1. Read `README.md`, `docs/02-mvp-scope.md`, `docs/05-architecture.md`, `knowledge/README.md` and the standards it lists for the paths you'll touch (`testing.md` always), and `.github/workflows/ci.yml`. Read the Claude Code docs on skills, subagents and hooks (code.claude.com/docs/en/skills, /sub-agents, /agents, /hooks) to confirm the constraints above still hold: background subagents' tool set, the `model` field in agent frontmatter, per-agent tool and permission limits, `${CLAUDE_SKILL_DIR}`, `allowed-tools`.
 2. Settle every open item with the user. Done when no question remains.
 3. Write `factory/README.md` with the flow diagrams and show it to the user for approval before writing code. Done when the user approves it.
-4. Build V1 on a branch with a PR (code reaches `main` only through a PR with passing checks): the issue form, the labels, the CLI with its tests, the skill, the four agents, `.gitignore` for `factory/.jobs/`, `factory/versions/v1.md`, the `CLAUDE.md` exception, the testing standards' changes and renames above. Done when the CLI's tests pass and the PR's checks are green.
+4. Build V1 on a branch with a PR (code reaches `main` only through a PR with passing checks): the issue form, the labels, the CLI with its tests, the skill, the four agents, the hooks that write the event log, `factory watch` and its page, `.gitignore` for `factory/.jobs/`, `factory/versions/v1.md`, the `CLAUDE.md` exception, the testing standards' changes and renames above. Done when the CLI's tests pass and the PR's checks are green.
 5. Prove it end to end with the user on one small real issue: from `factory:ready` to an open PR. Record what happened in `factory/versions/v1.md`. Tag `factory-v1` after the user merges.
 6. Delete this file (`FACTORY_PROMPT.md`) in the same PR: the README and `versions/v1.md` replace it.
 
 ## V2 candidates already raised
 
-Seed `factory/versions/v1.md` with these: a dedicated refactor station after green; hidden acceptance tests held back for the reviewers, when the risk justifies them; mutation testing on the diff only, so the score never becomes a target; property-based tests for invariants; contract tests; traceability per AC; a risk level per issue that scales verification; coverage as a diagnostic for the evaluator; a second-opinion evaluator on another model family; calibrating the reviewers against the user's verdicts; a cost budget per job; enforcing escalation in the CLI.
+Seed `factory/versions/v1.md` with these: a dedicated refactor station after green; hidden acceptance tests held back for the reviewers, when the risk justifies them; mutation testing on the diff only, so the score never becomes a target; property-based tests for invariants; contract tests; traceability per AC; a risk level per issue that scales verification; coverage as a diagnostic for the evaluator; a second-opinion evaluator on another model family; calibrating the reviewers against the user's verdicts; a cost budget per job; enforcing escalation in the CLI; blocking isolation breaches with a non-async `PreToolUse` hook instead of only flagging them.
 
 ## Already found (sources)
 
 - Claude Code: a background subagent loses the Agent tool, so it can't spawn subagents; custom subagents spawned from the main session start in the background; permission prompts from background subagents surface in the main session; `isolation: worktree` creates `.claude/worktrees/<name>` on a `worktree-<name>` branch, which is why the CLI creates the worktree instead. [Subagents](https://code.claude.com/docs/en/sub-agents), [Skills](https://code.claude.com/docs/en/skills), [Run agents in parallel](https://code.claude.com/docs/en/agents).
+- Hooks for the event log: tool events inside a subagent carry `agent_id` and `agent_type`; `PreToolUse` on the Agent tool carries the subagent's `prompt`; `SubagentStart` carries `agent_id` and `agent_type`, `SubagentStop` adds `agent_transcript_path`; a command hook with `async: true` runs in the background without blocking and can't block; hooks can be declared in a skill's or a subagent's frontmatter, and a subagent's run only while it runs. [Hooks reference](https://code.claude.com/docs/en/hooks), read on 2026-11-26.
 - TDD with Claude: write tests from expected input/output, say it's TDD so it doesn't write mock implementations, run them and confirm they fail, commit them, then implement without changing them. [Anthropic, Claude Code best practices](https://www.anthropic.com/research/claude-code-best-practices).
 - The outer loop is Anthropic's evaluator-optimizer pattern: one model generates, another evaluates and gives feedback in a loop. [Anthropic, Building effective agents](https://www.anthropic.com/engineering/building-effective-agents).
 - Why the evaluator is separate and skeptical: an agent grading its own work praises it even when it's mediocre, and tuning a standalone evaluator to be skeptical is more tractable than making a generator critical of itself. Out of the box the evaluator found real issues and approved anyway; the author tuned it over several rounds by reading its logs where its judgment diverged from theirs, and failed a sprint when any criterion fell below a hard threshold. Generator and evaluator agreed on what "done" meant before any code (sprint contracts) and handed work over through files. Every harness component encodes an assumption about what the model can't do alone, so re-test each one as models improve. [Anthropic, Harness design for long-running application development (Mar 2026)](https://www.anthropic.com/engineering/harness-design-long-running-apps).
