@@ -2,7 +2,7 @@
 
 The factory takes a GitHub issue to an open pull request with agents. It **delegates execution, not authority**: agents write the tests and the code, deterministic checks they can't change give the verdict, and the user approves what is built and merges it.
 
-This is version 1. How it got here and what comes next: [`versions/`](versions/).
+This is version 1.1. How it got here and what comes next: [`versions/`](versions/).
 
 ## The flow
 
@@ -323,7 +323,7 @@ Run from the repo root as `bun run factory <command>`. The orchestrator runs eve
 
 | Command | What it does | Refuses when |
 | --- | --- | --- |
-| `start <n> --session <id>` | Creates `.claude/worktrees/<n>-<slug>` on `feat/<n>-<slug>`, installs, writes `factory/.jobs/<n>/job.json`, moves the label to `factory:building`. On a blocked job, moves it back and prints the user's answer. | The issue lacks `factory:ready` or numbered ACs; 3 jobs already run |
+| `start <n> --session <id>` | Creates `.claude/worktrees/<n>-<slug>` on `feat/<n>-<slug>`, installs, writes the job's state (`job.json`) in the main checkout and `issue.md` in the job's folder, moves the label to `factory:building`, and prints the job with its folder's path. On an existing job, copies into the job's folder any handoff file that exists only in the main checkout; on a blocked job, moves the label back and prints the user's answer. | The issue lacks `factory:ready` or numbered ACs; 3 jobs already run |
 | `red <n>` | Runs the new or changed acceptance tests and commits them as the red commit | A test passes, or fails on anything but an assertion; 3 reds were already rejected |
 | `check <n>` | Runs the CI commands under the lock and saves the output in the job's folder | — (exits non-zero on red) |
 | `attempt <n>` | Records a build attempt (see "The two loops" for which runs count) | It would be the 4th |
@@ -362,7 +362,7 @@ flowchart LR
     watch -->|"server-sent events"| page
 ```
 
-**The event log.** Every job appends to `factory/.jobs/<n>/events.jsonl`, written only by the CLI and by Claude Code hooks, never by an agent: `factory/` and `.claude/` are protected paths.
+**The event log.** Every job appends to `factory/.jobs/<n>/events.jsonl` in the main checkout, written only by the CLI and by Claude Code hooks, never by an agent: the main checkout is outside the worktree agents are confined to, and `factory/` and `.claude/` are protected paths inside it.
 
 - Hooks are declared in `.claude/settings.json`, because they fire inside every subagent; hooks in a skill's frontmatter don't. Each logging hook is `async`, so it never slows an agent down.
 - A hook finds its job by the session: `factory start` records the session's ID, and every event in that session, its subagents' included, carries it. Outside a job the hooks do nothing.
@@ -388,18 +388,33 @@ A finished job replays from its log at any speed.
   settings.json                      the hooks
   skills/factory/SKILL.md            the orchestrator
   agents/factory-*.md                the four agents
+  worktrees/<n>-<slug>/              the job's worktree, on feat/<n>-<slug>
+    factory/.jobs/<n>/               gitignored: the job's folder, what agents hand each other
+      issue.md                       the issue and its ACs, written by factory start
+      acceptance.md                  the test agent's map of each AC to its tests
+      build-notes.md                 decisions and each technical test's value check
+      checks/                        the output of every factory check
+      gate.json                      the gate's verdict and its removed, skipped and focused tests
+      reviews/                       blind passes, final reports, merged findings, per round
+      diagnosis.md                   the orchestrator's diagnosis before a third build attempt
+      summary.md                     the orchestrator's summary for the PR
+      decision-requests/             each Decision Request, its draft and as posted
 factory/
   README.md                          this file
   cli/                               the CLI, a Bun workspace, tested with bun test
   versions/                          one file per version: v1.md…
-  .jobs/<n>/                         gitignored: one folder per job
-    job.json                         state: session, branch, red commit, attempts, rounds, rejected reds, gate
-    events.jsonl                     the event log
-    acceptance.md                    the test agent's map of each AC to its tests
-    build-notes.md                   decisions and each technical test's value check
-    checks/                          the output of every factory check
-    reviews/                         blind passes, final reports, merged findings, per round
-    decision-requests/               each Decision Request as posted
+  .jobs/                             gitignored: the jobs' state, in the main checkout
+    checks.lock                      the machine-wide lock on the local checks
+    <n>/
+      job.json                       state: session, branch, red commit, attempts, rounds, rejected reds, gate
+      events.jsonl                   the event log
+      install.log, red/, runs/       the CLI's own logs and the hooks' per-run snapshots
+      pr-body.md, pr-comment.md      what factory pr posted
 ```
 
-The job's code lives in its worktree, `.claude/worktrees/<n>-<slug>`, on `feat/<n>-<slug>`. The orchestrator enters it after `factory start`, so every agent works there; the job's folder stays in the main checkout.
+A job's files live in two places, and the split follows who writes them:
+
+- **The job's folder, in its worktree.** The orchestrator enters the worktree after `factory start`, and from then on Claude Code confines the session and every subagent to it: a `Write` or `Edit` outside it is refused. So everything agents and the orchestrator hand each other lives there, at `<worktree>/factory/.jobs/<n>/`. The guard hook and `factory watch` place that folder in the `job` area of [`cli/src/visibility.ts`](cli/src/visibility.ts), not in the protected `factory/**` of the repo; the rest of `factory/` in the worktree stays protected.
+- **The job's state, in the main checkout.** `job.json` and `events.jsonl` are written only by the CLI and the hooks, which aren't confined. Keeping them in the main checkout puts them outside every agent's reach, lets `factory status` and the 3-job limit read every job in one place, and keeps the job's record when its worktree is removed. To agents the main checkout, its copy of `factory/.jobs/<n>/` included, is `outside`.
+
+No symlink joins the two: auto mode blocks them because they sidestep its oversight, and a path through one would resolve to a different area than it reads as.

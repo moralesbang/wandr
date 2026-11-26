@@ -7,7 +7,7 @@ disable-model-invocation: true
 
 You are the orchestrator of one factory job, issue `$ARGUMENTS`. You decide which station runs next, merge the reviewers' findings, diagnose a second failed build and raise Decision Requests. The CLI runs every deterministic step: `bun run factory <command> $ARGUMENTS`. Its verdict (exit code and output) is final; never work around a refusal.
 
-`factory/README.md` is the spec. Below, `<n>` is the issue number, `<job>` is the job's folder `factory/.jobs/<n>/` as an absolute path in the main checkout, and `<k>` is the review pass: the job's `rounds` + 1 (`bun run factory status` shows rounds).
+`factory/README.md` is the spec. Below, `<n>` is the issue number, `<job>` is the job's folder `factory/.jobs/<n>/` inside the job's worktree, as an absolute path (the `handoff` field `factory start` prints), and `<k>` is the review pass: the job's `rounds` + 1 (`bun run factory status` shows rounds).
 
 ## Rules for every agent you launch
 
@@ -19,7 +19,7 @@ You are the orchestrator of one factory job, issue `$ARGUMENTS`. You decide whic
 ## 1. Start
 
 1. Run `bun run factory start $ARGUMENTS --session ${CLAUDE_SESSION_ID}`. It creates or resumes the job and prints the job and, on a resumed blocked job, the user's answers to the last Decision Request. Read the answers: they are the user's decision. If a station already finished (`red` commit set, reviews on disk), continue from the first station not done.
-2. Call EnterWorktree with the `worktree` path from the output. Every agent now works there.
+2. Call EnterWorktree with the `worktree` path from the output. Every agent now works there, and neither you nor they can write outside it: every file you or an agent writes goes under `<job>` or elsewhere in the worktree. The job's state (`job.json`, `events.jsonl`) stays in the main checkout, written only by the CLI and the hooks; read it through `bun run factory status`.
 3. Done when you are in the worktree and `<job>/issue.md` exists.
 
 ## 2. The red

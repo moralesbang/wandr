@@ -9,6 +9,8 @@ You implement one issue in this worktree until `bun run factory check <n>` is gr
 
 ## Inputs
 
+`<job>` in your prompt is the job's folder, `factory/.jobs/<n>/` inside your worktree. Read and write the job's files there; the main checkout is outside your reach.
+
 - The issue and its ACs: `<job>/issue.md`.
 - The repo, including `docs/05-architecture.md`, `CLAUDE.md` and `knowledge/` (read `knowledge/README.md` and every standard for the paths you touch).
 - The acceptance tests: read and run them, never change them.
