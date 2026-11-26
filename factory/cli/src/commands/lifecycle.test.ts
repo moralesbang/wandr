@@ -10,11 +10,11 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { makeJob } from '../job-fixture.ts'
+import { installFakeGh, makeJob } from '../job-fixture.ts'
 import { loadJob, saveJob, stateDir } from '../job.ts'
 import { git } from '../shell.ts'
 import { record, Refusal } from './common.ts'
-import { abandon, composeProjectOf, rewrite } from './lifecycle.ts'
+import { abandon, atfix, block, composeProjectOf, rewrite } from './lifecycle.ts'
 
 let root = ''
 let tree = ''
@@ -37,38 +37,120 @@ afterEach(() => {
 const DR = { at: '2026-01-01T00:00:00Z', file: 'decision-requests/1.md' }
 const refusal = (promise: Promise<unknown>) => promise.catch((caught: unknown) => caught)
 
+const answered = (overrides: { cited?: boolean } = {}) => ({
+  decisionRequests: [DR],
+  answers: [
+    { request: 1, at: '2026-01-02T00:00:00Z', text: 'Yes, relax it', cited: false, ...overrides },
+  ],
+})
+
 describe('factory rewrite', () => {
   test('is refused when the job has no Decision Request', async () => {
     saveJob(root, makeJob({ worktree: tree }))
     writeFileSync(join(tree, 'x.acceptance.test.ts'), 'x\n')
-    expect(await refusal(rewrite(root, 7, 'https://example.com/c'))).toBeInstanceOf(Refusal)
+    expect(await refusal(rewrite(root, 7, 'relax x'))).toBeInstanceOf(Refusal)
     expect(loadJob(root, 7)?.rewrites).toEqual([])
   })
 
-  test('is refused without the note citing the authorization', async () => {
+  test('is refused when the latest Decision Request has no answer', async () => {
     saveJob(root, makeJob({ worktree: tree, decisionRequests: [DR] }))
+    writeFileSync(join(tree, 'x.acceptance.test.ts'), 'x\n')
+    const error = await refusal(rewrite(root, 7, 'relax x'))
+    expect(error).toBeInstanceOf(Refusal)
+    expect((error as Refusal).message).toContain('factory answer')
+    expect(loadJob(root, 7)?.rewrites).toEqual([])
+  })
+
+  test('is refused when only an earlier request was answered', async () => {
+    saveJob(
+      root,
+      makeJob({
+        worktree: tree,
+        decisionRequests: [DR, { ...DR, file: 'decision-requests/2.md' }],
+        answers: answered().answers,
+      }),
+    )
+    writeFileSync(join(tree, 'x.acceptance.test.ts'), 'x\n')
+    expect(await refusal(rewrite(root, 7, 'relax x'))).toBeInstanceOf(Refusal)
+  })
+
+  test('is refused without the note describing the change', async () => {
+    saveJob(root, makeJob({ worktree: tree, ...answered() }))
     writeFileSync(join(tree, 'x.acceptance.test.ts'), 'x\n')
     expect(await refusal(rewrite(root, 7, '  '))).toBeInstanceOf(Refusal)
   })
 
   test('is refused when a file other than an acceptance test changed', async () => {
-    saveJob(root, makeJob({ worktree: tree, decisionRequests: [DR] }))
+    saveJob(root, makeJob({ worktree: tree, ...answered() }))
     writeFileSync(join(tree, 'x.acceptance.test.ts'), 'x\n')
     writeFileSync(join(tree, 'a.txt'), 'two\n')
-    const error = await refusal(rewrite(root, 7, 'https://example.com/c'))
+    const error = await refusal(rewrite(root, 7, 'relax x'))
     expect(error).toBeInstanceOf(Refusal)
     expect((error as Refusal).message).toContain('a.txt')
   })
 
-  test('commits the acceptance tests and records the rewrite', async () => {
-    saveJob(root, makeJob({ worktree: tree, decisionRequests: [DR] }))
+  test('commits the acceptance tests, cites the answer and records the rewrite', async () => {
+    saveJob(root, makeJob({ worktree: tree, ...answered() }))
     mkdirSync(join(tree, 'apps/web/e2e'), { recursive: true })
     writeFileSync(join(tree, 'apps/web/e2e/a.spec.ts'), 'x\n')
-    const job = await rewrite(root, 7, 'https://example.com/c')
+    const job = await rewrite(root, 7, 'relax x')
     const head = await git(tree, 'rev-parse', 'HEAD')
-    expect(job.rewrites[0]).toMatchObject({ commit: head, note: 'https://example.com/c' })
+    expect(job.rewrites[0]).toMatchObject({ commit: head, note: 'relax x' })
     expect(job.cliCommits).toContain(head)
-    expect(await git(tree, 'log', '-1', '--format=%B')).toContain('Factory-Job: #7')
+    const message = await git(tree, 'log', '-1', '--format=%B')
+    expect(message).toContain('relax x')
+    expect(message).toContain('Yes, relax it')
+    expect(message).toContain('Factory-Job: #7')
+    expect(message).toContain(
+      'Authorized-By: factory answer 2026-01-02T00:00:00Z (#7, Decision Request 1)',
+    )
+    expect(job.answers[0]?.cited).toBe(true)
+  })
+})
+
+describe('factory atfix', () => {
+  test('commits a plain fix with no citation when nothing was answered', async () => {
+    saveJob(root, makeJob({ worktree: tree }))
+    writeFileSync(join(tree, 'x.acceptance.test.ts'), 'x\n')
+    await atfix(root, 7, 'rename a helper')
+    expect(await git(tree, 'log', '-1', '--format=%B')).not.toContain('Authorized-By')
+  })
+
+  test('cites an answered request the first commit after it, and not again', async () => {
+    saveJob(root, makeJob({ worktree: tree, ...answered() }))
+    writeFileSync(join(tree, 'x.acceptance.test.ts'), 'x\n')
+    const first = await atfix(root, 7, 'apply the answer')
+    const message = await git(tree, 'log', '-1', '--format=%B')
+    expect(message).toContain('Yes, relax it')
+    expect(message).toContain(
+      'Authorized-By: factory answer 2026-01-02T00:00:00Z (#7, Decision Request 1)',
+    )
+    expect(first.answers[0]?.cited).toBe(true)
+
+    writeFileSync(join(tree, 'y.acceptance.test.ts'), 'y\n')
+    await atfix(root, 7, 'another fix')
+    expect(await git(tree, 'log', '-1', '--format=%B')).not.toContain('Authorized-By')
+  })
+})
+
+describe('factory block', () => {
+  let fake: ReturnType<typeof installFakeGh>
+  beforeEach(() => {
+    fake = installFakeGh(root)
+  })
+  afterEach(() => fake.restore())
+
+  test('keeps the request, moves the label, posts nothing and returns the request to print', async () => {
+    saveJob(root, makeJob({ worktree: tree }))
+    const file = join(root, 'dr.md')
+    writeFileSync(file, '# Question\n\nMay I relax x?\n')
+    const { job, request } = await block(root, 7, file)
+    expect(request).toContain('May I relax x?')
+    expect(job.state).toBe('blocked')
+    expect(job.decisionRequests).toHaveLength(1)
+    expect(readFileSync(job.decisionRequests[0]!.file, 'utf8')).toContain('May I relax x?')
+    expect(fake.calls()).toContain('issue edit 7 --add-label factory:blocked')
+    expect(fake.calls()).not.toContain('comment')
   })
 })
 

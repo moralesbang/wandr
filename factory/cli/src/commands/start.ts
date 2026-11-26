@@ -4,6 +4,7 @@ import { parseCriteria, slugify } from '../issue.ts'
 import {
   canStartAnother,
   handoffDir,
+  latestAnswer,
   listJobs,
   loadJob,
   migrateHandoff,
@@ -20,7 +21,6 @@ type Issue = {
   body: string
   state: string
   labels: { name: string }[]
-  comments: { author: { login: string }; body: string; createdAt: string }[]
 }
 
 const LABEL_COLORS: Record<string, [string, string]> = {
@@ -59,7 +59,7 @@ export async function moveLabel(number: number, to: string) {
 
 const viewIssue = async (number: number) =>
   JSON.parse(
-    await gh('issue', 'view', String(number), '--json', 'number,title,body,state,labels,comments'),
+    await gh('issue', 'view', String(number), '--json', 'number,title,body,state,labels'),
   ) as Issue
 
 const writeIssue = (handoff: string, issue: Issue) =>
@@ -123,6 +123,7 @@ export async function start(root: string, number: number, session: string): Prom
     rewrites: [],
     redRejections: 0,
     decisionRequests: [],
+    answers: [],
     pr: null,
     startedAt: new Date().toISOString(),
   }
@@ -151,6 +152,12 @@ async function resume(root: string, job: Job, session: string): Promise<Job> {
   }
   let resumed = { ...job, session }
   if (job.state === 'blocked') {
+    // Only the user's own `factory answer` unblocks a job; a chat reply or a comment proves nothing.
+    if (job.decisionRequests.length > 0 && !latestAnswer(job)) {
+      throw new Refusal(
+        `Job #${job.number} is blocked: Decision Request ${job.decisionRequests.length} has no answer. Ask the user to answer it with: ! bun run factory answer ${job.number} "<answer>"`,
+      )
+    }
     resumed = { ...resumed, state: 'building' }
     await moveLabel(job.number, LABELS.building)
   }
@@ -159,15 +166,12 @@ async function resume(root: string, job: Job, session: string): Promise<Job> {
   return resumed
 }
 
-/** The issue's comments since the job's last Decision Request: the user's answer. */
-export async function answersSinceLastRequest(job: Job) {
-  const last = job.decisionRequests.at(-1)
-  if (!last) return []
-  const issue = await viewIssue(job.number)
-  return issue.comments.filter(
-    (comment) => comment.createdAt > last.at && !comment.body.includes(DECISION_REQUEST_MARKER),
-  )
+/**
+ * The user's answer to the Decision Request the job just resumed from, for the orchestrator to
+ * read; null when there is none or a commit already cited it.
+ */
+export function describeAnswer(job: Job): string | null {
+  const answer = latestAnswer(job)
+  if (!answer || answer.cited) return null
+  return `The user answered Decision Request ${answer.request} (${answer.at}):\n\n${answer.text}`
 }
-
-/** Marks the factory's own Decision Request comments, so they never read as the user's answer. */
-export const DECISION_REQUEST_MARKER = '<!-- factory:decision-request -->'

@@ -5,9 +5,10 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { makeJob } from '../job-fixture.ts'
-import { saveJob } from '../job.ts'
-import { start } from './start.ts'
+import { installFakeGh, makeJob } from '../job-fixture.ts'
+import { loadJob, saveJob } from '../job.ts'
+import { Refusal } from './common.ts'
+import { describeAnswer, start } from './start.ts'
 
 let root = ''
 let worktree = ''
@@ -47,5 +48,52 @@ describe('factory start on an existing job', () => {
     writeFileSync(join(handoff, 'acceptance.md'), 'current\n')
     await start(root, 7, 'session-2')
     expect(readFileSync(join(handoff, 'acceptance.md'), 'utf8')).toBe('current\n')
+  })
+})
+
+const refusal = (promise: Promise<unknown>) => promise.catch((caught: unknown) => caught)
+
+const blocked = (overrides: Parameters<typeof makeJob>[0]) =>
+  saveJob(root, makeJob({ worktree, state: 'blocked', ...overrides }))
+
+describe('factory start on a blocked job', () => {
+  const DR = { at: '2026-01-01T00:00:00Z', file: 'decision-requests/1.md' }
+  const ANSWER = { request: 1, at: '2026-01-02T00:00:00Z', text: 'Drop it, go on', cited: false }
+  let fake: ReturnType<typeof installFakeGh>
+  beforeEach(() => {
+    fake = installFakeGh(root)
+  })
+  afterEach(() => fake.restore())
+
+  test('is refused while the latest Decision Request has no answer, and stays blocked', async () => {
+    blocked({ decisionRequests: [DR] })
+    const error = await refusal(start(root, 7, 'session-2'))
+    expect(error).toBeInstanceOf(Refusal)
+    expect((error as Refusal).message).toContain('factory answer')
+    expect(loadJob(root, 7)?.state).toBe('blocked')
+    expect(fake.calls()).toBe('')
+  })
+
+  test('is refused when only an earlier request has an answer', async () => {
+    blocked({
+      decisionRequests: [DR, { ...DR, file: 'decision-requests/2.md' }],
+      answers: [{ ...ANSWER, cited: true }],
+    })
+    expect(await refusal(start(root, 7, 'session-2'))).toBeInstanceOf(Refusal)
+    expect(loadJob(root, 7)?.state).toBe('blocked')
+  })
+
+  test('takes the job back to building once the latest request is answered', async () => {
+    blocked({ decisionRequests: [DR], answers: [ANSWER] })
+    const job = await start(root, 7, 'session-2')
+    expect(job.state).toBe('building')
+    expect(loadJob(root, 7)?.state).toBe('building')
+    expect(fake.calls()).toContain('--add-label factory:building')
+    expect(describeAnswer(job)).toContain('Drop it, go on')
+  })
+
+  test('prints no answer for a job whose answer a commit already cited', () => {
+    const job = makeJob({ decisionRequests: [DR], answers: [{ ...ANSWER, cited: true }] })
+    expect(describeAnswer(job)).toBeNull()
   })
 })

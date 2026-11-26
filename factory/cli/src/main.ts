@@ -18,7 +18,8 @@ import {
 } from './commands/lifecycle.ts'
 import { pr } from './commands/pr.ts'
 import { red } from './commands/red.ts'
-import { answersSinceLastRequest, start } from './commands/start.ts'
+import { answer } from './commands/answer.ts'
+import { describeAnswer, start } from './commands/start.ts'
 import { watch } from './watch/server.ts'
 
 const USAGE = `Usage: bun run factory <command>
@@ -30,8 +31,9 @@ const USAGE = `Usage: bun run factory <command>
   gate <n>                   the gate before review
   round <n>                  record a new review round with findings
   atfix <n> --note <text>    commit a same-guarantee acceptance-test fix
-  rewrite <n> --note <text>  commit an authorized rewrite of acceptance tests
-  block <n> <file>           post a Decision Request and block the job
+  rewrite <n> --note <text>  commit a rewrite of acceptance tests (needs an answered Decision Request)
+  block <n> <file>           keep a Decision Request and block the job
+  answer <n> "<text>"        the user's answer to the Decision Request (only from the user's own prompt)
   pr <n>                     open the pull request
   status                     list the jobs
   watch [--port <port>]      serve the live page
@@ -69,12 +71,8 @@ async function main(argv: string[]): Promise<number> {
         throw new Refusal('start needs --session <id> (the skill passes ${CLAUDE_SESSION_ID}).')
       const job = await start(root, issueNumber(arg), values.session)
       print({ ...job, handoff: handoffDir(job) })
-      const answers = await answersSinceLastRequest(job)
-      if (answers.length) {
-        print('\nThe user answered the last Decision Request:\n')
-        for (const answer of answers)
-          print(`--- ${answer.author.login}, ${answer.createdAt}\n${answer.body}\n`)
-      }
+      const note = describeAnswer(job)
+      if (note) print(`\n${note}\n`)
       return 0
     }
     case 'red': {
@@ -116,8 +114,17 @@ async function main(argv: string[]): Promise<number> {
     case 'block': {
       const file = positionals[2]
       if (!file) throw new Refusal('block needs the Decision Request file: block <n> <file>')
-      await block(root, issueNumber(arg), file)
-      print(`Job #${arg} is blocked; the Decision Request is on the issue.`)
+      const { request } = await block(root, issueNumber(arg), file)
+      print(
+        `Job #${arg} is blocked. Decision Request:\n\n${request}\n\nThe user answers with: ! bun run factory answer ${arg} "<text>"`,
+      )
+      return 0
+    }
+    case 'answer': {
+      const text = positionals[2]
+      if (!text) throw new Refusal('answer needs the text: answer <n> "<text>"')
+      answer(root, issueNumber(arg), text)
+      print(`Decision Request answered; run factory start ${arg} to resume.`)
       return 0
     }
     case 'pr':

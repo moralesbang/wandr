@@ -47,6 +47,21 @@ export const Job = z.object({
   /** How many times `factory red` rejected the test agent's red. */
   redRejections: z.number().int().nonnegative().default(0),
   decisionRequests: z.array(z.object({ at: z.string(), file: z.string() })),
+  /**
+   * The user's answers, written only by `factory answer`, which the user runs from their own
+   * prompt. `request` is the 1-based position in decisionRequests; `cited` is set once a commit
+   * carries the answer as its authorization.
+   */
+  answers: z
+    .array(
+      z.object({
+        request: z.number().int().positive(),
+        at: z.string(),
+        text: z.string(),
+        cited: z.boolean().default(false),
+      }),
+    )
+    .default([]),
   pr: z.string().nullable(),
   startedAt: z.string(),
 })
@@ -162,6 +177,10 @@ export function canTryRed(job: Pick<Job, 'number' | 'redRejections'>): Allowed {
       }
     : { ok: true }
 }
+
+/** The user's answer to the job's latest Decision Request, if it has one. */
+export const latestAnswer = (job: Pick<Job, 'decisionRequests' | 'answers'>) =>
+  job.answers.find((answer) => answer.request === job.decisionRequests.length)
 
 /** The review pass now under way: 1 before any round with findings, then one more per round. */
 export const reviewPass = (job: Pick<Job, 'rounds'>) => job.rounds + 1

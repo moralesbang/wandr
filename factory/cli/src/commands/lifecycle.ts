@@ -1,10 +1,11 @@
 import { $ } from 'bun'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import {
   countAttempt,
   countRound,
   handoffDir,
+  latestAnswer,
   listJobs,
   saveJob,
   stateDir,
@@ -13,7 +14,7 @@ import {
 import { isAcceptanceTest } from '../paths.ts'
 import { commitAll, gh, git, uncommitted } from '../shell.ts'
 import { LABELS, record, Refusal, requireJob } from './common.ts'
-import { DECISION_REQUEST_MARKER, moveLabel } from './start.ts'
+import { moveLabel } from './start.ts'
 
 export function attempt(root: string, number: number): Job {
   const counted = countAttempt(requireJob(root, number))
@@ -35,8 +36,7 @@ export function round(root: string, number: number): Job {
 async function commitAcceptanceChange(
   job: Job,
   what: string,
-  message: (note: string) => string,
-  note: string,
+  message: string,
 ): Promise<{ sha: string; files: string[] }> {
   const changed = await uncommitted(job.worktree)
   if (changed.length === 0) throw new Refusal('Nothing changed.')
@@ -44,21 +44,58 @@ async function commitAcceptanceChange(
   if (others.length) {
     throw new Refusal(`${what} changes only acceptance tests; these aren't: ${others.join(', ')}`)
   }
-  return { sha: await commitAll(job.worktree, message(note)), files: changed }
+  return { sha: await commitAll(job.worktree, message), files: changed }
 }
 
-/** Commits the test agent's same-guarantee fix to acceptance tests, and nothing else. */
+/**
+ * What a commit says about the user's answer: its text for the body and the trailer that cites it.
+ * Null when the latest Decision Request has no answer.
+ */
+function citation(job: Job) {
+  const answer = latestAnswer(job)
+  if (!answer) return null
+  return {
+    answer,
+    body: `The user answered Decision Request ${answer.request}:\n\n${answer.text}`,
+    trailer: `Authorized-By: factory answer ${answer.at} (#${job.number}, Decision Request ${answer.request})`,
+  }
+}
+
+const markCited = (job: Job): Job => ({
+  ...job,
+  answers: job.answers.map((answer) =>
+    answer.request === job.decisionRequests.length ? { ...answer, cited: true } : answer,
+  ),
+})
+
+const commitMessage = (
+  subject: string,
+  note: string,
+  number: number,
+  cited: ReturnType<typeof citation>,
+) =>
+  [
+    subject,
+    note,
+    ...(cited ? [cited.body] : []),
+    [`Factory-Job: #${number}`, ...(cited ? [cited.trailer] : [])].join('\n'),
+  ].join('\n\n')
+
+/**
+ * Commits the test agent's same-guarantee fix to acceptance tests, and nothing else. The first
+ * commit after the user's answer cites it.
+ */
 export async function atfix(root: string, number: number, note: string): Promise<Job> {
   const job = requireJob(root, number)
   if (!note.trim()) throw new Refusal('Say what the fix changes: factory atfix <n> --note "…"')
+  const cited = citation(job)?.answer.cited === false ? citation(job) : null
   const { sha, files } = await commitAcceptanceChange(
     job,
     'An acceptance-test fix',
-    (text) => `test(#${number}): fix an acceptance test\n\n${text}\n\nFactory-Job: #${number}`,
-    note,
+    commitMessage(`test(#${number}): fix an acceptance test`, note, number, cited),
   )
   const updated: Job = {
-    ...job,
+    ...(cited ? markCited(job) : job),
     cliCommits: [...job.cliCommits, sha],
     atfixes: [...job.atfixes, { sha, note, files }],
   }
@@ -69,29 +106,29 @@ export async function atfix(root: string, number: number, note: string): Promise
 
 /**
  * Commits the test agent's rewrite of acceptance tests after the user authorized a change of
- * guarantee on the issue. The note cites that authorization.
+ * guarantee by answering a Decision Request. The commit cites that answer; the note describes the
+ * change.
  */
 export async function rewrite(root: string, number: number, note: string): Promise<Job> {
   const job = requireJob(root, number)
-  if (!note.trim()) {
+  const cited = citation(job)
+  if (!cited) {
     throw new Refusal(
-      'Cite the user\'s authorization: factory rewrite <n> --note "<the issue comment URL>"',
+      job.decisionRequests.length === 0
+        ? `Job #${number} has no Decision Request, so no guarantee change can be authorized. Raise one with factory block.`
+        : `Decision Request ${job.decisionRequests.length} of job #${number} has no answer, so no guarantee change is authorized. The user answers with: ! bun run factory answer ${number} "<answer>"`,
     )
   }
-  if (job.decisionRequests.length === 0) {
-    throw new Refusal(
-      `Job #${number} has no Decision Request, so no guarantee change can be authorized. Raise one with factory block.`,
-    )
+  if (!note.trim()) {
+    throw new Refusal('Say what the rewrite changes: factory rewrite <n> --note "…"')
   }
   const { sha, files } = await commitAcceptanceChange(
     job,
     'An authorized rewrite',
-    (text) =>
-      `test(#${number}): rewrite acceptance tests as authorized\n\n${text}\n\nFactory-Job: #${number}`,
-    note,
+    commitMessage(`test(#${number}): rewrite acceptance tests as authorized`, note, number, cited),
   )
   const updated: Job = {
-    ...job,
+    ...markCited(job),
     cliCommits: [...job.cliCommits, sha],
     rewrites: [...job.rewrites, { commit: sha, note, at: new Date().toISOString() }],
   }
@@ -100,17 +137,22 @@ export async function rewrite(root: string, number: number, note: string): Promi
   return updated
 }
 
-/** Posts a Decision Request on the issue and blocks the job until the user answers there. */
-export async function block(root: string, number: number, file: string): Promise<Job> {
+/**
+ * Keeps a Decision Request in the job's folder and blocks the job until the user answers with
+ * `factory answer`. Nothing is posted on the issue: no one but the user may answer, so the request
+ * goes to the terminal; the caller prints the returned text.
+ */
+export async function block(
+  root: string,
+  number: number,
+  file: string,
+): Promise<{ job: Job; request: string }> {
   const job = requireJob(root, number)
   const dir = join(handoffDir(job), 'decision-requests')
   mkdirSync(dir, { recursive: true })
   const kept = join(dir, `${job.decisionRequests.length + 1}.md`)
   copyFileSync(file, kept)
-  const posted = join(dir, `${job.decisionRequests.length + 1}.posted.md`)
-  writeFileSync(posted, `${DECISION_REQUEST_MARKER}\n${readFileSync(file, 'utf8')}`)
   const at = new Date().toISOString()
-  await gh('issue', 'comment', String(number), '--body-file', posted)
   await moveLabel(number, LABELS.blocked)
   const updated: Job = {
     ...job,
@@ -119,7 +161,7 @@ export async function block(root: string, number: number, file: string): Promise
   }
   saveJob(root, updated)
   record(root, number, 'blocked', { file: kept })
-  return updated
+  return { job: updated, request: readFileSync(kept, 'utf8') }
 }
 
 export function status(root: string): string {
