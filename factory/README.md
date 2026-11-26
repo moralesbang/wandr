@@ -2,7 +2,7 @@
 
 The factory takes a GitHub issue to an open pull request with agents. It **delegates execution, not authority**: agents write the tests and the code, deterministic checks they can't change give the verdict, and the user approves what is built and merges it.
 
-This is version 1.1. How it got here and what comes next: [`versions/`](versions/).
+This is version 1.2. How it got here and what comes next: [`versions/`](versions/).
 
 ## The flow
 
@@ -242,7 +242,7 @@ The name keeps an acceptance test protected after its job, so no later build age
 
 ### A valid red
 
-`factory red` runs every new or changed acceptance test and accepts the red only if each file loaded, ran at least one test, and every test fails on an assertion. Vitest and Playwright run with our own reporters (`factory/cli/src/reporters/`), which write one JSON report in a common shape; `bun test` has no custom-reporter API, so the CLI converts its JUnit report into that shape. The rule then works on one shape:
+`factory red` runs every new or changed acceptance test and accepts the red only if each file passes lint and format (`oxlint --deny-warnings` and `oxfmt --check`, the worktree's own, as CI runs them), loaded, ran at least one test, and every test fails on an assertion. A file CI would reject is no red to build on: the build agent can't fix it, so it would cost an acceptance-test fix later. One rejection names every problem at once, lint, format and the run, each with its file and the command that fixes or checks it. Vitest and Playwright run with our own reporters (`factory/cli/src/reporters/`), which write one JSON report in a common shape; `bun test` has no custom-reporter API, so the CLI converts its JUnit report into that shape. The rule then works on one shape:
 
 | Runner | Accepted | Rejected |
 | --- | --- | --- |
@@ -283,7 +283,7 @@ flowchart LR
 
 The test agent may write acceptance tests but none of the other rows. `package.json` and `vite.config.ts` aren't protected, because dependencies and plugins change legitimately; the evaluator checks them for tampering. A job that needs to change a protected path escalates with a Decision Request.
 
-**The local checks** are the commands in [`ci.yml`](../.github/workflows/ci.yml), run with `CI=1` in the job's worktree: `bun install --frozen-lockfile`, `bun run services`, `bunx turbo run lint typecheck test build`, `bunx oxfmt --check`, the generated-files check, `db:migrate:test` and `bunx turbo run e2e`. Every job shares the same test database, bucket and Playwright port, so a machine-wide lock lets one job run checks at a time; the others wait in line. `factory red` takes the same lock.
+**The local checks** are the commands in [`ci.yml`](../.github/workflows/ci.yml), run with `CI=1` in the job's worktree, each step's script handed to `bash --noprofile --norc -eo pipefail -c` as one argument, as GitHub Actions runs it, so its newlines, line continuations and `$VAR`s reach bash untouched: `bun install --frozen-lockfile`, `bun run services`, `bunx turbo run lint typecheck test build`, `bunx oxfmt --check`, the generated-files check, `db:migrate:test` and `bunx turbo run e2e`. Every job shares the same test database, bucket and Playwright port, so a machine-wide lock lets one job run checks at a time; the others wait in line. They share one Docker stack too: `docker-compose.yml` names its project `wandr`, so `bun run services` from any checkout or worktree reuses the same containers and volumes instead of starting a stack that fights over ports 5432 and 9000. Its config holds no host path, so starting it from another checkout doesn't recreate a container. `factory red` takes the same lock.
 
 ## A job's states
 
@@ -296,6 +296,8 @@ stateDiagram-v2
     blocked --> building: user answers, /factory 42 again
     building --> pr_open: factory pr
     pr_open --> [*]: user merges, factory clean
+    building --> ready: factory clean --abandon
+    blocked --> ready: factory clean --abandon
 ```
 
 | State | Label on the issue | Set by |
@@ -304,6 +306,8 @@ stateDiagram-v2
 | building | `factory:building` | `factory start` |
 | blocked | `factory:blocked` | `factory block` |
 | pr_open | `factory:pr-open` | `factory pr` |
+
+**Abandoning a job.** A job that shouldn't go on, because the factory itself needs a fix or the issue needs rewriting, is discarded with `factory clean <n> --abandon`, in this order: it records `job.abandoned` in the job's log (the last event `factory watch` shows), takes down any compose stack the worktree started on its own, with its volumes but never the shared `wandr` stack, removes the worktree, deletes the branch locally and on `origin`, deletes the job's state folder, and moves the issue's label back to `factory:ready`, as it was before `factory start`. `/factory <n>` then starts the issue from scratch. It refuses while the branch has an open PR, which you close by hand first, and when the PR merged, which is plain `clean`.
 
 **Decision Requests.** Whenever a job needs the user (an escalation or a block), `factory block` comments on the issue with the context, the evidence, the alternatives, a recommendation, the impact and the risks, and moves the label to `factory:blocked`. The answer on the issue is the decision's record. The build agent escalates instead of deciding when a change would touch a public contract, the architecture, an acceptance test or anything outside the issue's ACs.
 
@@ -324,7 +328,7 @@ Run from the repo root as `bun run factory <command>`. The orchestrator runs eve
 | Command | What it does | Refuses when |
 | --- | --- | --- |
 | `start <n> --session <id>` | Creates `.claude/worktrees/<n>-<slug>` on `feat/<n>-<slug>`, installs, writes the job's state (`job.json`) in the main checkout and `issue.md` in the job's folder, moves the label to `factory:building`, and prints the job with its folder's path. On an existing job, copies into the job's folder any handoff file that exists only in the main checkout; on a blocked job, moves the label back and prints the user's answer. | The issue lacks `factory:ready` or numbered ACs; 3 jobs already run |
-| `red <n>` | Runs the new or changed acceptance tests and commits them as the red commit | A test passes, or fails on anything but an assertion; 3 reds were already rejected |
+| `red <n>` | Checks lint and format on the new or changed acceptance tests, runs them, and commits them as the red commit | A file fails lint or format; a test passes, or fails on anything but an assertion; 3 reds were already rejected |
 | `check <n>` | Runs the CI commands under the lock and saves the output in the job's folder | — (exits non-zero on red) |
 | `attempt <n>` | Records a build attempt (see "The two loops" for which runs count) | It would be the 4th |
 | `gate <n>` | Checks the last `check` was green on `HEAD`, the tree is clean and no protected path changed; writes the list of removed, skipped and focused tests | Any of those fails |
@@ -336,6 +340,7 @@ Run from the repo root as `bun run factory <command>`. The orchestrator runs eve
 | `status` | Lists the jobs and where each stands | — |
 | `watch` | Serves the live page on `localhost` | — |
 | `clean <n>` | Removes a merged job's worktree, branch and folder | The PR isn't merged |
+| `clean <n> --abandon` | Discards a job that won't merge, so its issue can start again: records the event, takes down the worktree's own compose stack, removes the worktree and the branch (local and remote), deletes the job's folder, moves the label back to `factory:ready` | The branch has an open PR (close it first) or a merged one |
 | `hook log` · `hook guard` | Entry points for Claude Code's hooks; not run by hand | — |
 
 **The pull request** is titled after the issue and its body holds `Closes #<n>`, a summary of the change, each AC with the acceptance tests that check it (from `acceptance.md`), the result of the local checks, any same-guarantee fixes to acceptance tests, and, in a separate section, any authorized guarantee changes with the note that cites each authorization. The comment beside it holds the build notes and both reviewers' final reports, so they stay on record in GitHub.
