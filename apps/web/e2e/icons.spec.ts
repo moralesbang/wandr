@@ -1,11 +1,21 @@
 import { expect, test, type Page } from '@playwright/test'
 
-type Icon = { url: string; type: 'image/svg+xml' | 'image/png'; size?: number; purpose?: string }
+type Icon = {
+  url: string
+  type: string
+  size?: [number, number]
+  purpose?: string
+}
 type Manifest = { icons?: { src: string; sizes?: string; type?: string; purpose?: string }[] }
 
 const MOSS = [0x4f, 0x63, 0x30]
 const TERRACOTTA = [0xe3, 0x9a, 0x7a]
 const TOLERANCE = 24
+
+function parseSize(sizes: string): [number, number] {
+  const [w, h] = sizes.split('x').map(Number)
+  return [w ?? Number.NaN, h ?? Number.NaN]
+}
 
 async function declaredIcons(page: Page): Promise<Icon[]> {
   await page.goto('/')
@@ -27,14 +37,13 @@ async function declaredIcons(page: Page): Promise<Icon[]> {
   const icons: Icon[] = []
   for (const l of links) {
     if (l.type === 'image/svg+xml') icons.push({ url: l.href, type: 'image/svg+xml' })
-    else if (l.sizes)
-      icons.push({ url: l.href, type: 'image/png', size: Number(l.sizes.split('x')[0]) })
+    else if (l.sizes) icons.push({ url: l.href, type: 'image/png', size: parseSize(l.sizes) })
   }
   for (const i of manifest.icons ?? []) {
     icons.push({
       url: new URL(i.src, manifestHref).href,
-      type: 'image/png',
-      size: Number((i.sizes ?? '').split('x')[0]),
+      type: i.type ?? '',
+      size: parseSize(i.sizes ?? ''),
       purpose: i.purpose ?? 'any',
     })
   }
@@ -74,7 +83,12 @@ async function pixels(page: Page, url: string) {
       width: bmp.width,
       height: bmp.height,
       center: at(Math.floor(w / 2), Math.floor(h / 2)),
-      edge: at(Math.floor(w * 0.08), Math.floor(h / 2)),
+      edges: [
+        at(Math.floor(w * 0.08), Math.floor(h / 2)),
+        at(Math.floor(w * 0.92), Math.floor(h / 2)),
+        at(Math.floor(w / 2), Math.floor(h * 0.08)),
+        at(Math.floor(w / 2), Math.floor(h * 0.92)),
+      ],
       minAlpha,
     }
   }, url)
@@ -101,10 +115,10 @@ test('the manifest lists 192 and 512 any icons and a 512 maskable icon, all PNG'
   page,
 }) => {
   const icons = (await declaredIcons(page)).filter((i) => i.purpose)
-  expect(icons.map((i) => `${i.type} ${i.size} ${i.purpose}`).toSorted()).toEqual([
-    'image/png 192 any',
-    'image/png 512 any',
-    'image/png 512 maskable',
+  expect(icons.map((i) => `${i.type} ${i.size?.join('x')} ${i.purpose}`).toSorted()).toEqual([
+    'image/png 192x192 any',
+    'image/png 512x512 any',
+    'image/png 512x512 maskable',
   ])
 })
 
@@ -119,7 +133,7 @@ test('every declared icon answers 200 with its type, and each PNG has the size i
     expect(res.headers()['content-type'], icon.url).toContain(icon.type)
     if (icon.size) {
       const px = await pixels(page, icon.url)
-      expect([px.width, px.height], icon.url).toEqual([icon.size, icon.size])
+      expect([px.width, px.height], icon.url).toEqual(icon.size)
     }
   }
 })
@@ -132,13 +146,13 @@ test('every icon draws the Contour mark: terracotta find at the center, moss til
   for (const icon of icons) {
     const px = await pixels(page, icon.url)
     near(px.center, TERRACOTTA)
-    near(px.edge, MOSS)
+    for (const edge of px.edges) near(edge, MOSS)
   }
 })
 
 test('the apple-touch-icon and the maskable icon have no transparent pixel', async ({ page }) => {
   const icons = (await declaredIcons(page)).filter(
-    (i) => i.size === 180 || i.purpose === 'maskable',
+    (i) => i.size?.join('x') === '180x180' || i.purpose === 'maskable',
   )
   expect(icons).toHaveLength(2)
   for (const icon of icons) {
