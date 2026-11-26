@@ -6,6 +6,10 @@ import { join } from 'node:path'
 
 const bin = (worktree: string, name: string) => join(worktree, 'node_modules', '.bin', name)
 
+/** A tool's output as plain text: oxfmt colors file names when it thinks it runs in CI. */
+const text = (result: { stdout: Buffer; stderr: Buffer }) =>
+  Bun.stripANSI(`${result.stdout.toString()}${result.stderr.toString()}`)
+
 /**
  * One problem per lint error and per unformatted file, each naming the file and how to fix it. An
  * empty list means every file passes `oxlint --deny-warnings` and `oxfmt --check`.
@@ -19,7 +23,7 @@ export async function styleProblems(worktree: string, files: readonly string[]):
     .nothrow()
     .quiet()
   if (lint.exitCode !== 0) {
-    const output = `${lint.stdout.toString()}${lint.stderr.toString()}`
+    const output = text(lint)
     // Unix format: `path:line:col: message [Severity/plugin(rule)]`, one per line.
     const found = output.split('\n').filter((line) => files.some((f) => line.startsWith(`${f}:`)))
     for (const line of found) {
@@ -32,7 +36,7 @@ export async function styleProblems(worktree: string, files: readonly string[]):
 
   const format = await $`${bin(worktree, 'oxfmt')} --check ${files}`.cwd(worktree).nothrow().quiet()
   if (format.exitCode !== 0) {
-    const output = format.stdout.toString()
+    const output = text(format)
     const unformatted = files.filter((file) =>
       output.split('\n').some((line) => line.startsWith(`${file} `) || line === file),
     )
