@@ -1,0 +1,21 @@
+{
+  "name": "@wandr/factory",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.12.0",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@playwright/test": "catalog:",
+    "@types/bun": "catalog:",
+    "@typescript/native": "catalog:",
+    "@wandr/tsconfig": "workspace:*",
+    "vitest": "catalog:"
+  }
+}

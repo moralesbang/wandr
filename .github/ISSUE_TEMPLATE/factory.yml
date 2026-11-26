@@ -1,0 +1,21 @@
+name: Factory issue
+description: A change the factory can build. The user adds the factory:ready label when it is ready to take.
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What to build and why, in plain words.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: One numbered line per criterion, each checkable by what a user or caller can observe.
+      placeholder: |
+        AC1: A walker can rename a walk from its page.
+        AC2: The new name shows in the journal list.
+        AC3: A blank name is refused with a message.
+    validations:
+      required: true

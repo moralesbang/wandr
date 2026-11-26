@@ -4,12 +4,15 @@
   "workspaces": {
     "packages": [
       "apps/*",
-      "packages/*"
+      "packages/*",
+      "factory/cli"
     ],
     "catalog": {
+      "@playwright/test": "1.65.1",
       "@types/bun": "1.4.5",
       "@typescript/native": "npm:typescript@7.0.2",
       "oxlint": "1.95.0",
+      "vitest": "5.1.1",
       "zod": "4.6.7"
     }
   },
@@ -24,7 +27,8 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "services": "docker compose up -d --wait && docker compose wait buckets",
-    "db:migrate": "bun run --cwd apps/api db:migrate"
+    "db:migrate": "bun run --cwd apps/api db:migrate",
+    "factory": "bun factory/cli/src/main.ts"
   },
   "devDependencies": {
     "@railway/cli": "5.75.0",

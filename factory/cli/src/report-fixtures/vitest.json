@@ -1,0 +1,44 @@
+{
+  "runner": "vitest",
+  "files": [
+    {
+      "path": "src/zz-a.acceptance.test.ts"
+    },
+    {
+      "path": "src/zz-c.acceptance.test.ts",
+      "loadError": "Failed to resolve import \"./does-not-exist\" from \"src/zz-c.acceptance.test.ts\". Does the file exist?"
+    }
+  ],
+  "tests": [
+    {
+      "file": "src/zz-a.acceptance.test.ts",
+      "name": "group > fails on an assertion",
+      "status": "failed",
+      "failure": {
+        "kind": "assertion",
+        "type": "AssertionError",
+        "message": "expected 1 to be 2 // Object.is equality"
+      }
+    },
+    {
+      "file": "src/zz-a.acceptance.test.ts",
+      "name": "group > throws",
+      "status": "failed",
+      "failure": {
+        "kind": "error",
+        "type": "Error",
+        "message": "boom"
+      }
+    },
+    {
+      "file": "src/zz-a.acceptance.test.ts",
+      "name": "group > passes",
+      "status": "passed"
+    },
+    {
+      "file": "src/zz-a.acceptance.test.ts",
+      "name": "group > skipped",
+      "status": "skipped"
+    }
+  ]
+}

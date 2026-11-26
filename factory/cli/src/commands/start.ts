@@ -1,0 +1,147 @@
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { parseCriteria, slugify } from '../issue.ts'
+import { canStartAnother, jobDir, listJobs, loadJob, saveJob, type Job } from '../job.ts'
+import { gh, git, runLogged } from '../shell.ts'
+import { LABELS, record, Refusal } from './common.ts'
+
+type Issue = {
+  number: number
+  title: string
+  body: string
+  state: string
+  labels: { name: string }[]
+  comments: { author: { login: string }; body: string; createdAt: string }[]
+}
+
+const LABEL_COLORS: Record<string, [string, string]> = {
+  [LABELS.ready]: ['0e8a16', 'The factory may take this issue'],
+  [LABELS.building]: ['1d76db', 'A factory job is building this issue'],
+  [LABELS.blocked]: ['d93f0b', 'A factory job waits for a decision on this issue'],
+  [LABELS.pr_open]: ['5319e7', 'A factory job opened a PR for this issue'],
+}
+
+async function ensureLabels() {
+  const existing = new Set(
+    (
+      JSON.parse(await gh('label', 'list', '--json', 'name', '--limit', '200')) as {
+        name: string
+      }[]
+    ).map((label) => label.name),
+  )
+  for (const [name, [color, description]] of Object.entries(LABEL_COLORS)) {
+    if (!existing.has(name)) {
+      await gh('label', 'create', name, '--color', color, '--description', description)
+    }
+  }
+}
+
+export async function moveLabel(number: number, to: string) {
+  const others = Object.values(LABELS).filter((label) => label !== to)
+  await gh(
+    'issue',
+    'edit',
+    String(number),
+    '--add-label',
+    to,
+    ...others.flatMap((l) => ['--remove-label', l]),
+  )
+}
+
+const viewIssue = async (number: number) =>
+  JSON.parse(
+    await gh('issue', 'view', String(number), '--json', 'number,title,body,state,labels,comments'),
+  ) as Issue
+
+export async function start(root: string, number: number, session: string): Promise<Job> {
+  const existing = loadJob(root, number)
+  if (existing) return resume(root, existing, session)
+
+  const allowed = canStartAnother(listJobs(root))
+  if (!allowed.ok) throw new Refusal(allowed.reason)
+
+  const issue = await viewIssue(number)
+  if (issue.state !== 'OPEN') throw new Refusal(`Issue #${number} is not open.`)
+  if (!issue.labels.some((label) => label.name === LABELS.ready)) {
+    throw new Refusal(`Issue #${number} doesn't have the ${LABELS.ready} label. The user sets it.`)
+  }
+  const criteria = parseCriteria(issue.body)
+  if (!criteria.ok) throw new Refusal(`Issue #${number}: ${criteria.reason}`)
+
+  const slug = slugify(issue.title)
+  const branch = `feat/${number}-${slug}`
+  const worktree = join(root, '.claude', 'worktrees', `${number}-${slug}`)
+  await git(root, 'fetch', '--quiet', 'origin', 'main')
+  const base = await git(root, 'rev-parse', 'origin/main')
+  await git(root, 'worktree', 'add', '--quiet', '-b', branch, worktree, base)
+
+  // Local secrets aren't committed; the worktree needs the developer's copy.
+  const env = join(root, 'apps', 'api', '.env')
+  if (existsSync(env)) copyFileSync(env, join(worktree, 'apps', 'api', '.env'))
+
+  const dir = jobDir(root, number)
+  mkdirSync(dir, { recursive: true })
+  const install = await runLogged(
+    'bun install --frozen-lockfile',
+    worktree,
+    join(dir, 'install.log'),
+  )
+  if (install !== 0) throw new Refusal(`bun install failed in ${worktree}; see ${dir}/install.log`)
+
+  writeFileSync(join(dir, 'issue.md'), `# ${issue.title} (#${number})\n\n${issue.body}\n`)
+  const job: Job = {
+    number,
+    title: issue.title,
+    slug,
+    branch,
+    worktree,
+    session,
+    state: 'building',
+    base,
+    redCommit: null,
+    cliCommits: [],
+    attempts: 0,
+    rounds: 0,
+    lastCheck: null,
+    gate: null,
+    atfixes: [],
+    rewrites: [],
+    redRejections: 0,
+    decisionRequests: [],
+    pr: null,
+    startedAt: new Date().toISOString(),
+  }
+  saveJob(root, job)
+  await ensureLabels()
+  await moveLabel(number, LABELS.building)
+  record(root, number, 'job.started', { branch, worktree, criteria: criteria.criteria.length })
+  return job
+}
+
+/** Takes a job back up in a new or the same session; a blocked job returns to building. */
+async function resume(root: string, job: Job, session: string): Promise<Job> {
+  if (job.state === 'pr_open') {
+    throw new Refusal(`Job #${job.number} already opened its PR: ${job.pr}`)
+  }
+  let resumed = { ...job, session }
+  if (job.state === 'blocked') {
+    resumed = { ...resumed, state: 'building' }
+    await moveLabel(job.number, LABELS.building)
+  }
+  saveJob(root, resumed)
+  record(root, job.number, 'job.resumed', { from: job.state })
+  return resumed
+}
+
+/** The issue's comments since the job's last Decision Request: the user's answer. */
+export async function answersSinceLastRequest(job: Job) {
+  const last = job.decisionRequests.at(-1)
+  if (!last) return []
+  const issue = await viewIssue(job.number)
+  return issue.comments.filter(
+    (comment) => comment.createdAt > last.at && !comment.body.includes(DECISION_REQUEST_MARKER),
+  )
+}
+
+/** Marks the factory's own Decision Request comments, so they never read as the user's answer. */
+export const DECISION_REQUEST_MARKER = '<!-- factory:decision-request -->'

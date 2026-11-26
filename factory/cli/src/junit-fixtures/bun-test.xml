@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="bun test" tests="3" assertions="2" failures="2" skipped="0" time="0.032008">
+  <testsuite name="src/zz-a.acceptance.test.ts" file="src/zz-a.acceptance.test.ts" tests="3" assertions="2" failures="2" skipped="0" time="0.015712" hostname="host">
+    <testsuite name="group" file="src/zz-a.acceptance.test.ts" line="2" tests="3" assertions="2" failures="2" skipped="0" time="0.005" hostname="host">
+      <testcase name="fails on an assertion" classname="group" time="0.005896" file="src/zz-a.acceptance.test.ts" line="3" assertions="1">
+        <failure type="AssertionError" message="expect(received).toBe(expected)&#10;&#10;Expected: 2&#10;Received: 1&#10;">AssertionError: expect(received).toBe(expected)&#10;&#10;Expected: 2&#10;Received: 1&#10;&#10;      at src/zz-a.acceptance.test.ts:3:51&#10;</failure>
+      </testcase>
+      <testcase name="throws" classname="group" time="0.000512" file="src/zz-a.acceptance.test.ts" line="4" assertions="0">
+        <failure type="Error" message="boom">Error: boom&#10;      at src/zz-a.acceptance.test.ts:4:48&#10;</failure>
+      </testcase>
+      <testcase name="passes" classname="group" time="0.000008" file="src/zz-a.acceptance.test.ts" line="5" assertions="1" />
+    </testsuite>
+  </testsuite>
+</testsuites>

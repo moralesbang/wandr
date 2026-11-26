@@ -1,0 +1,10 @@
+{
+  "runner": "playwright",
+  "files": [
+    {
+      "path": "zz-b.spec.ts",
+      "loadError": "SyntaxError: zz-b.spec.ts: Unexpected token, expected \",\" (2:19)"
+    }
+  ],
+  "tests": []
+}
