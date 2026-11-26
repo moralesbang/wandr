@@ -8,6 +8,16 @@ The user's main goal is to **learn** to build a factory by iterating on it: a de
 
 **The user decides.** Take no decision without asking: every choice not listed under "Decided" below goes to the user as a question that stands on its own, with your recommendation first and the trade-off of each option. For any external fact, use serious primary sources (official docs, papers, vendor engineering blogs), never forums, and cite them.
 
+## Principles
+
+The factory **delegates execution, not authority**. Use these to judge every design choice and to frame every question to the user.
+
+- **Inner loop**: implement → verify → diagnose → fix, fast and deterministic, run by the build agent alone until the checks pass or it hits its limit.
+- **Outer loop**: an evaluator with its own context checks the result against the issue's intent and sends actionable findings, backed by evidence, back to the inner loop. Passing tests is necessary, never sufficient.
+- **Independent gates**: the final verdict comes from checks the agent can't change (the CLI and CI), not from one agent's judgment of another.
+- **Human by exception**: the user approves the spec and its acceptance criteria, decides whatever changes intent, risk or constraints, and merges. Agents decide what is local, reversible and verifiable, and never widen their scope, their permissions or the rules they're judged by.
+- **Traceability**: every decision the user makes for a job stays on record in GitHub.
+
 ## Decided
 
 | Topic | Decision |
@@ -16,22 +26,26 @@ The user's main goal is to **learn** to build a factory by iterating on it: a de
 | Where files live | `factory/` at the repo root: `README.md`, `cli/` (the CLI), `versions/`. The skill in `.claude/skills/factory/SKILL.md`, the agents in `.claude/agents/`. Everything lives in the repo. |
 | Job state | One JSON per job in `factory/.jobs/`, gitignored. The CLI also moves the issue's labels (`factory:ready` → `factory:building` → `factory:pr-open`, plus a blocked state) so GitHub shows where each job stands. |
 | Concurrency | Up to 3 jobs at a time, **one Claude session per job**: the user runs `/factory 42` in up to three terminals; the CLI refuses a fourth. |
-| Skill | One skill only, `/factory`: the orchestrator of one job. It runs in the main session, because a background subagent has no Agent tool and can't spawn the test and build agents. |
+| Skill | One skill only, `/factory`: the orchestrator of one job. It runs in the main session, because a background subagent has no Agent tool and can't spawn the other agents. |
 | Subagents | Each runs in the background. |
 | Deterministic actions | A CLI in **TypeScript on Bun** (the repo's runtime; no new toolchain, no build step, `Bun.$` for git and gh, tested with `bun test`). The CLI is the shell backbone: the skill runs CLI subcommands for every deterministic step and reasons only about the rest. |
-| Worktree | The CLI creates it: `factory start 42` makes `.claude/worktrees/42-<slug>` on branch `feat/42-<slug>`; both agents work there. The CLI owns branch naming and cleanup. |
-| V1 flow | Issue → **test agent** writes failing tests and commits them (the red commit) → **build agent**, in another context, implements until green → the CI checks run locally → PR. The user reviews and merges. No plan gate and no automated review in V1. |
-| Tests vs implementation | Tests are **frozen but visible**: the build agent may read and run them, never edit them. The CLI checks that the build's diff touches no test file and fails if it does. |
-| Hollow tests | V1 defends with a **verified red**: at the red commit the CLI runs the new tests and rejects any that already pass; at the green commit all must pass. Traceability per AC, mutation testing and a reviewer agent are V2 candidates. |
+| Worktree | The CLI creates it: `factory start 42` makes `.claude/worktrees/42-<slug>` on branch `feat/42-<slug>`; all agents work there. The CLI owns branch naming and cleanup. |
+| V1 flow | Issue → **test agent** writes failing tests and commits them (the red commit) → **build agent**, in another context, implements until green → the CI checks run locally → **evaluator agent**, in its own context, reviews the result and sends findings back to the build agent, then re-evaluates (the outer loop) → PR. The user reviews and merges. No plan gate and no refactor step in V1. |
+| Tests vs implementation | Tests are **frozen but visible**: the build agent may read and run them, never edit them or add new ones. |
+| Protected paths | The CLI rejects a build whose diff touches a test file, `.github/workflows/`, the lint or TypeScript config, `factory/` or `.claude/`: the agent can't change the rules it's judged by. |
+| Hollow tests | V1 defends with a **verified red**: at the red commit the CLI runs the new tests and rejects any that already pass; at the green commit all must pass. Traceability per AC and mutation testing are V2 candidates. |
+| Escalation | The build agent stops and asks instead of deciding when the change would touch a public contract, the architecture, or anything outside the issue's ACs. V1 enforces this by instruction only. |
+| Decision Requests | Whenever a job needs the user (an escalation or a block), the orchestrator comments on the issue with context, evidence, alternatives, a recommendation, impact and risks, and moves the job to the blocked label. The user's answer on the issue is the decision's record. |
 | Models | Haiku explores code, Sonnet writes code (test and build agents), Opus does what matters: the orchestrator and the diagnosis of a failed build. |
-| `factory/README.md` | Explains the flow **visually** first (diagrams of the stations, the job's states and labels, who runs each step), then the commands. It describes the current version only. |
+| `factory/README.md` | Explains the flow **visually** first (diagrams of the stations, both loops, the job's states and labels, who runs each step), then the commands. It describes the current version only. |
 | Versions | Each version is a git tag (`factory-v1`) plus `factory/versions/v1.md`: the need that motivated it, what it does, what the user learned, and the V2 candidates. `factory/versions/` is an explicit exception to the repo rule that docs hold only the current definition; record that exception in `CLAUDE.md`. |
 
 ## Open: settle with the user before designing
 
-1. **What counts as a valid red.** If the module under test doesn't exist yet, the whole test file fails on import, so every test "fails" even if it asserts nothing. Options on the table: (a) the test agent writes stubs with the signatures (throwing "not implemented" or returning an empty value) so the file loads, and the CLI reads a JUnit report to require each new test to fail on an assertion, not on an import or syntax error; (b) any failure counts. The user asked you to **research this** before they decide: the TDD literature on "failing for the right reason" (Beck, Freeman & Pryce), and whether `bun test` and Vitest report assertion failures apart from load errors in their JUnit output. Bring findings with sources and a recommendation.
-2. **Retries and diagnosis.** The user asked for a **concrete example** before deciding: walk one job through a build that doesn't reach green (what the agent sees, what the orchestrator does, when the user hears about it). Options on the table: (a) 2 Sonnet attempts, then the Opus orchestrator diagnoses and relaunches once, then the job is blocked and the user is told; (b) the same with a fresh-context Opus subagent diagnosing; (c) 1 attempt, then the user decides.
-3. Anything else the design needs that isn't decided above, for example: whether the CLI follows `knowledge/standards/workspace.md` (it lives outside `apps/` and `packages/`), the CLI's subcommands, the PR body (link `Closes #<n>`), how the user learns a job finished or is blocked, how the local checks match CI (`.github/workflows/ci.yml`).
+1. **What counts as a valid red.** If the module under test doesn't exist yet, the whole test file fails on import, so every test "fails" even if it asserts nothing. Options on the table: (a) the test agent writes stubs with the signatures (throwing "not implemented" or returning an empty value) so the file loads, and the CLI reads a JUnit report to require each new test to fail on an assertion, not on an import or syntax error; (b) any failure counts. The principles lean to (a), tests that fail for the expected reason, but the user asked you to **research this** before they decide: the TDD literature on "failing for the right reason" (Beck, Freeman & Pryce), and whether `bun test` and Vitest report assertion failures apart from load errors in their JUnit output. Bring findings with sources and a recommendation.
+2. **The evaluator.** What it checks (starting point: ACs met, behavior end to end, conformance to `docs/05-architecture.md` and `knowledge/`, test quality, scope creep and over-engineering, tampering with the checks), its model, how many outer-loop rounds before the job is blocked, and where a finding about the frozen tests goes, since the build agent can't fix them (back to the test agent, or a Decision Request).
+3. **Retries and diagnosis.** The user asked for a **concrete example** before deciding: walk one job through a build that doesn't reach green (what the agent sees, what the orchestrator does, when the user hears about it). Options on the table: (a) 2 Sonnet attempts, then the Opus orchestrator diagnoses and relaunches once, then the job is blocked with a Decision Request; (b) the same with a fresh-context Opus subagent diagnosing; (c) 1 attempt, then the user decides. Settle it together with the evaluator's round limit: both are budgets of the same job.
+4. Anything else the design needs that isn't decided above, for example: whether the CLI follows `knowledge/standards/workspace.md` (it lives outside `apps/` and `packages/`), the CLI's subcommands, the exact protected files, the PR body (link `Closes #<n>`), how the user learns a job finished, how the local checks match CI (`.github/workflows/ci.yml`).
 
 ## How to run this session
 
@@ -42,10 +56,15 @@ The user's main goal is to **learn** to build a factory by iterating on it: a de
 5. Prove it end to end with the user on one small real issue: from `factory:ready` to an open PR. Record what happened in `factory/versions/v1.md`. Tag `factory-v1` after the user merges.
 6. Delete this file (`FACTORY_PROMPT.md`) in the same PR: the README and `versions/v1.md` replace it.
 
+## V2 candidates already raised
+
+Seed `factory/versions/v1.md` with these: a refactor step after green, technical tests added by the build agent (never touching the AC tests), hidden tests, mutation testing, property-based testing, contract tests, traceability per AC, a cost budget per job, enforcing escalation in the CLI.
+
 ## Already found (sources)
 
 - Claude Code: a background subagent loses the Agent tool, so it can't spawn subagents; custom subagents spawned from the main session start in the background; permission prompts from background subagents surface in the main session; `isolation: worktree` creates `.claude/worktrees/<name>` on a `worktree-<name>` branch, which is why the CLI creates the worktree instead. [Subagents](https://code.claude.com/docs/en/sub-agents), [Skills](https://code.claude.com/docs/en/skills), [Run agents in parallel](https://code.claude.com/docs/en/agents).
 - TDD with Claude: write tests from expected input/output, say it's TDD so it doesn't write mock implementations, run them and confirm they fail, commit them, then implement without changing them. [Anthropic, Claude Code best practices](https://www.anthropic.com/research/claude-code-best-practices).
+- The outer loop is Anthropic's evaluator-optimizer pattern: one model generates, another evaluates and gives feedback in a loop. [Anthropic, Building effective agents](https://www.anthropic.com/engineering/building-effective-agents).
 - Hollow tests (V2 material): Meta's ACH keeps an LLM-written test only if it kills a mutant ([arXiv:2501.12862](https://arxiv.org/abs/2501.12862)); Google runs mutation testing only on the diff, at code review ([Practical Mutation Testing at Scale](https://arxiv.org/pdf/2102.11378)). StrykerJS supports Vitest officially ([StrykerJS 7](https://stryker-mutator.io/blog/announcing-stryker-js-7/)); `bun test` only through community plugins, and its TypeScript checker reportedly fails on TypeScript 7, which this repo uses.
 - Shell vs a structured language: the [Google Shell Style Guide](https://google.github.io/styleguide/shellguide.html) advises leaving shell once a script passes ~100 lines or has non-trivial control flow.
 - `gh issue list --json number,title,labels --jq …` for intake: [gh issue list](https://cli.github.com/manual/gh_issue_list).
