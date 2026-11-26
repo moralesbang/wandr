@@ -6,7 +6,16 @@ import { check } from './commands/check.ts'
 import { Refusal } from './commands/common.ts'
 import { gate } from './commands/gate.ts'
 import { hookGuard, hookLog } from './commands/hook.ts'
-import { atfix, attempt, block, clean, rewrite, round, status } from './commands/lifecycle.ts'
+import {
+  abandon,
+  atfix,
+  attempt,
+  block,
+  clean,
+  rewrite,
+  round,
+  status,
+} from './commands/lifecycle.ts'
 import { pr } from './commands/pr.ts'
 import { red } from './commands/red.ts'
 import { answersSinceLastRequest, start } from './commands/start.ts'
@@ -27,6 +36,7 @@ const USAGE = `Usage: bun run factory <command>
   status                     list the jobs
   watch [--port <port>]      serve the live page
   clean <n>                  remove a merged job
+  clean <n> --abandon        discard an unmerged job so its issue can start again
   hook log | hook guard      Claude Code hook entry points`
 
 const issueNumber = (value: string | undefined) => {
@@ -47,6 +57,7 @@ async function main(argv: string[]): Promise<number> {
       session: { type: 'string' },
       note: { type: 'string' },
       port: { type: 'string' },
+      abandon: { type: 'boolean' },
     },
   })
   const [command, arg] = positionals
@@ -119,6 +130,11 @@ async function main(argv: string[]): Promise<number> {
       await watch(root, Number(values.port ?? 4300))
       return 0
     case 'clean':
+      if (values.abandon) {
+        print((await abandon(root, issueNumber(arg))).join('\n'))
+        print(`Job #${arg} abandoned.`)
+        return 0
+      }
       await clean(root, issueNumber(arg))
       print(`Job #${arg} cleaned.`)
       return 0

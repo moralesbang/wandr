@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ciSteps, readCiSteps, withChecksLock } from './checks.ts'
+import { ciSteps, readCiSteps, shellOf, withChecksLock } from './checks.ts'
 import { jobsDir } from './job.ts'
+import { runLogged } from './shell.ts'
 
 const repo = join(import.meta.dir, '..', '..', '..')
 
@@ -45,6 +46,55 @@ describe('ciSteps', () => {
   test('ignores steps that only use an action', () => {
     const yaml = 'jobs:\n  a:\n    steps:\n      - uses: actions/checkout@v4\n'
     expect(ciSteps(yaml).steps).toEqual([])
+  })
+})
+
+describe('a CI step run as factory check runs it', () => {
+  let dir = ''
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'factory-step-'))
+  })
+  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+  /** Runs a step's script the way `factory check` does; returns its exit code and the log. */
+  const runStep = async (run: string, env: Record<string, string> = {}) => {
+    const log = join(dir, 'step.log')
+    writeFileSync(log, '')
+    const code = await runLogged(shellOf(run), dir, log, env)
+    return { code, log: readFileSync(log, 'utf8') }
+  }
+
+  test('a one-line step runs, and its stdout and stderr reach the log', async () => {
+    expect(await runStep('echo out; echo err >&2')).toEqual({ code: 0, log: 'out\nerr\n' })
+  })
+
+  test('a multi-line step keeps its newlines, a continuation and a { …; } group', async () => {
+    // The shape of "Generated files match the code": a continued command whose failure runs a group.
+    const run = [
+      'echo first',
+      'test -n "" \\',
+      '  || { echo "stale"; exit 3; }',
+      'echo never',
+      '',
+    ].join('\n')
+    expect(await runStep(run)).toEqual({ code: 3, log: 'first\nstale\n' })
+  })
+
+  test('a multi-line step whose continued command passes runs to the end', async () => {
+    const run = ['test -n "x" \\', '  || { echo "stale"; exit 3; }', 'echo done', ''].join('\n')
+    expect(await runStep(run)).toEqual({ code: 0, log: 'done\n' })
+  })
+
+  test('bash, not an outer shell, expands $VAR and backticks', async () => {
+    const run = 'VALUE=inner\necho "var:$VALUE tick:`echo $VALUE`"\n'
+    expect(await runStep(run, { VALUE: 'outer' })).toEqual({
+      code: 0,
+      log: 'var:inner tick:inner\n',
+    })
+  })
+
+  test('a failing command in a pipeline fails the step, as with pipefail in CI', async () => {
+    expect((await runStep('false | cat\necho after\n')).code).not.toBe(0)
   })
 })
 

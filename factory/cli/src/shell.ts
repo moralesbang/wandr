@@ -1,7 +1,7 @@
 // git and gh, through Bun.$. Every call throws on a non-zero exit unless it says otherwise.
 
 import { $ } from 'bun'
-import { copyFileSync, existsSync, rmSync, utimesSync } from 'node:fs'
+import { closeSync, copyFileSync, existsSync, openSync, rmSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -63,18 +63,27 @@ export async function commitAll(cwd: string, message: string): Promise<string> {
   return git(cwd, 'rev-parse', 'HEAD')
 }
 
-/** Runs a shell command in `cwd`, appending its output to `log`. Resolves to its exit code. */
+/**
+ * Runs `argv` in `cwd`, appending its stdout and stderr to `log`. Resolves to its exit code. No
+ * shell stands between the CLI and the program: each argument reaches it exactly as given.
+ */
 export async function runLogged(
-  command: string,
+  argv: string[],
   cwd: string,
   log: string,
   env: Record<string, string> = {},
 ): Promise<number> {
-  const child = Bun.spawn(['sh', '-c', `${command} >> "$FACTORY_LOG" 2>&1`], {
-    cwd,
-    env: { ...process.env, ...env, FACTORY_LOG: log },
-    stdout: 'inherit',
-    stderr: 'inherit',
-  })
-  return child.exited
+  const fd = openSync(log, 'a')
+  try {
+    const child = Bun.spawn(argv, {
+      cwd,
+      env: { ...process.env, ...env },
+      stdin: 'ignore',
+      stdout: fd,
+      stderr: fd,
+    })
+    return await child.exited
+  } finally {
+    closeSync(fd)
+  }
 }

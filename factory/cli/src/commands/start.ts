@@ -94,7 +94,7 @@ export async function start(root: string, number: number, session: string): Prom
   const state = stateDir(root, number)
   mkdirSync(state, { recursive: true })
   const install = await runLogged(
-    'bun install --frozen-lockfile',
+    ['bun', 'install', '--frozen-lockfile'],
     worktree,
     join(state, 'install.log'),
   )
