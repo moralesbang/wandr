@@ -1,6 +1,14 @@
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { countAttempt, countRound, jobDir, listJobs, saveJob, type Job } from '../job.ts'
+import {
+  countAttempt,
+  countRound,
+  handoffDir,
+  listJobs,
+  saveJob,
+  stateDir,
+  type Job,
+} from '../job.ts'
 import { isAcceptanceTest } from '../paths.ts'
 import { commitAll, gh, git, uncommitted } from '../shell.ts'
 import { LABELS, record, Refusal, requireJob } from './common.ts'
@@ -94,7 +102,7 @@ export async function rewrite(root: string, number: number, note: string): Promi
 /** Posts a Decision Request on the issue and blocks the job until the user answers there. */
 export async function block(root: string, number: number, file: string): Promise<Job> {
   const job = requireJob(root, number)
-  const dir = join(jobDir(root, number), 'decision-requests')
+  const dir = join(handoffDir(job), 'decision-requests')
   mkdirSync(dir, { recursive: true })
   const kept = join(dir, `${job.decisionRequests.length + 1}.md`)
   copyFileSync(file, kept)
@@ -124,7 +132,7 @@ export function status(root: string): string {
     .join('\n')
 }
 
-/** Removes a merged job's worktree, branch and folder. */
+/** Removes a merged job's worktree (its handoff folder with it), branch and state folder. */
 export async function clean(root: string, number: number): Promise<void> {
   const job = requireJob(root, number)
   const state = job.pr
@@ -133,5 +141,5 @@ export async function clean(root: string, number: number): Promise<void> {
   if (state !== 'MERGED') throw new Refusal(`Job #${number}'s PR isn't merged (${state}).`)
   await git(root, 'worktree', 'remove', '--force', job.worktree)
   await git(root, 'branch', '-D', job.branch)
-  rmSync(jobDir(root, number), { recursive: true, force: true })
+  rmSync(stateDir(root, number), { recursive: true, force: true })
 }

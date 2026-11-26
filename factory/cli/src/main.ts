@@ -1,7 +1,7 @@
 // The factory's CLI: `bun run factory <command>`. See factory/README.md for every command.
 
 import { parseArgs } from 'node:util'
-import { mainRoot } from './job.ts'
+import { handoffDir, mainRoot } from './job.ts'
 import { check } from './commands/check.ts'
 import { Refusal } from './commands/common.ts'
 import { gate } from './commands/gate.ts'
@@ -57,7 +57,7 @@ async function main(argv: string[]): Promise<number> {
       if (!values.session)
         throw new Refusal('start needs --session <id> (the skill passes ${CLAUDE_SESSION_ID}).')
       const job = await start(root, issueNumber(arg), values.session)
-      print(job)
+      print({ ...job, handoff: handoffDir(job) })
       const answers = await answersSinceLastRequest(job)
       if (answers.length) {
         print('\nThe user answered the last Decision Request:\n')

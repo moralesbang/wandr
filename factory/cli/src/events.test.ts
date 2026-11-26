@@ -3,7 +3,7 @@ import { eventsFromHook, locate, type HookInput } from './events.ts'
 import { makeJob } from './job-fixture.ts'
 
 const job = makeJob()
-const places = { worktree: job.worktree, jobDir: '/repo/factory/.jobs/7' }
+const places = { worktree: job.worktree, handoffDir: `${job.worktree}/factory/.jobs/7` }
 
 describe('locate', () => {
   test('a path in the worktree is in the repo area, relative to it', () => {
@@ -13,10 +13,17 @@ describe('locate', () => {
     })
   })
 
-  test('a path in the job folder is in the job area', () => {
-    expect(locate('/repo/factory/.jobs/7/build-notes.md', places)).toEqual({
+  test("a path in the worktree's job folder is in the job area", () => {
+    expect(locate(`${job.worktree}/factory/.jobs/7/build-notes.md`, places)).toEqual({
       area: 'job',
       path: 'build-notes.md',
+    })
+  })
+
+  test("the main checkout's job folder, where the state lives, is outside", () => {
+    expect(locate('/repo/factory/.jobs/7/acceptance.md', places)).toEqual({
+      area: 'outside',
+      path: '/repo/factory/.jobs/7/acceptance.md',
     })
   })
 
@@ -43,7 +50,7 @@ describe('eventsFromHook: Read', () => {
     tool_name: 'Read',
     tool_input: { file_path: `${job.worktree}/apps/api/src/app.ts`, offset: 2, limit: 1 },
   }
-  const context = { job, jobDir: places.jobDir, now: 'now', readText: () => content }
+  const context = { job, handoffDir: places.handoffDir, now: 'now', readText: () => content }
   const [event] = eventsFromHook(input, context)
 
   test('logs the path, the line range and the tokens', () => {
@@ -68,7 +75,7 @@ describe('eventsFromHook: Read', () => {
 
 describe('eventsFromHook: writes', () => {
   const base = { session_id: 's', tool_name: 'Edit', tool_input: { file_path: '/repo/x' } }
-  const context = { job, jobDir: places.jobDir, now: 'now', readText: () => null }
+  const context = { job, handoffDir: places.handoffDir, now: 'now', readText: () => null }
 
   test('an edit is not logged before it happens', () => {
     expect(eventsFromHook({ ...base, hook_event_name: 'PreToolUse' }, context)).toEqual([])

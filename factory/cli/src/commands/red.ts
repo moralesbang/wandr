@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { withChecksLock } from '../checks.ts'
-import { canTryRed, jobDir, saveJob, type Job } from '../job.ts'
+import { canTryRed, saveJob, stateDir, type Job } from '../job.ts'
 import { fromBunJUnit } from '../junit.ts'
 import { isAcceptanceTest, ruleProtecting } from '../paths.ts'
 import {
@@ -72,7 +72,8 @@ export async function red(root: string, number: number): Promise<{ job: Job; pro
     groups.set(key, [...(groups.get(key) ?? []), run])
   }
 
-  const dir = join(jobDir(root, number), 'red')
+  // The CLI's own logs and reports: no agent reads them, the CLI prints the verdict.
+  const dir = join(stateDir(root, number), 'red')
   mkdirSync(dir, { recursive: true })
   const stamp = new Date().toISOString().replaceAll(':', '-')
   const log = join(dir, `${stamp}.log`)

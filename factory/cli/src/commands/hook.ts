@@ -4,7 +4,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { appendEvent, eventsFromHook, HookInput, locate, type FactoryEvent } from '../events.ts'
-import { findJobBySession, jobDir, jobsDir, type Job } from '../job.ts'
+import { findJobBySession, handoffDir, jobsDir, stateDir, type Job } from '../job.ts'
 import { changedBetween, workingTree } from '../shell.ts'
 import { classifyWrite } from '../visibility.ts'
 
@@ -17,10 +17,10 @@ const readText = (path: string) => {
 }
 
 /** The hook input and the job its session runs, or null outside a factory job. */
-function find(root: string, stdin: string): { input: HookInput; job: Job; dir: string } | null {
+function find(root: string, stdin: string): { input: HookInput; job: Job } | null {
   const input = HookInput.parse(JSON.parse(stdin))
   const job = findJobBySession(root, input.session_id)
-  return job ? { input, job, dir: jobDir(root, job.number) } : null
+  return job ? { input, job } : null
 }
 
 const logError = (root: string, hook: string, error: unknown) => {
@@ -32,9 +32,9 @@ const logError = (root: string, hook: string, error: unknown) => {
 }
 
 /** Records the worktree's state when an agent starts, and what it changed when it stops. */
-async function withRunChanges(events: FactoryEvent[], input: HookInput, job: Job, dir: string) {
+async function withRunChanges(events: FactoryEvent[], input: HookInput, job: Job, root: string) {
   if (!input.agent_id) return events
-  const runs = join(dir, 'runs')
+  const runs = join(stateDir(root, job.number), 'runs')
   const snapshot = join(runs, `${input.agent_id}.tree`)
   if (input.hook_event_name === 'SubagentStart') {
     mkdirSync(runs, { recursive: true })
@@ -55,14 +55,14 @@ export async function hookLog(root: string, stdin: string): Promise<void> {
   try {
     const found = find(root, stdin)
     if (!found) return
-    const { input, job, dir } = found
+    const { input, job } = found
     const events = eventsFromHook(input, {
       job,
-      jobDir: dir,
+      handoffDir: handoffDir(job),
       now: new Date().toISOString(),
       readText,
     })
-    for (const event of await withRunChanges(events, input, job, dir)) appendEvent(root, event)
+    for (const event of await withRunChanges(events, input, job, root)) appendEvent(root, event)
   } catch (error) {
     logError(root, 'log', error)
   }
@@ -76,12 +76,12 @@ export function hookGuard(root: string, stdin: string): string {
   try {
     const found = find(root, stdin)
     if (!found) return ''
-    const { input, job, dir } = found
+    const { input, job } = found
     // The orchestrator, in the main session, isn't guarded: its writes are logged.
     if (!input.agent_id) return ''
     const path = input.tool_input?.file_path ?? input.tool_input?.notebook_path
     if (typeof path !== 'string') return ''
-    const target = locate(path, { worktree: job.worktree, jobDir: dir })
+    const target = locate(path, { worktree: job.worktree, handoffDir: handoffDir(job) })
     const verdict = classifyWrite(input.agent_type ?? 'unknown', target)
     if (verdict.ok) return ''
     appendEvent(root, {

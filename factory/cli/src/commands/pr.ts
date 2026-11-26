@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { jobDir, reviewPass, saveJob, type Job } from '../job.ts'
+import { handoffDir, reviewPass, saveJob, stateDir, type Job } from '../job.ts'
 import { gh, git } from '../shell.ts'
 import { LABELS, record, Refusal, requireJob } from './common.ts'
 import { moveLabel } from './start.ts'
@@ -10,7 +10,7 @@ const LIMIT = 60_000
 const fit = (text: string) =>
   text.length <= LIMIT
     ? text
-    : `${text.slice(0, LIMIT)}\n\n…(cut: the full file is in the job's folder)`
+    : `${text.slice(0, LIMIT)}\n\n…(cut: the full file is in the job's handoff folder)`
 
 const read = (path: string) => (existsSync(path) ? readFileSync(path, 'utf8').trim() : null)
 
@@ -52,7 +52,10 @@ export function prBody(job: Job, parts: { summary: string; acceptance: string })
 /** Opens the PR once the gate passed on HEAD and both final reports approve. */
 export async function pr(root: string, number: number): Promise<Job> {
   const job = requireJob(root, number)
-  const dir = jobDir(root, number)
+  // What the agents and the orchestrator wrote is in the handoff folder; what the CLI posts is
+  // kept with the job's state.
+  const dir = handoffDir(job)
+  const posted = stateDir(root, number)
   const head = await git(job.worktree, 'rev-parse', 'HEAD')
   if (!job.gate?.passed || job.gate.head !== head) {
     throw new Refusal('The gate has not passed on HEAD. Run factory gate.')
@@ -73,7 +76,7 @@ export async function pr(root: string, number: number): Promise<Job> {
   if (!acceptance) throw new Refusal(`The test agent's ${dir}/acceptance.md is missing.`)
 
   await git(job.worktree, 'push', '--quiet', '-u', 'origin', job.branch)
-  const bodyFile = join(dir, 'pr-body.md')
+  const bodyFile = join(posted, 'pr-body.md')
   writeFileSync(bodyFile, prBody(job, { summary, acceptance }))
   const url = await gh(
     'pr',
@@ -87,7 +90,7 @@ export async function pr(root: string, number: number): Promise<Job> {
     '--body-file',
     bodyFile,
   )
-  const commentFile = join(dir, 'pr-comment.md')
+  const commentFile = join(posted, 'pr-comment.md')
   writeFileSync(
     commentFile,
     fit(

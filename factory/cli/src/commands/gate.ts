@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { jobDir, saveJob, type Job } from '../job.ts'
+import { handoffDir, saveJob, type Job } from '../job.ts'
 import { protectedFromBuild } from '../paths.ts'
 import { git, lines, uncommitted } from '../shell.ts'
 import { testChanges, type TestChanges } from '../test-changes.ts'
@@ -55,7 +55,8 @@ export async function gate(
     await git(cwd, 'diff', '--unified=0', `${job.base}...HEAD`),
   )
   const result: GateResult = { passed: problems.length === 0, problems, tests, head }
-  writeFileSync(join(jobDir(root, number), 'gate.json'), `${JSON.stringify(result, null, 2)}\n`)
+  // The reviewers read the gate's test changes from the handoff folder.
+  writeFileSync(join(handoffDir(job), 'gate.json'), `${JSON.stringify(result, null, 2)}\n`)
   const updated: Job = {
     ...job,
     gate: { head, passed: result.passed, at: new Date().toISOString() },
