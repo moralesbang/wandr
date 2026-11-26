@@ -28,7 +28,7 @@ Code MUST live in the folder its kind names.
 
 ### WEB-002 — Routes compose, features build
 
-A route file MUST hold only its route definition: `loader`, `validateSearch`, `beforeLoad`, `pendingComponent`, `errorComponent`, `notFoundComponent`, and a `component` imported from `features/`. Screen logic and markup live in `features/`.
+A route file MUST hold only its route definition: `staticData`, `loader`, `validateSearch`, `beforeLoad`, `pendingComponent`, `errorComponent`, `notFoundComponent`, and a `component` imported from `features/`. Screen logic and markup live in `features/`.
 
 ### WEB-003 — Features stay apart
 
@@ -49,6 +49,16 @@ Components MUST style through Tailwind classes backed by the Design System's tok
 #### Rationale
 
 Light and dark mode, and their contrast (M7, keyboard and dark mode), hold only when every colour switches with the theme.
+
+## Titles
+
+### WEB-012 — Every route declares its title
+
+Every route, the root included, MUST declare its page's name in `staticData.title`. The tab reads `{title} · Wandr`, and just `Wandr` on the home page. `StaticDataRouteOption` MUST declare `title` as required, so the type check rejects a route without one.
+
+#### Rationale
+
+A page added without a title would silently show a generic one.
 
 ## State
 
