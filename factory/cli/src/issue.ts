@@ -1,5 +1,7 @@
 // Reading an issue written with .github/ISSUE_TEMPLATE/factory.yml.
 
+import { RISKS, type Risk } from './job.ts'
+
 export type AcceptanceCriterion = { id: string; text: string }
 
 export type ParsedCriteria =
@@ -35,6 +37,36 @@ export function parseCriteria(body: string): ParsedCriteria {
     }
   }
   return { ok: true, criteria }
+}
+
+export type ParsedRisk = { ok: true; risk: Risk } | { ok: false; reason: string }
+
+const RISK_SECTION = /^###\s+Risk\s*$/im
+
+/**
+ * The risk the form's "Risk" dropdown declares: the first word of its answer. An issue written
+ * before the field, or one that leaves it unanswered, is normal.
+ */
+export function parseRisk(body: string): ParsedRisk {
+  const start = body.search(RISK_SECTION)
+  if (start === -1) return { ok: true, risk: 'normal' }
+  const answer = body
+    .slice(start)
+    .split('\n')
+    .slice(1)
+    .map((line) => line.trim())
+    .find((line) => line !== '')
+  if (!answer || /^#{1,3}\s/.test(answer) || answer === '_No response_') {
+    return { ok: true, risk: 'normal' }
+  }
+  const word = /^[a-z]+/i.exec(answer)?.[0]?.toLowerCase()
+  const risk = RISKS.find((candidate) => candidate === word)
+  return risk
+    ? { ok: true, risk }
+    : {
+        ok: false,
+        reason: `The Risk field says "${answer}"; it must be one of ${RISKS.join(', ')}.`,
+      }
 }
 
 /** A branch-safe slug of the issue's title: lowercase, kebab-case, at most 40 characters. */

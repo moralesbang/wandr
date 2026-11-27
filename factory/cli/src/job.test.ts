@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -100,5 +100,14 @@ describe('mainRoot', () => {
 
   test('from the main checkout it is the repo root', () => {
     expect(mainRoot('/Users/x/wandr/factory/cli/src')).toBe('/Users/x/wandr')
+  })
+})
+
+describe('a job saved before the risk field', () => {
+  test('loads as normal risk', () => {
+    const { risk: _risk, ...old } = makeJob()
+    mkdirSync(join(root, 'factory', '.jobs', '7'), { recursive: true })
+    writeFileSync(join(root, 'factory', '.jobs', '7', 'job.json'), JSON.stringify(old))
+    expect(loadJob(root, 7)?.risk).toBe('normal')
   })
 })

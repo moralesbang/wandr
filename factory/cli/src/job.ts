@@ -15,6 +15,35 @@ export const MAX_BUILD_ATTEMPTS = 3
 export const MAX_ROUNDS = 3
 export const MAX_RED_REJECTIONS = 3
 
+export const RISKS = ['low', 'normal', 'high'] as const
+export const Risk = z.enum(RISKS)
+export type Risk = z.infer<typeof Risk>
+
+export const REVIEWER_ROLES = ['evaluator', 'test-reviewer'] as const
+export type ReviewerRole = (typeof REVIEWER_ROLES)[number]
+
+/**
+ * What a reviewer does in a review pass: a full blind `review`, a `verify` of the previous
+ * findings against the diff since the last reviewed HEAD, or `carry`, its approval standing.
+ */
+export const RoleTask = z.enum(['review', 'verify', 'carry'])
+export type RoleTask = z.infer<typeof RoleTask>
+
+export const ReviewPlan = z.object({
+  pass: z.number().int().positive(),
+  /** The HEAD this pass reviews. */
+  head: z.string(),
+  /** The HEAD the previous pass reviewed; null on the first pass. */
+  since: z.string().nullable(),
+  /** The files changed since then. */
+  changed: z.array(z.string()),
+  risk: Risk,
+  raisedBy: z.array(z.string()),
+  roles: z.object({ evaluator: RoleTask.optional(), 'test-reviewer': RoleTask }),
+  at: z.string(),
+})
+export type ReviewPlan = z.infer<typeof ReviewPlan>
+
 const Check = z.object({
   /** The tree the checks ran on: equal to HEAD's tree when they ran on a clean, committed state. */
   tree: z.string(),
@@ -27,6 +56,8 @@ const Check = z.object({
 export const Job = z.object({
   number: z.number().int().positive(),
   title: z.string(),
+  /** The risk the issue declares; an issue without the field is normal. */
+  risk: Risk.default('normal'),
   slug: z.string(),
   branch: z.string(),
   worktree: z.string(),
@@ -41,7 +72,22 @@ export const Job = z.object({
   rounds: z.number().int().nonnegative(),
   lastCheck: Check.nullable(),
   gate: z.object({ head: z.string(), passed: z.boolean(), at: z.string() }).nullable(),
-  atfixes: z.array(z.object({ sha: z.string(), note: z.string(), files: z.array(z.string()) })),
+  atfixes: z.array(
+    z.object({
+      sha: z.string(),
+      note: z.string(),
+      files: z.array(z.string()),
+      /** The test reviewer's same-guarantee ruling the fix was committed on. */
+      ruling: z.number().int().positive().optional(),
+    }),
+  ),
+  /**
+   * Rulings `factory ruling` asked a test reviewer for: the number of rulings/<ruling>.md in the
+   * handoff folder and the hash of the acceptance-test diff it rules on.
+   */
+  rulings: z
+    .array(z.object({ ruling: z.number().int().positive(), diff: z.string(), at: z.string() }))
+    .default([]),
   /** Acceptance-test rewrites the user authorized after a Decision Request. */
   rewrites: z.array(z.object({ commit: z.string(), note: z.string(), at: z.string() })).default([]),
   /** How many times `factory red` rejected the test agent's red. */
@@ -62,6 +108,8 @@ export const Job = z.object({
       }),
     )
     .default([]),
+  /** One plan per review pass, written by `factory review`. */
+  reviews: z.array(ReviewPlan).default([]),
   pr: z.string().nullable(),
   startedAt: z.string(),
 })

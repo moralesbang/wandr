@@ -36,6 +36,25 @@ export const RULE_PATHS = [
   },
 ] as const
 
+/**
+ * The privacy boundary: the code that decides what a walker's data looks like, who reaches it and
+ * what leaves the server. A diff that touches it is never low risk.
+ */
+export const PRIVACY_BOUNDARY = [
+  'packages/sharing/**',
+  'packages/contract/**',
+  'apps/api/src/db/**',
+  'apps/api/src/routes/**',
+  'apps/api/src/photos/**',
+  'apps/api/src/http/cache-control.ts',
+] as const
+
+/** Files that change what runs or gets installed without looking like code: never low risk. */
+export const TAMPER_PRONE = ['**/package.json', 'bun.lock', '**/vite.config.ts'] as const
+
+export const isPrivacyBoundary = (path: string) => match(PRIVACY_BOUNDARY, path)
+export const isTamperProne = (path: string) => match(TAMPER_PRONE, path)
+
 /** Where every job keeps its files, relative to a checkout's root. Gitignored. */
 export const JOBS_FOLDER = 'factory/.jobs'
 

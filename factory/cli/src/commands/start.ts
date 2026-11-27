@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { parseCriteria, slugify } from '../issue.ts'
+import { parseCriteria, parseRisk, slugify } from '../issue.ts'
 import {
   canStartAnother,
   handoffDir,
@@ -79,6 +79,8 @@ export async function start(root: string, number: number, session: string): Prom
   }
   const criteria = parseCriteria(issue.body)
   if (!criteria.ok) throw new Refusal(`Issue #${number}: ${criteria.reason}`)
+  const risk = parseRisk(issue.body)
+  if (!risk.ok) throw new Refusal(`Issue #${number}: ${risk.reason}`)
 
   const slug = slugify(issue.title)
   const branch = `feat/${number}-${slug}`
@@ -107,6 +109,7 @@ export async function start(root: string, number: number, session: string): Prom
   const job: Job = {
     number,
     title: issue.title,
+    risk: risk.risk,
     slug,
     branch,
     worktree,
@@ -120,17 +123,24 @@ export async function start(root: string, number: number, session: string): Prom
     lastCheck: null,
     gate: null,
     atfixes: [],
+    rulings: [],
     rewrites: [],
     redRejections: 0,
     decisionRequests: [],
     answers: [],
+    reviews: [],
     pr: null,
     startedAt: new Date().toISOString(),
   }
   saveJob(root, job)
   await ensureLabels()
   await moveLabel(number, LABELS.building)
-  record(root, number, 'job.started', { branch, worktree, criteria: criteria.criteria.length })
+  record(root, number, 'job.started', {
+    branch,
+    worktree,
+    criteria: criteria.criteria.length,
+    risk: risk.risk,
+  })
   return job
 }
 
