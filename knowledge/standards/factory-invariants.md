@@ -50,6 +50,13 @@ While a Decision Request has no answer, every command that moves the job refuses
 - **Mechanism:** `job.ts` (`unlessBlocked`), `commands/common.ts` (`refuseWhileBlocked`), `commands/start.ts`.
 - **Defended by:** `commands/blocked.test.ts`, `commands/start.test.ts`.
 
+### FI-023 — A job is judged against what the user wrote
+
+A job starts only on an open issue whose ACs are numbered AC1, AC2… in order and whose Risk field is `low`, `normal` or `high`: the ACs are what the acceptance tests and the reviewers check, and the Risk is the floor no route lowers.
+
+- **Mechanism:** `commands/start.ts`, `issue.ts` (`parseCriteria`, `parseRisk`).
+- **Defended by:** `issue.test.ts`, `commands/start.test.ts`.
+
 ## Tests as judges
 
 ### FI-005 — An agent can't change what judges it
@@ -193,7 +200,6 @@ Refusals that defend no invariant above. Each is kept for now; the user judges w
 | A command without its arguments (an issue number, `--session`, the proposal or Decision Request file, `--ruling`, `--pass`, the answer's text, a sandbox role) | `main.ts`, `commands/sandbox.ts`, `sandbox-names.ts`, `commands/answer.ts` | Usage |
 | No job for the issue; `answer` when no request is open | `commands/common.ts`, `commands/answer.ts` | Usage |
 | `atfix` or `rewrite` without `--note`; nothing changed | `commands/lifecycle.ts` | Record |
-| The issue is closed; its ACs aren't numbered AC1, AC2… in order; its Risk field isn't one of the three | `commands/start.ts`, `issue.ts` | Intake |
 | 3 jobs already building | `job.ts` (`canStartAnother`) | Operational: shared test database, bucket and port |
 | `start` on a job whose PR is open or whose worktree is gone | `commands/start.ts` | Operational |
 | `pr` without `summary.md` or `acceptance.md`; a light job's report without one evidence line per AC | `commands/pr.ts` | Record |
