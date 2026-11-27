@@ -2,7 +2,7 @@
 
 A web map journal for walks. After a walk, you place what caught your eye on a map, each find with a note or a photo, and optionally draw the route you want to repeat. When you want to, you share only the finds and the stretch you choose, through a link that opens without an account and that you can revoke at any time.
 
-A portfolio project, built to practice senior software engineering with AI-assisted development.
+A portfolio project, built to practice senior software engineering with AI-assisted development. The [factory](factory/README.md), the agentic system that takes an issue to a pull request, is half of the project: its first goal is to show how such a system is built while the whole project is managed with AI.
 
 ## Docs
 

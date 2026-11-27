@@ -1,11 +1,11 @@
 # Wandr
 
-Wandr is a portfolio project: a web map journal for walks, built to practice senior software engineering with AI-assisted development. The user is product owner, architect, designer and reviewer; you implement. Why it exists: [`README.md`](README.md).
+Wandr is a portfolio project: a web map journal for walks, built to practice senior software engineering with AI-assisted development. The user is product owner, architect, designer and reviewer; you implement. Its first goal is to show the skill of building an agentic coding system, the [factory](factory/README.md), while managing a project in all its areas with AI, so the factory is worth more than the product. Why it exists: [`README.md`](README.md).
 
 ## Working with the user
 
 - Talk with the user in Spanish. Write everything that lives in the repo in English: code, comments, docs, knowledge, commit messages, branch and PR text.
-- Judge every proposal by whether it shows a senior engineering decision a reviewer can verify (the map editor, the private/public boundary, tests that defend the privacy promise), ahead of feature breadth.
+- Judge every proposal first by whether it shows a senior decision in the agentic system a reviewer can verify (the factory's isolation, its gates, its routing), then by whether it shows one in the product (the map editor, the private/public boundary, tests that defend the privacy promise), and both ahead of feature breadth.
 - This is not a pitch: docs cover the product and the engineering decisions, and leave out market analysis and competitors.
 - When talking with the user, give every doc code (M5, S4, P3, §5) its meaning in plain words in the same sentence, e.g. "S3 (undo in the route editor, an optional extra cut if time runs short)". Questions to the user stand on their own: they answer without opening the docs.
 
