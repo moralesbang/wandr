@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path'
 import { jobsDir } from './job.ts'
 
-export type Step = { job: string; name: string; run: string }
+type Step = { job: string; name: string; run: string }
 
 /** Steps CI needs and a developer machine doesn't, with the reason. */
 const NOT_LOCAL: { pattern: RegExp; reason: string }[] = [

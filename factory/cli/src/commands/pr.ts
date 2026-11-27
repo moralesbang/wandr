@@ -133,7 +133,7 @@ export function prComment(parts: {
  * Refuses when a planned report is missing or doesn't approve, and when a role that reviewed has no
  * blind pass: its final report would then rest on the build notes alone.
  */
-export function plannedReports(
+function plannedReports(
   job: Pick<Job, 'reviews'>,
   plan: ReviewPlan,
   readReport: (rel: string) => string | null,
@@ -169,7 +169,7 @@ export function plannedReports(
  * `reviews/<pass>.<role>.md` by that role's agent. A file with no such write was put there by
  * someone else, the orchestrator's Bash included.
  */
-export function requireOwnWrites(events: FactoryEvent[], plan: ReviewPlan): void {
+function requireOwnWrites(events: FactoryEvent[], plan: ReviewPlan): void {
   for (const role of ['evaluator', 'test-reviewer'] as const) {
     const task = plan.roles[role]
     if (task !== 'review' && task !== 'verify') continue
@@ -186,7 +186,7 @@ export function requireOwnWrites(events: FactoryEvent[], plan: ReviewPlan): void
  * Refuses a blind pass `factory unseal` never froze, or one that changed since: its hash is in the
  * job from the unseal on, and the guard denies every write to the file after that.
  */
-export function requireFrozenBlindPasses(
+function requireFrozenBlindPasses(
   job: Pick<Job, 'blindPasses' | 'number'>,
   plan: ReviewPlan,
   dir: string,

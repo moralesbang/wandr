@@ -14,7 +14,7 @@ export type Task = (typeof TASKS)[number]
 
 export type Model = 'sonnet' | 'opus'
 export type Effort = 'low' | 'medium' | 'high'
-export type Setting = { model: Model; effort: Effort }
+type Setting = { model: Model; effort: Effort }
 
 /** The main session's own setting, for the skill's frontmatter; `factory launch` never plans it. */
 export const ORCHESTRATOR: Setting = { model: 'sonnet', effort: 'medium' }
@@ -51,7 +51,7 @@ export const LAUNCH_TABLE: Record<string, Partial<Record<Task, ByRisk>>> = {
   },
 }
 
-export type LaunchSetting = ({ ok: true } & Setting) | { ok: false; reason: string }
+type LaunchSetting = ({ ok: true } & Setting) | { ok: false; reason: string }
 
 /** The model and effort for one run, or why the table has no such run. */
 export function launchSetting(agent: string, task: string, risk: Risk): LaunchSetting {

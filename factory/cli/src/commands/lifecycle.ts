@@ -35,7 +35,7 @@ export function attempt(root: string, number: number): Job {
   return counted.job
 }
 
-export { COPIED_WORDS, sharedPhrase }
+export { sharedPhrase }
 
 /**
  * Starts a new round with the pass's merged findings. Refused without them, and when they copy the
@@ -262,7 +262,7 @@ export function status(root: string): string {
 }
 
 /** The compose project every checkout shares: `name:` in docker-compose.yml. */
-export const SHARED_COMPOSE_PROJECT = 'wandr'
+const SHARED_COMPOSE_PROJECT = 'wandr'
 
 /**
  * The compose project a worktree started before docker-compose.yml set `name:`: compose named it

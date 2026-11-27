@@ -17,7 +17,7 @@ const readOrNull = (file: string) => {
   }
 }
 
-export function jobExtras(root: string, job: Job): JobExtras {
+function jobExtras(root: string, job: Job): JobExtras {
   const sandboxDir = join(handoffDir(job), 'sandbox')
   return {
     requests: job.decisionRequests.map((request) => readOrNull(request.file)),

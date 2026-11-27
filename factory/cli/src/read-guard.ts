@@ -291,7 +291,7 @@ export type Reading = {
 }
 
 /** The verdict on one path a subagent reads or names. */
-export function readVerdict(raw: string, context: GuardContext, how: Reading = {}): Verdict {
+function readVerdict(raw: string, context: GuardContext, how: Reading = {}): Verdict {
   if (!context.agent) return allow
   const { listing = false, search = false, ignoring = false } = how
   const path = judged(raw)

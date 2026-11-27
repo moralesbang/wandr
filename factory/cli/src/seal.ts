@@ -33,7 +33,7 @@ import {
   type ReviewerRole,
 } from './job.ts'
 
-export { REVIEWER_ROLES, type ReviewerRole }
+export { type ReviewerRole }
 
 export type Seal = {
   pass: number
@@ -80,7 +80,7 @@ export const blindPassFile = (job: Pick<Job, 'number' | 'worktree'>, pass: numbe
   join(handoffDir(job), 'reviews', `${pass}.${role}.blind.md`)
 
 /** The sealed roles whose blind pass for the sealed pass isn't written yet. */
-export const missingBlindPasses = (job: Pick<Job, 'number' | 'worktree'>, sealed: Seal) =>
+const missingBlindPasses = (job: Pick<Job, 'number' | 'worktree'>, sealed: Seal) =>
   sealed.roles.filter((role) => !existsSync(blindPassFile(job, sealed.pass, role)))
 
 /**

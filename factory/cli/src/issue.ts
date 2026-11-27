@@ -2,11 +2,9 @@
 
 import { RISKS, type Risk } from './job.ts'
 
-export type AcceptanceCriterion = { id: string; text: string }
+type AcceptanceCriterion = { id: string; text: string }
 
-export type ParsedCriteria =
-  | { ok: true; criteria: AcceptanceCriterion[] }
-  | { ok: false; reason: string }
+type ParsedCriteria = { ok: true; criteria: AcceptanceCriterion[] } | { ok: false; reason: string }
 
 const SECTION = /^###\s+Acceptance criteria\s*$/im
 const CRITERION = /^\s*(?:[-*]\s+)?\*{0,2}AC(\d+)\*{0,2}\s*[:.)-]\s*(.+?)\s*$/i
@@ -39,7 +37,7 @@ export function parseCriteria(body: string): ParsedCriteria {
   return { ok: true, criteria }
 }
 
-export type ParsedRisk = { ok: true; risk: Risk } | { ok: false; reason: string }
+type ParsedRisk = { ok: true; risk: Risk } | { ok: false; reason: string }
 
 const RISK_SECTION = /^###\s+Risk\s*$/im
 

@@ -11,7 +11,7 @@ import { reviewerRole, verifierMayRead } from './review-plan.ts'
 export type Area = 'repo' | 'job' | 'outside'
 export type Target = { area: Area; path: string }
 
-export const AGENTS = [
+const AGENTS = [
   'factory-test',
   'factory-build',
   'factory-evaluator',
@@ -24,7 +24,7 @@ export const isFactoryAgent = (type: string): type is AgentType =>
   (AGENTS as readonly string[]).includes(type)
 
 /** When an input becomes visible: from the agent's start, or once its blind first pass is written. */
-export type Moment = 'start' | 'after-blind-pass'
+type Moment = 'start' | 'after-blind-pass'
 
 export type Input = {
   label: string
@@ -89,7 +89,7 @@ const reviewer = (role: 'evaluator' | 'test-reviewer'): Input[] => [
   ORCHESTRATOR_NOTES,
 ]
 
-export const INPUTS: Record<AgentType, readonly Input[]> = {
+const INPUTS: Record<AgentType, readonly Input[]> = {
   'factory-test': [
     ISSUE,
     INSTRUCTIONS,
@@ -169,9 +169,9 @@ const matches = (glob: string, target: Target) => {
   return area === target.area && new Bun.Glob(pattern).match(target.path)
 }
 
-export type ReadVerdict = { ok: true; input: string } | { ok: false; reason: string }
+type ReadVerdict = { ok: true; input: string } | { ok: false; reason: string }
 
-export type ReadState = {
+type ReadState = {
   blindPassWritten: boolean
   /**
    * The reader is a reviewer planned to verify in this pass: it has no blind pass, and reads the
@@ -207,7 +207,7 @@ export function classifyRead(agent: AgentType, target: Target, state: ReadState)
   return { ok: true, input: input.label }
 }
 
-export type WriteVerdict = { ok: true } | { ok: false; reason: string }
+type WriteVerdict = { ok: true } | { ok: false; reason: string }
 
 const deny = (reason: string): WriteVerdict => ({ ok: false, reason })
 

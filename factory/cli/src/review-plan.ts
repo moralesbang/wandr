@@ -16,7 +16,7 @@ export type PreviousPass = {
 }
 
 /** The reviewers a risk level requires: the test reviewer alone judges a low-risk job. */
-export const requiredRoles = (risk: Risk): ReviewerRole[] =>
+const requiredRoles = (risk: Risk): ReviewerRole[] =>
   risk === 'low' ? ['test-reviewer'] : ['evaluator', 'test-reviewer']
 
 /** What each required reviewer does in this pass. */

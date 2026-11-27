@@ -37,8 +37,7 @@ export type Sandbox = {
 
 export { sandboxNames }
 
-export const sandboxesDir = (job: Pick<Job, 'number' | 'worktree'>) =>
-  join(handoffDir(job), 'sandbox')
+const sandboxesDir = (job: Pick<Job, 'number' | 'worktree'>) => join(handoffDir(job), 'sandbox')
 const recordsDir = (root: string, number: number) => join(stateDir(root, number), 'sandbox')
 const recordPath = (root: string, number: number, role: string) =>
   join(recordsDir(root, number), `${role}.json`)
@@ -358,7 +357,7 @@ export async function removeSandbox(root: string, job: Job, role: string): Promi
 }
 
 /** Every role with a sandbox: a recorded one or a checkout on disk. */
-export function sandboxRoles(root: string, job: Job): string[] {
+function sandboxRoles(root: string, job: Job): string[] {
   const records = existsSync(recordsDir(root, job.number))
     ? readdirSync(recordsDir(root, job.number))
         .filter((file) => file.endsWith('.json'))

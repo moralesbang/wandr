@@ -87,7 +87,7 @@ export async function review(root: string, number: number): Promise<ReviewPlan> 
  * pass's merged findings and its own previous final report, from the sealed store while another
  * reviewer's blind pass keeps the job sealed.
  */
-export function verifierReads(root: string, job: Job, plan: ReviewPlan): Record<string, string[]> {
+function verifierReads(root: string, job: Job, plan: ReviewPlan): Record<string, string[]> {
   const folder = loadSeal(root, job.number) ? sealedStore(root, job.number) : handoffDir(job)
   const previous = plan.pass - 1
   return Object.fromEntries(

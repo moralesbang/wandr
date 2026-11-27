@@ -2,11 +2,10 @@
 // writes derive from the input price (usage.ts): 1.25x for 5 minutes, 2x for 1 hour.
 
 /** USD per million tokens. */
-export type Price = { input: number; output: number; cacheRead: number }
+type Price = { input: number; output: number; cacheRead: number }
 
-export const PRICES_EFFECTIVE = '2026-11-26'
-
-export const PRICES: Record<string, Price> = {
+// Prices effective 2026-11-26.
+const PRICES: Record<string, Price> = {
   'claude-opus-5-5': { input: 4, output: 20, cacheRead: 0.2 },
   'claude-sonnet-5-5': { input: 2, output: 10, cacheRead: 0.1 },
 }

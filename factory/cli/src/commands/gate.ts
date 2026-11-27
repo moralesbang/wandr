@@ -7,7 +7,7 @@ import { git, lines, patchId, uncommitted } from '../shell.ts'
 import { testChanges, type TestChanges } from '../test-changes.ts'
 import { record, refuseWhileBlocked } from './common.ts'
 
-export type GateResult = { passed: boolean; problems: string[]; tests: TestChanges; head: string }
+type GateResult = { passed: boolean; problems: string[]; tests: TestChanges; head: string }
 
 /**
  * The trailers a build commit may carry: attribution and references, each one short line. Anything
@@ -21,7 +21,7 @@ const TRAILER =
  * reaches the reviewers only through build-notes.md, which is sealed during their blind passes; a
  * body would carry it past the seal in `git log`.
  */
-export function bodyBeyondTrailers(message: string): string {
+function bodyBeyondTrailers(message: string): string {
   const [, ...rest] = message.trim().split('\n')
   return rest
     .filter((line) => line.trim() && !TRAILER.test(line.trim()))
