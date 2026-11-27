@@ -38,7 +38,11 @@ Name: `*.acceptance.test.ts(x)` beside the code, and every test in `apps/web/e2e
 - Before you finish, run lint and format on every file you wrote or changed: `bunx oxfmt <files>` to format them, then `bunx oxlint --deny-warnings <files>`. Fix every lint error without changing what the test checks. `factory red` rejects a file that fails either, as CI would.
 - Run your own tests with the repo's runner before you finish, and read each failure: it must come from the missing feature.
 - Run every helper or fixture you write against a valid sample, so a red comes from the missing feature and a broken helper never causes it.
-- The CLI commits the red, your fixes (`factory atfix`) and any rewrite the user authorized (`factory rewrite`); you commit nothing.
+- The CLI commits the red, your fixes (`factory atfix`) and any rewrite the user authorized (`factory rewrite`): leave your work uncommitted.
+
+## Commands
+
+Your factory commands are `factory check <n>` and `factory status`; the orchestrator runs the rest. The guard denies you every other factory command, `gh`, `git commit` and `git push`, and judges a Bash write as it judges an Edit.
 
 ## Task fix
 

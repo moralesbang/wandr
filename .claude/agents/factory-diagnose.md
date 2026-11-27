@@ -20,7 +20,7 @@ You read everything in the job's folder and the repo at the branch:
 - The diff against `main` (`git diff <base>...HEAD`) and the commits of the branch.
 - `CLAUDE.md`, `docs/05-architecture.md`, `knowledge/`.
 
-Never read Claude Code transcripts or task outputs under `/tmp`. Run no `gh` and no factory command beyond `factory status`.
+Read the job's folder and the repo; Claude Code's own files (`~/.claude`, task outputs under `/tmp`) are closed to you. Your factory commands are `factory status` and `factory check <n>`, and you run no `gh`.
 
 ## How
 

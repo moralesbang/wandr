@@ -27,11 +27,11 @@ The prompt holds `<n>`, the task, the worktree path, `<job>` and the file paths 
 
 **Risk.** The issue form declares the risk and the CLI raises it from the diff (`launch` and `review` print it). You never pick it.
 
-**Visibility.** Hand an agent only what its inputs allow (`factory/cli/src/visibility.ts`). The test agent never gets implementation plans. While the job is sealed, you hand no one the build notes or a Decision Request: the guard denies it.
+**Visibility.** Hand an agent only what its inputs allow (`factory/cli/src/visibility.ts`). The test agent never gets implementation plans. While the job is sealed, your prompts, messages and the files you write in `<job>` carry no build notes, Decision Request or earlier report, by name or by quote: the guard denies them.
 
-**Waiting.** While background agents run, wait without narrating. Every turn costs money; the next turn is the agents' completion notice. Each agent ends by reporting what it wrote: check the files exist before the next step. The PR comment carries a per-agent cost table, and `factory watch` shows cost live.
+**Waiting.** While background agents run, wait without narrating. Every turn costs money; the next turn is the agents' completion notice. Each agent ends by reporting what it wrote: check the files exist before the next step. The PR comment carries a per-agent cost table. The user follows the job live with `! bun run factory watch`, which prints a URL with a token; you run neither `watch` nor `hook`.
 
-**Decision Requests.** Only the user answers one (step 7). Never run `factory answer`, and never post on the issue or the PR: during a job the guard denies every gh write, and the CLI posts the PR.
+**Decision Requests.** Only the user answers one (step 7). Never run `factory answer`, and never post on the issue or the PR or push the branch: during a job the guard denies every gh write and `git push`, and the CLI pushes and posts the PR.
 
 ## 1. Start
 
@@ -68,7 +68,7 @@ A build attempt is one run of `factory-build` until it stops. A job has one budg
 2. Launch every `review` and `verify` role in one message, in the background, each after its `launch` call (task `review` or `verify`). Launch nothing for `carry`: the role's earlier approval stands.
    - `review`: blind. Give it the issue, the worktree path, `<job>`, `<k>` and the `<job>/gate.json` path, nothing else. It writes `<job>/reviews/<k>.<role>.blind.md` and stops.
    - `verify`: no blind pass. Give it the paths in `reads[role]` (the previous findings and its own previous report) and the range `git diff <since> <head>` with the plan's `since` and `head`. It writes `<job>/reviews/<k>.<role>.md` directly.
-3. Wait until every `review` role's blind pass exists. If `sealed` is true, run `bun run factory unseal <n>`; it refuses until every sealed role has written its blind pass.
+3. Wait until every `review` role's blind pass exists. If `sealed` is true, run `bun run factory unseal <n>`. It refuses until every sealed role's own run has written a non-empty blind pass with the Write tool; relaunch a reviewer whose blind pass it names, for its blind pass only.
 4. SendMessage each `review` role: the path `<job>/build-notes.md` and the order to write its final report `<job>/reviews/<k>.<role>.md`, first line `Verdict: approve` or `Verdict: changes`.
 5. Wait for every final report.
 
@@ -86,18 +86,18 @@ Done when every role of the plan that isn't `carry` has its final report for pas
      2. Run `bun run factory ruling <n>`. It prints the ruling number `<m>`, the file `<job>/rulings/<m>.md` and the diff hash.
      3. Launch a fresh `factory-test-reviewer`, task `ruling`, with the file and the hash. Fresh means a new Agent call, never a message to a running reviewer.
      4. `Verdict: same-guarantee`: run `bun run factory atfix <n> --ruling <m> --note "<what changed and why>"`, then `bun run factory check <n>`.
-     5. `Verdict: changed-guarantee`: write a Decision Request and run `factory block` (step 7). After the user answers, `factory-test` makes the change the answer authorizes, and you run `bun run factory rewrite <n> --note "<what changed>"`, which cites the answer, then `bun run factory check <n>`.
+     5. `Verdict: changed-guarantee`: write a Decision Request and run `factory block` (step 7); the CLI records the ruling it was raised on. After the user answers, either the answer accepts the fix as ruled, and you run `bun run factory atfix <n> --note "<what changed and why>"` with no `--ruling`, or `factory-test` makes the change the answer authorizes and you run `bun run factory rewrite <n> --note "<what changed>"`. Either cites the answer; then `bun run factory check <n>`.
    - Anything else goes to the build agent.
 6. If any finding is for the build agent, launch `factory-build` with the findings file, with no `attempt` call: the fix run costs nothing if it reaches green. Run the gate. If it ends red, the reruns are counted attempts (step 3). If only acceptance-test fixes were found, the round already counted (item 4): run `bun run factory gate <n>`. Then review again from step 4.
 
 ## 6. The PR
 
 1. Write `<job>/summary.md`: what changed and why, in plain words, in English, for a reviewer who has not seen the issue. No test lists (the CLI adds the ACs from `acceptance.md`).
-2. Run `bun run factory pr <n>`. It needs, for each role in the pass's plan, its final report for the pass or a carried approval. A refusal names what is missing; fix that and rerun. It prints the PR URL.
+2. Run `bun run factory pr <n>`. It needs, for each role in the pass's plan, its final report for the pass (and, for a `review` role, its blind pass) or a carried approval. A refusal names what is missing; fix that and rerun. It prints the PR URL.
 3. End with one line in the terminal, in Spanish: the PR URL and the number of attempts and rounds used.
 
 ## 7. A Decision Request
 
 Whenever the job needs the user: write `<job>/decision-requests/draft.md` in English with these headings, each filled from evidence: Context, Evidence, Alternatives (each with its trade-off), Recommendation, Impact, Risks. It must stand alone: the user answers without opening anything else.
 
-Run `bun run factory block <n> <job>/decision-requests/draft.md`. It prints the request. Show it to the user in full in the terminal, tell them in Spanish to answer with `! bun run factory answer <n> "<text>"`, and stop the turn. When the user runs `/factory <n>` again, `factory start` resumes the job and prints the answer; an `atfix` or `rewrite` that the answer authorizes cites it on its own.
+Run `bun run factory block <n> <job>/decision-requests/draft.md`. It prints the request. Show it to the user in full in the terminal, tell them in Spanish to answer with `! bun run factory answer <n> "<text>"`, and stop the turn. While the job is blocked, every command that moves it refuses. When the user runs `/factory <n>` again, `factory start` resumes the job and prints the answer. The answer authorizes one commit: a `rewrite`, or an `atfix` when the request was raised on a changed-guarantee ruling. That commit cites it, and a second one is refused.

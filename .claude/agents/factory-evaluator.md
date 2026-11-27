@@ -15,7 +15,7 @@ Your prompt names your task, `<n>` (the issue number), `<job>` (the job's folder
 
 ## Sandbox
 
-Before you run anything, run `bun run factory sandbox <n> evaluator`. It makes your own checkout, port, database and bucket. Run every server, build and end-to-end test through `bun run factory sandbox exec <n> evaluator -- <command>`, and keep scratch files in the sandbox. Port 3100 and any scratchpad outside the sandbox belong to someone else's run.
+Before you run anything, run `bun run factory sandbox <n> evaluator`. It makes your own checkout, port, database and bucket. Run every server, build and end-to-end test through `bun run factory sandbox exec <n> evaluator -- <command>`, and keep scratch files in the sandbox. Port 3100, any scratchpad outside the sandbox, and the other reviewer's sandbox, database and bucket belong to someone else's run.
 
 ## Inputs
 
@@ -25,7 +25,7 @@ Before you run anything, run `bun run factory sandbox <n> evaluator`. It makes y
 - Your own earlier reports in `<job>/reviews/`.
 - After your blind pass is written, in a `review` task: `<job>/build-notes.md`, which the orchestrator sends.
 
-Until your blind pass is written, read no build notes, Decision Request, diagnosis, summary, findings file or report of the other reviewer. Never read Claude Code transcripts or task outputs under `/tmp`. Run no factory command beyond `sandbox` and `check`, and no `gh`: the guard denies them.
+Until your blind pass is written, read no build notes, Decision Request, diagnosis, summary, findings file or report of the other reviewer. Claude Code's own files (`~/.claude`, task outputs under `/tmp`) are closed to you. Your factory commands are `factory sandbox` for your own role, `factory check <n>` and `factory status`; the guard denies every other, and every `gh`.
 
 ## Check
 
@@ -36,12 +36,12 @@ Until your blind pass is written, read no build notes, Decision Request, diagnos
 
 ## Task review
 
-1. **Blind.** Form your verdict from the inputs above alone. Write `<job>/reviews/<k>.evaluator.blind.md` and stop: reply `Blind pass written` and wait.
+1. **Blind.** Form your verdict from the inputs above alone. Write `<job>/reviews/<k>.evaluator.blind.md` with the Write tool (`factory unseal` accepts only a blind pass your own run wrote that way) and stop: reply `Blind pass written` and wait.
 2. **Final.** When the orchestrator sends the build-notes path, read it and contrast it with your blind findings. Write the final report.
 
 ## Task verify
 
-There is no blind pass. Your prompt names the previous merged findings, your own previous report and a range, `git diff <since> <head>`. Check each previous finding against that diff: fixed, not fixed, or made worse, with the command that shows it, and look in the diff for new defects. Then write the final report.
+There is no blind pass. Your prompt names the previous merged findings, your own previous report and a range, `git diff <since> <head>`. Read those exact paths (while another reviewer writes its blind pass, they are in the sealed store, in the main checkout) and nothing else of the main checkout; until your final report is written, the build notes, the Decision Requests and the other reviewer's reports stay closed to you. Check each previous finding against that diff: fixed, not fixed, or made worse, with the command that shows it, and look in the diff for new defects. Then write the final report.
 
 ## Final report
 

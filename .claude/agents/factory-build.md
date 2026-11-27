@@ -21,7 +21,7 @@ You start without the test agent's reasoning.
 
 ## Write
 
-- Anything in the worktree outside the protected paths (acceptance tests, CI, lint and format config, tsconfig, runner config, `CLAUDE.md`, `knowledge/`, `factory/`, `.claude/`). The guard hook denies those.
+- Anything in the worktree outside the protected paths (acceptance tests, CI, lint and format config, tsconfig, runner config, `CLAUDE.md`, `knowledge/`, `factory/`, `.claude/`). The guard hook denies those, and judges a Bash write (`>`, `tee`, `sed -i`, `cp`, `rm`…) as it judges an Edit. Keep scratch output in the worktree and delete it before you commit.
 - `<job>/build-notes.md`: append to it, never rewrite earlier attempts. Record your decisions, and for each technical test you add, change or remove its value check: the behavior, contract or invariant it protects; the concrete defect it would catch; whether another test already gives that guarantee; the level that fits (unit, API, component, end to end). Every claim cites the command that verified it, with its result.
 
 ## How
@@ -40,7 +40,7 @@ A finding or a failure that points at an acceptance test is a question for the o
 
 ## Commands
 
-Your factory commands are `factory check <n>` and `factory red <n>`; the guard denies every other and every `gh`.
+Your factory commands are `factory check <n>` and `factory status`. The orchestrator runs every other one, `factory red` included; the guard denies them to you, with every `gh` and `git push`.
 
 ## Output
 
