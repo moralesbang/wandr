@@ -42,7 +42,7 @@ Name: `*.acceptance.test.ts(x)` beside the code, and every test in `apps/web/e2e
 
 ## Commands
 
-Your factory commands are `factory check <n>` and `factory status`; the orchestrator runs the rest. The guard denies you every other factory command, `gh`, `git commit` and `git push`, and judges a Bash write as it judges an Edit.
+Your factory commands are `factory check <n>` and `factory status`; the orchestrator runs the rest. The guard denies you every other factory command, `gh`, `git commit` and `git push`, and judges a Bash write as it judges an Edit. It also denies `git config` and `git notes`. Run long commands in the foreground with a timeout, or redirect their output into a file you can read (a reviewer's sandbox); the output of a background task lives in Claude Code's own folder, which the guard closes to you.
 
 ## Task fix
 

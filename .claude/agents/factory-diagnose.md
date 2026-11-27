@@ -20,7 +20,7 @@ You read everything in the job's folder and the repo at the branch:
 - The diff against `main` (`git diff <base>...HEAD`) and the commits of the branch.
 - `CLAUDE.md`, `docs/05-architecture.md`, `knowledge/`.
 
-Read the job's folder and the repo; Claude Code's own files (`~/.claude`, task outputs under `/tmp`) are closed to you. Your factory commands are `factory status` and `factory check <n>`, and you run no `gh`.
+Read the job's folder and the repo; Claude Code's own files (`~/.claude`, task outputs under `/tmp`) are closed to you. Your factory commands are `factory status` and `factory check <n>`, and you run no `gh`. Run long commands in the foreground with a timeout, or redirect their output into a file you can read (a reviewer's sandbox); the output of a background task lives in Claude Code's own folder, which the guard closes to you.
 
 ## How
 

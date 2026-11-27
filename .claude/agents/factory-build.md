@@ -40,7 +40,7 @@ A finding or a failure that points at an acceptance test is a question for the o
 
 ## Commands
 
-Your factory commands are `factory check <n>` and `factory status`. The orchestrator runs every other one, `factory red` included; the guard denies them to you, with every `gh` and `git push`.
+Your factory commands are `factory check <n>` and `factory status`. The orchestrator runs every other one, `factory red` included; the guard denies them to you, with every `gh` and `git push`. It also denies `git config`, a branch move (`update-ref`, `branch -f`), `git notes` and a merge commit: keep the history linear (`git rebase main`, never `git merge main`). Run long commands in the foreground with a timeout, or redirect their output into a file you can read (a reviewer's sandbox); the output of a background task lives in Claude Code's own folder, which the guard closes to you.
 
 ## Output
 
