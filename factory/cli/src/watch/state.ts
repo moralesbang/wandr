@@ -3,6 +3,7 @@
 // imports beyond types and touches neither the DOM nor the clock: the page passes the time in.
 
 import type { Annotated } from '../annotate.ts'
+import type { RunUsage } from '../usage.ts'
 
 // ---- The flow: stations and edges, as in factory/README.md ---------------------------------------
 
@@ -21,6 +22,7 @@ export const STATIONS = {
   tqr: { label: 'Test reviewer', kind: 'agent', x: 184, y: 210, sub: 'opus' },
   verdict: { label: 'Findings?', kind: 'orch', x: 24, y: 174 },
   atfix: { label: 'AT fix', kind: 'agent', x: 504, y: 318, sub: 'test agent' },
+  diag: { label: 'Diagnosis', kind: 'agent', x: 664, y: 318, sub: 'opus' },
   pr: { label: 'PR', kind: 'cli', x: 24, y: 318 },
   merged: { label: 'You merge', kind: 'user', x: 184, y: 318 },
   dr: { label: 'Decision', kind: 'wait', x: 824, y: 174, sub: 'request' },
@@ -52,6 +54,8 @@ export const EDGE_IDS = [
   'e16',
   'e17',
   'e18',
+  'e19',
+  'e20',
 ] as const
 export type EdgeId = (typeof EDGE_IDS)[number]
 
@@ -60,6 +64,7 @@ const ROLE_STATION: Record<string, StationId> = {
   'factory-build': 'build',
   'factory-evaluator': 'eval',
   'factory-test-reviewer': 'tqr',
+  'factory-diagnose': 'diag',
 }
 const stationOfActor = (actor: string | undefined): StationId | undefined =>
   actor ? ROLE_STATION[actor] : undefined
@@ -115,6 +120,7 @@ const AFTER_STOP: Partial<Record<StationId, { at: StationId; what: string }>> = 
   build: { at: 'checks', what: 'running the checks' },
   eval: { at: 'verdict', what: 'merging the reviews' },
   tqr: { at: 'verdict', what: 'merging the reviews' },
+  diag: { at: 'build', what: 'dispatching build with the diagnosis' },
 }
 
 const modeAt = (at: StationId[], running: StationId[]): OrchestratorMode => {
@@ -148,6 +154,7 @@ export function orchestratorAt(input: OrchestratorInput): Reticle {
       reviewers[0] === 'eval' ? 'waiting on the evaluator' : 'waiting on the test reviewer',
     )
   }
+  if (running.includes('diag')) return pick(['diag'], 'waiting on the diagnosis agent')
   if (running.includes('build'))
     return pick(['build'], `waiting on build · try ${attempt}/${MAX_ATTEMPTS}`)
   if (running.includes('test')) return pick(['test'], 'waiting on the test agent')
@@ -180,10 +187,61 @@ export function reticleBox(at: StationId[]) {
 
 // ---- A job's state ------------------------------------------------------------------------------
 
+export type RiskLevel = 'low' | 'normal' | 'high'
+export type RoleTask = 'review' | 'verify' | 'carry'
+
+/** What the server adds to job.json for the page: files the job's events do not carry. */
+export type JobExtras = {
+  /** The text of each Decision Request, oldest first; null when its file is gone. */
+  requests: (string | null)[]
+  /** The verdict each ruling's file says, by ruling number; null while it is unwritten. */
+  rulingVerdicts: Record<string, string | null>
+  /** The roles that have a folder under the handoff's sandbox/. */
+  sandboxFolders: string[]
+  /** The contents of seal.json while the job is sealed. */
+  seal: { pass: number; roles: string[]; at: string } | null
+}
+
+export type PlanInfo = {
+  pass: number
+  head?: string
+  changed: string[] | number
+  risk: RiskLevel
+  raisedBy: string[]
+  roles: Partial<Record<string, RoleTask>>
+  at: string
+}
+
+/** job.json as the page gets it, with the server's extras. Everything but the first three is optional. */
 export type JobInfo = {
   number: number
   title: string
   state: Phase
+  risk?: RiskLevel
+  reviews?: PlanInfo[]
+  rulings?: { ruling: number; diff: string; at: string }[]
+  atfixes?: { sha: string; note: string; files: string[]; ruling?: number }[]
+  decisionRequests?: { at: string; file: string }[]
+  answers?: { request: number; at: string; text: string; cited?: boolean }[]
+  extras?: JobExtras
+}
+
+/** The orchestrator's own setting, as in ORCHESTRATOR in launch.ts (a test keeps them equal). */
+export const ORCHESTRATOR_PLAN = { model: 'sonnet', effort: 'medium' } as const
+
+/** A run's reads: the Read tool's, and the paths a Bash command, a Grep or a Glob read. */
+export type ReadEntry = Annotated & { via: string }
+
+/** What `factory launch` planned for one agent run. */
+export type PlannedRun = {
+  agent: string
+  task: string
+  model: string
+  effort: string
+  risk: string
+  t: number
+  /** The run that started under this plan, once one did. */
+  run: string | null
 }
 
 export type Run = {
@@ -200,16 +258,45 @@ export type Run = {
   prompt: unknown
   description: unknown
   instructions: Annotated[]
-  reads: Annotated[]
+  reads: ReadEntry[]
   writes: Annotated[]
   denied: Annotated[]
   searches: Annotated[]
   bash: Annotated[]
   changed: { status: string; path: string }[]
+  /** The run's total from its latest usage event: each one recomputes it from the transcript. */
+  usage: RunUsage | null
+  /** What `factory launch` planned for it, when the log has a plan for this run. */
+  plan: PlannedRun | null
 }
 
+/** One seal: the review pass it covers, who must write a blind pass, and when it opened and shut. */
+export type SealRecord = {
+  pass: number
+  roles: string[]
+  sealedAt: number
+  unsealedAt: number | null
+  /** Roles whose blind pass of this pass is written. */
+  blind: string[]
+}
+
+export type SandboxRecord = {
+  role: string
+  path: string
+  port: unknown
+  database: unknown
+  bucket: unknown
+  removed: boolean
+}
+
+/** The calls the guard denies; each is logged as an event of its own kind. */
+export const DENIAL_KINDS = new Set(['write.denied', 'read.denied', 'bash.denied', 'agent.denied'])
+
+/** What the job's runs cost together; `unpriced` models have tokens but no price. */
+export type Cost = { usd: number; unpriced: string[] }
+
 export type Segment = { mode: OrchestratorMode; from: number; to: number | null }
-export type Mark = { t: number; kind: string; fail: boolean }
+export type Mark = { t: number; kind: string; fail: boolean; request?: number }
 
 export type JobView = {
   number: number
@@ -218,7 +305,23 @@ export type JobView = {
   order: string[]
   marks: Mark[]
   breaches: { ev: Annotated; run: Run }[]
+  /** Calls the guard denied, of every kind in DENIAL_KINDS. */
   deniedCount: number
+  deniedBy: Record<string, number>
+  /** Reads by the tool that made them: Read, Bash, Grep or Glob. */
+  readBy: Record<string, number>
+  seals: SealRecord[]
+  sandboxes: Map<string, SandboxRecord>
+  planned: PlannedRun[]
+  /** The review plans the log announced, one per pass. */
+  reviewPlans: PlanInfo[]
+  /** Risk the latest plan or launch named. */
+  risk: RiskLevel | null
+  rulingRequests: { ruling: number; diff: string; t: number }[]
+  /** Rulings an AT fix was committed on, by ruling number. */
+  rulingFixes: Map<number, { sha: string | null; t: number }>
+  blockedCount: number
+  answeredCount: number
   handoffs: { ev: Annotated; run: Run }[]
   /** The newest events, oldest first, capped at FEED_CAP. */
   feed: Annotated[]
@@ -231,6 +334,7 @@ export type JobView = {
   round: number
   readCount: number
   tokens: number
+  cost: Cost
   stations: Record<StationId, StationState>
   /** Stations whose run read something it should not have. */
   flagged: Set<StationId>
@@ -259,6 +363,17 @@ export function createJobView(number: number): JobView {
     marks: [],
     breaches: [],
     deniedCount: 0,
+    deniedBy: {},
+    readBy: { Read: 0, Bash: 0, Grep: 0, Glob: 0 },
+    seals: [],
+    sandboxes: new Map(),
+    planned: [],
+    reviewPlans: [],
+    risk: null,
+    rulingRequests: [],
+    rulingFixes: new Map(),
+    blockedCount: 0,
+    answeredCount: 0,
     handoffs: [],
     feed: [],
     feedTotal: 0,
@@ -269,6 +384,7 @@ export function createJobView(number: number): JobView {
     round: 0,
     readCount: 0,
     tokens: 0,
+    cost: { usd: 0, unpriced: [] },
     stations: Object.fromEntries(STATION_IDS.map((id) => [id, 'idle'])) as Record<
       StationId,
       StationState
@@ -297,7 +413,7 @@ export function createJobView(number: number): JobView {
 export type Effects = { comet?: { from: StationId; to: StationId } }
 
 const FAIL_KINDS = new Set(['checks.failed', 'gate.rejected', 'red.rejected'])
-const AGENT_STATIONS = new Set<StationId>(['test', 'build', 'eval', 'tqr'])
+const AGENT_STATIONS = new Set<StationId>(['test', 'build', 'eval', 'tqr', 'diag'])
 
 export const runningStations = (view: JobView): StationId[] => {
   const found = new Set<StationId>()
@@ -305,6 +421,14 @@ export const runningStations = (view: JobView): StationId[] => {
     if (run.started && run.end === null && !run.parent && run.station) found.add(run.station)
   }
   return [...found]
+}
+
+function totalCost(view: JobView): Cost {
+  const runs = [...view.runs.values()]
+  return {
+    usd: runs.reduce((sum, run) => sum + (run.usage?.usd ?? 0), 0),
+    unpriced: [...new Set(runs.flatMap((run) => run.usage?.unpriced ?? []))],
+  }
 }
 
 function runOf(view: JobView, ev: Annotated, time: number): Run {
@@ -329,6 +453,8 @@ function runOf(view: JobView, ev: Annotated, time: number): Run {
       searches: [],
       bash: [],
       changed: [],
+      usage: null,
+      plan: null,
     }
     view.runs.set(id, run)
     view.order.push(id)
@@ -357,8 +483,115 @@ function move(view: JobView, time: number, on: EdgeId[], trail: EdgeId[] = []) {
   }
 }
 
+const RISK_RANK: Record<RiskLevel, number> = { low: 0, normal: 1, high: 2 }
+const asRisk = (value: unknown): RiskLevel | null =>
+  value === 'low' || value === 'normal' || value === 'high' ? value : null
+const strings = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+
+/**
+ * CLI events that add facts to the job without moving the flow: the orchestrator is where it was.
+ * They show in the timeline and the feed, and update the panels, never the reticle.
+ */
+const INFO_KINDS = new Set([
+  'launch.planned',
+  'review.planned',
+  'sealed',
+  'unsealed',
+  'ruling.requested',
+  'answered',
+  'sandbox.created',
+  'sandbox.removed',
+])
+
+function applyInfo(view: JobView, ev: Annotated, time: number) {
+  const detail = ev.detail ?? {}
+  switch (ev.kind) {
+    case 'launch.planned':
+      view.risk = asRisk(detail.risk) ?? view.risk
+      view.planned.push({
+        agent: String(detail.agent ?? ''),
+        task: String(detail.task ?? ''),
+        model: String(detail.model ?? ''),
+        effort: String(detail.effort ?? ''),
+        risk: String(detail.risk ?? ''),
+        t: time,
+        run: null,
+      })
+      break
+    case 'review.planned': {
+      const risk = asRisk(detail.risk)
+      view.risk = risk ?? view.risk
+      const roles = (detail.roles ?? {}) as PlanInfo['roles']
+      const plan: PlanInfo = {
+        pass: Number(detail.pass ?? view.reviewPlans.length + 1),
+        changed: typeof detail.changed === 'number' ? detail.changed : strings(detail.changed),
+        risk: risk ?? 'normal',
+        raisedBy: strings(detail.raisedBy),
+        roles,
+        at: ev.t,
+      }
+      const at = view.reviewPlans.findIndex((item) => item.pass === plan.pass)
+      if (at === -1) view.reviewPlans.push(plan)
+      else view.reviewPlans[at] = plan
+      break
+    }
+    case 'sealed':
+      view.seals.push({
+        pass: Number(detail.pass ?? 0),
+        roles: strings(detail.roles),
+        sealedAt: time,
+        unsealedAt: null,
+        blind: [],
+      })
+      break
+    case 'unsealed': {
+      const open = view.seals.findLast((item) => item.unsealedAt === null)
+      if (open) open.unsealedAt = time
+      break
+    }
+    case 'ruling.requested':
+      view.rulingRequests.push({
+        ruling: Number(detail.ruling ?? 0),
+        diff: String(detail.diff ?? ''),
+        t: time,
+      })
+      break
+    case 'answered':
+      view.answeredCount += 1
+      break
+    case 'sandbox.created':
+      view.sandboxes.set(String(detail.role ?? ''), {
+        role: String(detail.role ?? ''),
+        path: String(detail.path ?? ''),
+        port: detail.port,
+        database: detail.database,
+        bucket: detail.bucket,
+        removed: false,
+      })
+      break
+    case 'sandbox.removed': {
+      const found = view.sandboxes.get(String(detail.role ?? ''))
+      if (found) found.removed = true
+      break
+    }
+    default:
+      break
+  }
+  view.marks.push({
+    t: time,
+    kind: ev.kind,
+    fail: false,
+    ...(ev.kind === 'answered' ? { request: Number(detail.request ?? view.answeredCount) } : {}),
+  })
+}
+
 function applyCli(view: JobView, ev: Annotated, time: number) {
   const detail = ev.detail ?? {}
+  if (INFO_KINDS.has(ev.kind)) {
+    applyInfo(view, ev, time)
+    return
+  }
   switch (ev.kind) {
     case 'job.started':
       view.stations.ready = 'done'
@@ -415,6 +648,12 @@ function applyCli(view: JobView, ev: Annotated, time: number) {
       break
     case 'atfix':
     case 'rewrite':
+      if (ev.kind === 'atfix' && typeof detail.ruling === 'number') {
+        view.rulingFixes.set(detail.ruling, {
+          sha: typeof detail.sha === 'string' ? detail.sha : null,
+          t: time,
+        })
+      }
       pulse(view, 'atfix')
       move(view, time, ['e13'])
       break
@@ -422,6 +661,7 @@ function applyCli(view: JobView, ev: Annotated, time: number) {
       pulse(view, 'dr')
       move(view, time, [view.lastCli === 'red.rejected' ? 'e18' : 'e17'])
       view.phase = 'blocked'
+      view.blockedCount += 1
       break
     case 'pr.opened':
       pulse(view, 'pr', 'done')
@@ -451,7 +691,9 @@ function applyHook(view: JobView, ev: Annotated, time: number): Effects {
         view.stations[run.station] = 'active'
         view.lastStop = null
         if (run.station === 'test') move(view, time, ['e3'], ['e1', 'e2'])
+        if (run.station === 'diag') move(view, time, ['e19'])
       }
+      bindPlan(view, run)
       break
     case 'agent.stop': {
       if (!run.started) break
@@ -470,21 +712,23 @@ function applyHook(view: JobView, ev: Annotated, time: number): Effects {
           ) {
             move(view, time, ['e11'])
           }
+          if (station === 'diag') move(view, time, ['e20'], ['e19'])
         }
       }
       break
     }
+    case 'usage':
+      run.usage = ev.detail as RunUsage
+      view.cost = totalCost(view)
+      break
     case 'instructions':
       run.instructions.push(ev)
       break
     case 'read': {
-      run.reads.push(ev)
+      run.reads.push({ ...ev, via: 'Read' })
       view.readCount += 1
+      view.readBy.Read = (view.readBy.Read ?? 0) + 1
       view.tokens += ev.tokens ?? 0
-      if (ev.breach) {
-        view.breaches.push({ ev, run })
-        if (run.station) view.flagged.add(run.station)
-      }
       if (ev.from) {
         view.handoffs.push({ ev, run })
         const from =
@@ -495,18 +739,22 @@ function applyHook(view: JobView, ev: Annotated, time: number): Effects {
       }
       break
     }
-    case 'write':
+    case 'write': {
       run.writes.push(ev)
+      const blind = /^reviews\/(\d+)\.(evaluator|test-reviewer)\.blind\.md$/.exec(
+        ev.target?.area === 'job' ? ev.target.path : '',
+      )
+      const seal = blind && view.seals.findLast((item) => item.pass === Number(blind[1]))
+      if (seal && blind?.[2] && !seal.blind.includes(blind[2])) seal.blind.push(blind[2])
       break
-    case 'write.denied':
-      run.denied.push(ev)
-      view.deniedCount += 1
-      break
+    }
     case 'search':
       run.searches.push(ev)
+      addReads(view, run, ev, String(detail.tool ?? 'Grep'))
       break
     case 'bash':
       run.bash.push(ev)
+      addReads(view, run, ev, 'Bash')
       break
     case 'bash.files':
       run.changed.push(
@@ -519,7 +767,44 @@ function applyHook(view: JobView, ev: Annotated, time: number): Effects {
     default:
       break
   }
+  if (DENIAL_KINDS.has(ev.kind)) {
+    run.denied.push(ev)
+    view.deniedCount += 1
+    view.deniedBy[ev.kind] = (view.deniedBy[ev.kind] ?? 0) + 1
+  }
+  // A breach is whatever the annotator flagged: a read by any tool, or a denied read or call.
+  if (ev.breach) {
+    view.breaches.push({ ev, run })
+    if (run.station) view.flagged.add(run.station)
+  }
   return effects
+}
+
+/** The paths a Bash command, a Grep or a Glob read, each as a read of the run, tagged by its tool. */
+function addReads(view: JobView, run: Run, ev: Annotated, via: string) {
+  for (const read of ev.reads ?? []) {
+    const { breach: _all, reads: _reads, input: _input, ...rest } = ev
+    run.reads.push({
+      ...rest,
+      kind: 'read',
+      target: read.target,
+      via,
+      ...(read.input ? { input: read.input } : {}),
+      ...(read.breach ? { breach: read.breach } : {}),
+    })
+    view.readCount += 1
+    view.readBy[via] = (view.readBy[via] ?? 0) + 1
+  }
+}
+
+/** Ties the run that just started to the oldest unclaimed `factory launch` plan for its agent. */
+function bindPlan(view: JobView, run: Run) {
+  if (run.plan || run.parent) return
+  const plan = view.planned.find((item) => item.run === null && item.agent === run.type)
+  if (plan) {
+    plan.run = run.id
+    run.plan = plan
+  }
 }
 
 function trackSegments(view: JobView, time: number) {
@@ -581,6 +866,170 @@ export const runLabel = (view: JobView, run: Run): string => {
   return label
 }
 
+// ---- Panels: what the page shows besides the flow ----------------------------------------------
+
+export type Decision = {
+  /** The Decision Request waiting for the user, while the job is blocked and unanswered. */
+  pending: { n: number; text: string | null; waitingFor: string } | null
+  /** Every request raised so far, with the user's answer once there is one. */
+  history: { n: number; answered: boolean; answer: string | null }[]
+}
+
+/** The text on the page for the command the user runs to answer. */
+export const waitingFor = (job: number) => `! bun run factory answer ${job} "<text>"`
+
+export function decisionOf(view: JobView): Decision {
+  const info = view.info
+  const total = Math.max(view.blockedCount, info?.decisionRequests?.length ?? 0)
+  const history = Array.from({ length: total }, (_, index) => {
+    const n = index + 1
+    const answer = info?.answers?.find((item) => item.request === n)?.text ?? null
+    // The log says an answer exists; the text comes from job.json, so it may not be here yet.
+    return { n, answered: view.answeredCount >= n || answer !== null, answer }
+  })
+  const open = history.at(-1)
+  const blocked = phaseOf(view) === 'blocked' && open !== undefined && !open.answered
+  return {
+    pending:
+      blocked && open
+        ? {
+            n: open.n,
+            text: info?.extras?.requests[open.n - 1] ?? null,
+            waitingFor: waitingFor(view.number),
+          }
+        : null,
+    history,
+  }
+}
+
+export type RiskView = {
+  declared: RiskLevel | null
+  effective: RiskLevel | null
+  raised: boolean
+  raisedBy: string[]
+}
+
+/** The issue's declared risk and the one in force; `raisedBy` names the paths that raised it. */
+export function riskOf(view: JobView): RiskView {
+  const declared = view.info?.risk ?? null
+  const plans = reviewPlansOf(view)
+  const effective = view.risk ?? plans.at(-1)?.risk ?? declared
+  const raised =
+    declared !== null && effective !== null && RISK_RANK[effective] > RISK_RANK[declared]
+  const raisedBy = [...new Set(plans.flatMap((plan) => plan.raisedBy))]
+  return { declared, effective, raised, raisedBy: raised ? raisedBy : [] }
+}
+
+/** One plan per review pass: from the log, or from job.json when the log has none. */
+export const reviewPlansOf = (view: JobView): PlanInfo[] =>
+  view.reviewPlans.length ? view.reviewPlans : (view.info?.reviews ?? [])
+
+export type SealView = {
+  /** The seal in force, with a tick per role whose blind pass is written. */
+  sealed: SealRecord | null
+  /** The seals already lifted, with the moment of each unseal. */
+  lifted: SealRecord[]
+}
+
+export function sealOf(view: JobView): SealView {
+  const sealed = view.seals.findLast((item) => item.unsealedAt === null) ?? null
+  return { sealed, lifted: view.seals.filter((item) => item.unsealedAt !== null) }
+}
+
+export type RulingRow = {
+  ruling: number
+  diff: string
+  verdict: string | null
+  /** The AT fix committed on it, if any. */
+  committed: { sha: string | null } | null
+}
+
+export function rulingsOf(view: JobView): RulingRow[] {
+  const info = view.info
+  const asked = new Map<number, string>()
+  for (const item of info?.rulings ?? []) asked.set(item.ruling, item.diff)
+  for (const item of view.rulingRequests) asked.set(item.ruling, item.diff)
+  return [...asked]
+    .toSorted((a, b) => a[0] - b[0])
+    .map(([ruling, diff]) => {
+      const fix = view.rulingFixes.get(ruling)
+      const saved = info?.atfixes?.find((item) => item.ruling === ruling)
+      return {
+        ruling,
+        diff,
+        verdict: info?.extras?.rulingVerdicts[String(ruling)] ?? null,
+        committed: fix || saved ? { sha: saved?.sha ?? fix?.sha ?? null } : null,
+      }
+    })
+}
+
+export type SandboxStrip = {
+  source: 'events' | 'folders' | 'none'
+  rows: { role: string; detail: string }[]
+}
+
+/** Each reviewer's sandbox: from the sandbox events, else from the folders under sandbox/. */
+export function sandboxesOf(view: JobView): SandboxStrip {
+  if (view.sandboxes.size) {
+    return {
+      source: 'events',
+      rows: [...view.sandboxes.values()].map((box) => ({
+        role: box.role,
+        detail: box.removed
+          ? 'removed'
+          : `port ${String(box.port)} · db ${String(box.database)} · bucket ${String(box.bucket)}`,
+      })),
+    }
+  }
+  const folders = view.info?.extras?.sandboxFolders ?? []
+  return folders.length
+    ? { source: 'folders', rows: folders.map((role) => ({ role, detail: 'folder only' })) }
+    : { source: 'none', rows: [] }
+}
+
+export type ModelCheck = {
+  status: 'unplanned' | 'pending' | 'ok' | 'mismatch'
+  planned: { model: string; effort: string } | null
+  actual: { models: string[]; efforts: string[] } | null
+  problems: string[]
+}
+
+/**
+ * A run's model and effort against what was planned for it: `factory launch`'s plan for an agent,
+ * ORCHESTRATOR for the orchestrator. The plan says `opus`; usage says `claude-opus-5-5`.
+ */
+export function modelCheck(run: Run): ModelCheck {
+  const planned =
+    run.id === 'orchestrator'
+      ? ORCHESTRATOR_PLAN
+      : run.plan
+        ? { model: run.plan.model, effort: run.plan.effort }
+        : null
+  const actual = run.usage
+    ? { models: Object.keys(run.usage.models), efforts: Object.keys(run.usage.efforts) }
+    : null
+  if (!planned) return { status: 'unplanned', planned, actual, problems: [] }
+  if (!actual) return { status: 'pending', planned, actual, problems: [] }
+  const problems: string[] = []
+  const wrongModels = actual.models.filter((name) => !name.includes(planned.model))
+  if (wrongModels.length) problems.push(`model ${wrongModels.join(', ')}, planned ${planned.model}`)
+  const wrongEfforts = actual.efforts.filter((name) => name !== planned.effort)
+  if (wrongEfforts.length)
+    problems.push(`effort ${wrongEfforts.join(', ')}, planned ${planned.effort}`)
+  return { status: problems.length ? 'mismatch' : 'ok', planned, actual, problems }
+}
+
+/** The runs whose model or effort differs from the plan. */
+export const mismatches = (view: JobView): Run[] =>
+  [...view.runs.values()].filter((run) => modelCheck(run).status === 'mismatch')
+
+/** The tooltip of a CLI mark in the timeline; an answer carries the user's own words. */
+export function markTitle(view: JobView, mark: Mark): string {
+  if (mark.kind !== 'answered') return mark.kind
+  const text = view.info?.answers?.find((item) => item.request === mark.request)?.text
+  return text ? `answered · ${text}` : 'answered'
+}
+
 export const runTokens = (run: Run) => run.reads.reduce((sum, r) => sum + (r.tokens ?? 0), 0)
 
 export const where = (target: Annotated['target']): string =>
@@ -593,7 +1042,7 @@ export const where = (target: Annotated['target']): string =>
     : ''
 
 const OK_KINDS = new Set(['red.accepted', 'checks.passed', 'gate.passed', 'pr.opened'])
-const FAIL_ROW_KINDS = new Set([...FAIL_KINDS, 'write.denied', 'blocked'])
+const FAIL_ROW_KINDS = new Set([...FAIL_KINDS, ...DENIAL_KINDS, 'blocked'])
 
 const text = (value: unknown) => (typeof value === 'string' ? value : '')
 const trim = (value: string, max: number) =>
@@ -634,7 +1083,43 @@ export function describe(ev: Annotated): { kind: string; msg: string; cls: strin
       msg = path
       break
     case 'write.denied':
+    case 'read.denied':
       msg = `${path} · ${text(detail.reason)}`
+      break
+    case 'bash.denied':
+      msg = `${trim(text(detail.command), 100)} · ${text(detail.reason)}`
+      break
+    case 'agent.denied':
+      msg = `${text(detail.subagentType) || text(detail.to)} · ${text(detail.reason)}`
+      break
+    case 'launch.planned':
+      msg = `${text(detail.agent).replace('factory-', '')} · ${text(detail.task)} · ${text(detail.model)}/${text(detail.effort)} · ${text(detail.risk)} risk`
+      break
+    case 'review.planned':
+      msg = `pass ${String(detail.pass ?? '')} · ${Object.entries(
+        (detail.roles ?? {}) as Record<string, string>,
+      )
+        .map(([role, task]) => `${role} ${task}`)
+        .join(', ')} · ${text(detail.risk)} risk`
+      break
+    case 'sealed':
+      msg = `pass ${String(detail.pass ?? '')} · ${Array.isArray(detail.roles) ? detail.roles.join(', ') : ''}`
+      break
+    case 'unsealed':
+      msg = `pass ${String(detail.pass ?? '')} · blind passes written`
+      break
+    case 'ruling.requested':
+      msg = `ruling ${String(detail.ruling ?? '')} · diff ${text(detail.diff).slice(0, 12)}`
+      break
+    case 'answered':
+      msg = `Decision Request ${String(detail.request ?? '')} answered`
+      cls = 'ok'
+      break
+    case 'sandbox.created':
+      msg = `${text(detail.role)} · port ${String(detail.port ?? '')}`
+      break
+    case 'sandbox.removed':
+      msg = text(detail.role)
       break
     case 'search':
       msg = `${text(detail.tool)} ${text(detail.pattern)} ${path}`.trim()
@@ -653,6 +1138,9 @@ export function describe(ev: Annotated): { kind: string; msg: string; cls: strin
       break
     case 'agent.launched':
       msg = text(detail.childType) || text(detail.childId)
+      break
+    case 'usage':
+      msg = typeof detail.usd === 'number' ? `$${detail.usd.toFixed(2)}` : ''
       break
     case 'agent.stop':
       msg = Array.isArray(detail.changed) ? `${detail.changed.length} files changed` : ''
@@ -679,6 +1167,7 @@ export function describe(ev: Annotated): { kind: string; msg: string; cls: strin
     case 'atfix':
     case 'rewrite':
       msg = trim(text(detail.note), 140)
+      if (typeof detail.ruling === 'number') msg = `ruling ${detail.ruling} · ${msg}`
       break
     case 'pr.opened':
       msg = text(detail.url)
@@ -688,6 +1177,12 @@ export function describe(ev: Annotated): { kind: string; msg: string; cls: strin
       break
     default:
       break
+  }
+  // Any other event the annotator flagged (a Bash read, a Grep, a denied call) is a breach too.
+  if (ev.breach && ev.kind !== 'read') {
+    cls = 'breach'
+    // A denial's message already says why.
+    if (!DENIAL_KINDS.has(ev.kind)) msg = `${msg} · ${ev.breach}`
   }
   return { kind, msg, cls }
 }

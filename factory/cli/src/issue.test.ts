@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { parseCriteria, slugify } from './issue.ts'
+import { parseCriteria, parseRisk, slugify } from './issue.ts'
+import type { Risk } from './job.ts'
 
 const issue = (criteria: string) =>
   `### Description\n\nSomething.\n\n### Acceptance criteria\n\n${criteria}\n`
@@ -65,5 +66,32 @@ describe('slugify', () => {
 
   test('falls back to "issue" when nothing is left', () => {
     expect(slugify('!!!')).toBe('issue')
+  })
+})
+
+const withRisk = (answer: string) =>
+  `### Description\n\nSomething.\n\n### Risk\n\n${answer}\n\n### Acceptance criteria\n\nAC1: x\n`
+
+describe('parseRisk', () => {
+  test.each([
+    ['low: copy, styling, docs-like changes with no data path', 'low'],
+    ['normal: the default', 'normal'],
+    ['high: privacy boundary, auth, data model, migrations', 'high'],
+    ['High', 'high'],
+  ] as [string, Risk][])('reads "%s" as %s', (answer, risk) => {
+    expect(parseRisk(withRisk(answer))).toEqual({ ok: true, risk })
+  })
+
+  test('an issue written before the field is normal', () => {
+    expect(parseRisk(issue('AC1: x'))).toEqual({ ok: true, risk: 'normal' })
+  })
+
+  test('an unanswered field is normal', () => {
+    expect(parseRisk(withRisk('_No response_'))).toEqual({ ok: true, risk: 'normal' })
+  })
+
+  test('refuses a risk the form does not offer', () => {
+    const parsed = parseRisk(withRisk('medium'))
+    expect(parsed.ok).toBe(false)
   })
 })

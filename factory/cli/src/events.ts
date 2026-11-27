@@ -2,10 +2,12 @@
 // by Claude Code hooks.
 // It keeps paths, line ranges and sizes, never file contents.
 
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { z } from 'zod'
 import { stateDir, type Job } from './job.ts'
+import { canonical } from './paths.ts'
+import { usageOf } from './usage.ts'
 import type { Area, Target } from './visibility.ts'
 
 export type AgentRef = { id: string; type: string }
@@ -30,6 +32,21 @@ export function appendEvent(root: string, event: FactoryEvent): void {
   appendFileSync(join(dir, 'events.jsonl'), `${JSON.stringify(event)}\n`)
 }
 
+/** Every event of a job's log, oldest first; a line that doesn't parse is skipped. */
+export function readEvents(root: string, job: number): FactoryEvent[] {
+  const file = join(stateDir(root, job), 'events.jsonl')
+  if (!existsSync(file)) return []
+  const events: FactoryEvent[] = []
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    try {
+      if (line.trim()) events.push(JSON.parse(line) as FactoryEvent)
+    } catch {
+      // A line cut short by a crash is not the log's fault.
+    }
+  }
+  return events
+}
+
 export const cliEvent = (
   job: number,
   kind: string,
@@ -48,6 +65,10 @@ export const HookInput = z.looseObject({
   tool_response: z.unknown().optional(),
   file_path: z.string().optional(),
   load_reason: z.string().optional(),
+  /** The main session's transcript, which is the orchestrator's. */
+  transcript_path: z.string().optional(),
+  /** The stopping subagent's own transcript. */
+  agent_transcript_path: z.string().optional(),
 })
 export type HookInput = z.infer<typeof HookInput>
 
@@ -57,18 +78,21 @@ export type Places = { worktree: string; handoffDir: string }
 /**
  * Places an absolute path in its area: the job's handoff folder, the rest of its worktree, or
  * outside both. The handoff folder sits inside the worktree, so it is matched first. The main
- * checkout, its copy of the job's folder included, is outside.
+ * checkout, its copy of the job's folder included, is outside. Symlinks are resolved on both
+ * sides, so a link in the worktree is placed where it leads.
  */
 export function locate(path: string, places: Places): Target {
+  const real = canonical(path)
   const inside = (dir: string) => {
-    const rel = relative(dir, path)
-    return rel && !rel.startsWith('..') && !rel.startsWith(sep) ? rel.split(sep).join('/') : null
+    const rel = relative(canonical(dir), real)
+    // The folder itself is inside it, with an empty path: `git checkout -- .` writes the worktree.
+    return !rel.startsWith('..') && !rel.startsWith(sep) ? rel.split(sep).join('/') : null
   }
   const asJob = inside(places.handoffDir)
-  if (asJob) return { area: 'job', path: asJob }
+  if (asJob !== null) return { area: 'job', path: asJob }
   const asRepo = inside(places.worktree)
-  if (asRepo) return { area: 'repo', path: asRepo }
-  return { area: 'outside' as Area, path }
+  if (asRepo !== null) return { area: 'repo', path: asRepo }
+  return { area: 'outside' as Area, path: real }
 }
 
 const str = (value: unknown) => (typeof value === 'string' ? value : undefined)
@@ -107,7 +131,14 @@ export function eventsFromHook(input: HookInput, context: HookContext): FactoryE
     case 'SubagentStart':
       return [{ ...base, kind: 'agent.start' }]
     case 'SubagentStop':
-      return [{ ...base, kind: 'agent.stop' }]
+      return [
+        { ...base, kind: 'agent.stop' },
+        // A resumed subagent stops again with the same transcript: the latest event of a run wins.
+        ...usageEvents(input.agent_transcript_path, base, context),
+        ...usageEvents(input.transcript_path, orchestrator(base), context),
+      ]
+    case 'Stop':
+      return usageEvents(input.transcript_path, orchestrator(base), context)
     case 'InstructionsLoaded':
       return input.file_path
         ? [
@@ -129,6 +160,14 @@ export function eventsFromHook(input: HookInput, context: HookContext): FactoryE
 }
 
 type Base = Omit<FactoryEvent, 'kind'>
+
+const orchestrator = ({ agent: _agent, ...rest }: Base): Base => rest
+
+/** The run's total so far, from the whole transcript; nothing when it can't be read. */
+function usageEvents(path: string | undefined, base: Base, context: HookContext): FactoryEvent[] {
+  const usage = path ? usageOf(path, context.readText) : null
+  return usage ? [{ ...base, kind: 'usage', detail: usage }] : []
+}
 
 function preToolEvents(
   input: HookInput,
@@ -156,6 +195,7 @@ function preToolEvents(
     }
     case 'Edit':
     case 'Write':
+    case 'MultiEdit':
     case 'NotebookEdit':
       // Logged after the fact, in PostToolUse: only a write that happened counts.
       return []
@@ -167,7 +207,11 @@ function preToolEvents(
           ...base,
           kind: 'search',
           ...(searched ? { target: locate(searched, places) } : {}),
-          detail: { tool: input.tool_name, pattern: str(toolInput.pattern) },
+          detail: {
+            tool: input.tool_name,
+            pattern: str(toolInput.pattern),
+            ...(str(toolInput.glob) ? { glob: str(toolInput.glob) } : {}),
+          },
         },
       ]
     }
@@ -176,7 +220,10 @@ function preToolEvents(
         {
           ...base,
           kind: 'bash',
-          detail: { command: (str(toolInput.command) ?? '').slice(0, 300) },
+          detail: {
+            command: (str(toolInput.command) ?? '').slice(0, 4000),
+            ...(str(input.cwd) ? { cwd: str(input.cwd) } : {}),
+          },
         },
       ]
     case 'Agent':
@@ -205,7 +252,7 @@ function postToolEvents(
 ): FactoryEvent[] {
   const response = (input.tool_response ?? {}) as Record<string, unknown>
   const path = str(toolInput.file_path) ?? str(toolInput.notebook_path)
-  if (['Edit', 'Write', 'NotebookEdit'].includes(input.tool_name ?? '') && path) {
+  if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(input.tool_name ?? '') && path) {
     return [{ ...base, kind: 'write', target: locate(path, places) }]
   }
   if ((input.tool_name === 'Agent' || input.tool_name === 'Task') && str(response.agentId)) {

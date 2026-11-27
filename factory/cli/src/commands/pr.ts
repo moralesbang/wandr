@@ -1,8 +1,20 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { handoffDir, reviewPass, saveJob, stateDir, type Job } from '../job.ts'
+import { readEvents, type FactoryEvent } from '../events.ts'
+import { wroteInJob } from '../runs.ts'
+import type { RunUsage } from '../usage.ts'
+import {
+  handoffDir,
+  reviewPass,
+  saveJob,
+  stateDir,
+  type Job,
+  type ReviewerRole,
+  type ReviewPlan,
+} from '../job.ts'
+import { fileHash, refuseWhileSealed } from '../seal.ts'
 import { gh, git } from '../shell.ts'
-import { LABELS, record, Refusal, requireJob } from './common.ts'
+import { LABELS, record, Refusal, refuseWhileBlocked, requireJob } from './common.ts'
 import { moveLabel } from './start.ts'
 
 /** GitHub refuses comments and bodies over 65,536 characters. */
@@ -49,9 +61,151 @@ export function prBody(job: Job, parts: { summary: string; acceptance: string })
   )
 }
 
-/** Opens the PR once the gate passed on HEAD and both final reports approve. */
+const usd = (value: number) => `$${value.toFixed(2)}`
+const kilo = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n))
+/** `claude-opus-5-5` for one name, `claude-opus-5-5 ×12, claude-sonnet-5-5 ×3` for several. */
+const seen = (counts: Record<string, number>) => {
+  const entries = Object.entries(counts)
+  if (entries.length === 1) return entries[0]![0]
+  return entries.map(([name, n]) => `${name} ×${n}`).join(', ') || '–'
+}
+const cost = (total: number, unpriced: string[]) =>
+  unpriced.length ? `${usd(total)} + unpriced (${unpriced.join(', ')})` : usd(total)
+
+/**
+ * The per-run table of the PR comment, from the job's events: each run's latest usage event wins,
+ * since a resumed subagent logs its total again. Null when the log holds no usage.
+ */
+export function usageTable(events: FactoryEvent[]): string | null {
+  const runs = new Map<string, { label: string; usage: RunUsage }>()
+  for (const event of events) {
+    if (event.kind !== 'usage' || !event.detail) continue
+    const id = event.agent?.id ?? 'orchestrator'
+    const label = event.agent ? `${event.agent.type} (${id.slice(0, 7)})` : 'orchestrator'
+    runs.set(id, { label, usage: event.detail as RunUsage })
+  }
+  if (!runs.size) return null
+  const rows = [...runs.values()].map(
+    ({ label, usage }) =>
+      `| ${label} | ${seen(usage.models)} | ${seen(usage.efforts)} | ${kilo(usage.tokens.input)} | ${kilo(usage.tokens.output)} | ${kilo(usage.tokens.cacheRead)} | ${kilo(usage.tokens.cacheWrite5m + usage.tokens.cacheWrite1h)} | ${cost(usage.usd, usage.unpriced)} |`,
+  )
+  const all = [...runs.values()].map((run) => run.usage)
+  const total = cost(
+    all.reduce((sum, usage) => sum + usage.usd, 0),
+    [...new Set(all.flatMap((usage) => usage.unpriced))],
+  )
+  return [
+    '| Agent | Model | Effort | Input | Output | Cache read | Cache write | Cost |',
+    '| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |',
+    ...rows,
+    `| **Total** | | | | | | | **${total}** |`,
+  ].join('\n')
+}
+
+/** The first comment on the PR: what the cost was, the build notes and both final reports. */
+export function prComment(parts: {
+  buildNotes: string | null
+  pass: number
+  evaluator: string
+  testReviewer: string
+  usage: string | null
+}): string {
+  return fit(
+    [
+      ...(parts.usage ? [`## Cost per agent\n\n${parts.usage}`] : []),
+      `## Build notes\n\n${parts.buildNotes ?? '_None written._'}`,
+      `## Evaluator, final report (pass ${parts.pass})\n\n${parts.evaluator}`,
+      `## Test reviewer, final report (pass ${parts.pass})\n\n${parts.testReviewer}`,
+    ].join('\n\n'),
+  )
+}
+
+/**
+ * What each reviewer says for the pass, by its plan: the final report of a role that reviewed or
+ * verified, which must approve; the approval a role carries; or that the risk didn't need it.
+ * Refuses when a planned report is missing or doesn't approve, and when a role that reviewed has no
+ * blind pass: its final report would then rest on the build notes alone.
+ */
+export function plannedReports(
+  job: Pick<Job, 'reviews'>,
+  plan: ReviewPlan,
+  readReport: (rel: string) => string | null,
+): Record<ReviewerRole, string> {
+  const say = (role: ReviewerRole): string => {
+    const task = plan.roles[role]
+    if (!task) {
+      return `_Not launched: the job is ${plan.risk} risk, and the test reviewer alone judges a low-risk job._`
+    }
+    if (task === 'review' && !readReport(`reviews/${plan.pass}.${role}.blind.md`)) {
+      throw new Refusal(
+        `The ${role} reviewed pass ${plan.pass} without a blind pass: reviews/${plan.pass}.${role}.blind.md is missing or empty.`,
+      )
+    }
+    if (task === 'carry') {
+      const judged = job.reviews.findLast(
+        (earlier) => earlier.pass < plan.pass && earlier.roles[role] !== 'carry',
+      )
+      return `_Its approval from review pass ${judged?.pass ?? '?'} carries: only tests changed since._`
+    }
+    const report = readReport(`reviews/${plan.pass}.${role}.md`)
+    if (!report) throw new Refusal(`No final report from the ${role} for review pass ${plan.pass}.`)
+    if (!approves(report)) {
+      throw new Refusal(`The ${role}'s final report for pass ${plan.pass} doesn't approve.`)
+    }
+    return report
+  }
+  return { evaluator: say('evaluator'), 'test-reviewer': say('test-reviewer') }
+}
+
+/**
+ * Refuses a final report its own role's run didn't write: the log must hold a Write of
+ * `reviews/<pass>.<role>.md` by that role's agent. A file with no such write was put there by
+ * someone else, the orchestrator's Bash included.
+ */
+export function requireOwnWrites(events: FactoryEvent[], plan: ReviewPlan): void {
+  for (const role of ['evaluator', 'test-reviewer'] as const) {
+    const task = plan.roles[role]
+    if (task !== 'review' && task !== 'verify') continue
+    const rel = `reviews/${plan.pass}.${role}.md`
+    if (!wroteInJob(events, { type: `factory-${role}`, rel })) {
+      throw new Refusal(
+        `${rel} was not written by a factory-${role} run with the Write tool: the log shows no such write. Launch the ${role} to write its report.`,
+      )
+    }
+  }
+}
+
+/**
+ * Refuses a blind pass `factory unseal` never froze, or one that changed since: its hash is in the
+ * job from the unseal on, and the guard denies every write to the file after that.
+ */
+export function requireFrozenBlindPasses(
+  job: Pick<Job, 'blindPasses' | 'number'>,
+  plan: ReviewPlan,
+  dir: string,
+): void {
+  for (const role of ['evaluator', 'test-reviewer'] as const) {
+    if (plan.roles[role] !== 'review') continue
+    const rel = `reviews/${plan.pass}.${role}.blind.md`
+    const frozen = job.blindPasses[rel]
+    if (frozen === undefined) {
+      throw new Refusal(
+        `${rel} was never frozen: \`factory unseal ${job.number}\` records each blind pass, and none did for this one.`,
+      )
+    }
+    if (!existsSync(join(dir, rel)) || fileHash(join(dir, rel)) !== frozen) {
+      throw new Refusal(
+        `${rel} changed since \`factory unseal\` froze it: a blind pass is final once the build notes are out.`,
+      )
+    }
+  }
+}
+
+/** Opens the PR once the gate passed on HEAD and every reviewer the pass's plan names approves. */
 export async function pr(root: string, number: number): Promise<Job> {
   const job = requireJob(root, number)
+  refuseWhileBlocked(job, 'the PR')
+  refuseWhileSealed(root, job, 'the PR')
   // What the agents and the orchestrator wrote is in the handoff folder; what the CLI posts is
   // kept with the job's state.
   const dir = handoffDir(job)
@@ -61,15 +215,21 @@ export async function pr(root: string, number: number): Promise<Job> {
     throw new Refusal('The gate has not passed on HEAD. Run factory gate.')
   }
   const pass = reviewPass(job)
-  const reports = {
-    evaluator: read(join(dir, 'reviews', `${pass}.evaluator.md`)),
-    testReviewer: read(join(dir, 'reviews', `${pass}.test-reviewer.md`)),
+  const plan = job.reviews.find((planned) => planned.pass === pass)
+  if (!plan) {
+    throw new Refusal(
+      `Review pass ${pass} has no plan. Run: bun run factory review ${number}, then the reviewers it names.`,
+    )
   }
-  for (const [who, report] of Object.entries(reports)) {
-    if (!report) throw new Refusal(`No final report from the ${who} for review pass ${pass}.`)
-    if (!approves(report))
-      throw new Refusal(`The ${who}'s final report for pass ${pass} doesn't approve.`)
+  if (plan.head !== head) {
+    throw new Refusal(
+      `Review pass ${pass} reviewed ${plan.head.slice(0, 7)}, and HEAD is ${head.slice(0, 7)}: what changed since was never reviewed.`,
+    )
   }
+  const reports = plannedReports(job, plan, (rel) => read(join(dir, rel)))
+  const events = readEvents(root, number)
+  requireOwnWrites(events, plan)
+  requireFrozenBlindPasses(job, plan, dir)
   const summary = read(join(dir, 'summary.md'))
   const acceptance = read(join(dir, 'acceptance.md'))
   if (!summary) throw new Refusal(`Write the PR summary in ${dir}/summary.md first.`)
@@ -93,13 +253,13 @@ export async function pr(root: string, number: number): Promise<Job> {
   const commentFile = join(posted, 'pr-comment.md')
   writeFileSync(
     commentFile,
-    fit(
-      [
-        `## Build notes\n\n${read(join(dir, 'build-notes.md')) ?? '_None written._'}`,
-        `## Evaluator, final report (pass ${pass})\n\n${reports.evaluator}`,
-        `## Test reviewer, final report (pass ${pass})\n\n${reports.testReviewer}`,
-      ].join('\n\n'),
-    ),
+    prComment({
+      buildNotes: read(join(dir, 'build-notes.md')),
+      pass,
+      evaluator: reports.evaluator,
+      testReviewer: reports['test-reviewer'],
+      usage: usageTable(events),
+    }),
   )
   await gh('pr', 'comment', url, '--body-file', commentFile)
   await moveLabel(number, LABELS.pr_open)

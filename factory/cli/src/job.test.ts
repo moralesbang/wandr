@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -9,6 +17,7 @@ import {
   countRound,
   listJobs,
   loadJob,
+  findJobBySession,
   mainRoot,
   reviewPass,
   saveJob,
@@ -91,6 +100,28 @@ describe('job state on disk', () => {
   })
 })
 
+// A job.json that doesn't parse (written by hand, or cut short) must not hide every other job from
+// the guard: the guard finds a session's job through this list.
+describe('a job that does not read', () => {
+  test('listJobs skips it, logs it to hook-errors.log, and lists the rest', () => {
+    saveJob(root, makeJob({ number: 7, session: 'job-session' }))
+    mkdirSync(join(root, 'factory', '.jobs', '99'), { recursive: true })
+    writeFileSync(join(root, 'factory', '.jobs', '99', 'job.json'), '{\n')
+    expect(listJobs(root).map((job) => job.number)).toEqual([7])
+    expect(findJobBySession(root, 'job-session')?.number).toBe(7)
+    const log = readFileSync(join(root, 'factory', '.jobs', 'hook-errors.log'), 'utf8')
+    expect(log).toContain('factory/.jobs/99/job.json')
+  })
+
+  test('saveJob replaces job.json whole and leaves no temporary file', () => {
+    saveJob(root, makeJob({ number: 7 }))
+    saveJob(root, makeJob({ number: 7, attempts: 2 }))
+    expect(loadJob(root, 7)?.attempts).toBe(2)
+    expect(readdirSync(join(root, 'factory', '.jobs', '7'))).toEqual(['job.json'])
+    expect(existsSync(join(root, 'factory', '.jobs', '7', 'job.json'))).toBe(true)
+  })
+})
+
 describe('mainRoot', () => {
   test('from a job worktree it is the main checkout', () => {
     expect(mainRoot('/Users/x/wandr/.claude/worktrees/7-add/factory/cli/src')).toBe(
@@ -100,5 +131,14 @@ describe('mainRoot', () => {
 
   test('from the main checkout it is the repo root', () => {
     expect(mainRoot('/Users/x/wandr/factory/cli/src')).toBe('/Users/x/wandr')
+  })
+})
+
+describe('a job saved before the risk field', () => {
+  test('loads as normal risk', () => {
+    const { risk: _risk, ...old } = makeJob()
+    mkdirSync(join(root, 'factory', '.jobs', '7'), { recursive: true })
+    writeFileSync(join(root, 'factory', '.jobs', '7', 'job.json'), JSON.stringify(old))
+    expect(loadJob(root, 7)?.risk).toBe('normal')
   })
 })

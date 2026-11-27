@@ -1192,6 +1192,114 @@
           transform: scale(1);
         }
       }
+      .dr {
+        border-color: rgba(255, 93, 93, 0.5);
+        background: rgba(255, 93, 93, 0.06);
+      }
+      .dr.hidden,
+      .hidden {
+        display: none;
+      }
+      .drtext {
+        margin: 0 0 10px;
+        padding: 10px 12px;
+        max-height: 320px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font:
+          12.5px/1.5 'JetBrains Mono',
+          monospace;
+        color: #e7ecf3;
+        background: #07090d;
+        border-radius: 8px;
+      }
+      .waiting {
+        font:
+          600 12.5px/1.4 'JetBrains Mono',
+          monospace;
+        color: #ffc145;
+        margin: 0;
+        word-break: break-word;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 16px;
+      }
+      .tbl {
+        width: 100%;
+        border-collapse: collapse;
+        font:
+          11.5px/1.4 'JetBrains Mono',
+          monospace;
+        color: #aeb8c8;
+      }
+      .tbl th {
+        text-align: left;
+        font-weight: 500;
+        color: #7c879b;
+        padding: 0 8px 6px 0;
+      }
+      .tbl td {
+        padding: 4px 8px 4px 0;
+        border-top: 1px solid #141b26;
+        vertical-align: top;
+        word-break: break-word;
+      }
+      .tag {
+        display: inline-block;
+        padding: 1px 6px;
+        border-radius: 4px;
+        border: 1px solid #2a3446;
+        font:
+          600 10.5px/1.4 'JetBrains Mono',
+          monospace;
+        color: #aeb8c8;
+        white-space: nowrap;
+      }
+      .tag.review {
+        color: #34d399;
+        border-color: rgba(52, 211, 153, 0.4);
+      }
+      .tag.verify {
+        color: #4ca8ff;
+        border-color: rgba(76, 168, 255, 0.4);
+      }
+      .tag.carry {
+        color: #8b96a8;
+      }
+      .tag.high,
+      .tag.bad {
+        color: #ff8a8a;
+        border-color: rgba(255, 93, 93, 0.5);
+        background: rgba(255, 93, 93, 0.1);
+      }
+      .tag.ok {
+        color: #34d399;
+        border-color: rgba(52, 211, 153, 0.4);
+      }
+      .tag.warn {
+        color: #ffc145;
+        border-color: rgba(255, 193, 69, 0.5);
+      }
+      .lock {
+        font:
+          600 12px/1.4 'JetBrains Mono',
+          monospace;
+        color: #e7ecf3;
+        margin: 0 0 6px;
+      }
+      .lock.shut {
+        color: #ffc145;
+      }
+      .note {
+        margin: 8px 0 0;
+        font:
+          11.5px/1.4 Inter,
+          sans-serif;
+        color: #7c879b;
+      }
       .empty {
         margin: 0;
         font:
@@ -1254,10 +1362,19 @@
             <div class="stat"><span>Round</span><b id="s-round">0/3</b></div>
             <div class="stat"><span>Reads</span><b id="s-reads">0</b></div>
             <div class="stat"><span>Tokens</span><b id="s-tokens">~0</b></div>
+            <div class="stat"><span>Cost</span><b id="s-cost">$0.00</b></div>
             <div class="stat" id="s-breach-box"><span>Breaches</span><b id="s-breaches">0</b></div>
+            <div class="stat" id="s-denied-box"><span>Denied</span><b id="s-denied">0</b></div>
           </div>
           <div class="jobs" id="jobs" role="group" aria-label="Jobs"></div>
         </header>
+
+        <section class="panel dr hidden" id="decision" aria-labelledby="dr-h">
+          <div class="ph">
+            <h2 id="dr-h">Decision Request<span id="dr-sub"></span></h2>
+          </div>
+          <div id="dr-body"></div>
+        </section>
 
         <div class="row2">
           <section class="panel" aria-labelledby="flow-h" style="flex: 999 1 680px">
@@ -1295,6 +1412,31 @@
               <span class="count" id="feed-count">0 events</span>
             </div>
             <div class="feed" id="feed" aria-live="polite"></div>
+          </section>
+        </div>
+
+        <div class="grid" id="panels">
+          <section class="panel" aria-labelledby="risk-h">
+            <div class="ph"><h2 id="risk-h">Risk and review plan</h2></div>
+            <div id="risk"></div>
+          </section>
+          <section class="panel" aria-labelledby="seal-h">
+            <div class="ph"><h2 id="seal-h">Seal</h2></div>
+            <div id="seal"></div>
+          </section>
+          <section class="panel" aria-labelledby="rul-h">
+            <div class="ph"><h2 id="rul-h">Rulings</h2></div>
+            <div id="rulings"></div>
+          </section>
+          <section class="panel" aria-labelledby="mdl-h">
+            <div class="ph">
+              <h2 id="mdl-h">Model and effort<span>planned against actual</span></h2>
+            </div>
+            <div id="models"></div>
+          </section>
+          <section class="panel" aria-labelledby="sbx-h">
+            <div class="ph"><h2 id="sbx-h">Sandboxes</h2></div>
+            <div id="sandboxes"></div>
           </section>
         </div>
 
@@ -1344,6 +1486,15 @@
         where,
         actorOf,
         describe,
+        decisionOf,
+        riskOf,
+        reviewPlansOf,
+        sealOf,
+        rulingsOf,
+        sandboxesOf,
+        modelCheck,
+        mismatches,
+        markTitle,
       } from '/state.js'
 
       const params = new URLSearchParams(location.search)
@@ -1379,6 +1530,8 @@
         e16: [['M136 340H180', 1]],
         e17: [['M776 196H820', 1]],
         e18: [['M776 56H880'], ['M880 56V170', 1]],
+        e19: [['M690 222V314', 1]],
+        e20: [['M750 318V222', 1]],
       }
       const DOTTED = new Set(['e17', 'e18'])
       const SVG = 'http://www.w3.org/2000/svg'
@@ -1424,7 +1577,8 @@
       }
       add(`<div class="elbl" style="left:732px;top:118px">red commit</div>
         <div class="elbl" style="left:73px;top:252px">approve</div>
-        <div class="elbl" style="left:300px;top:294px">findings with evidence</div>`)
+        <div class="elbl" style="left:300px;top:294px">findings with evidence</div>
+        <div class="elbl" style="left:626px;top:236px">diagnosis</div>`)
       const ret = document.createElement('div')
       ret.className = 'ret hidden'
       ret.setAttribute('aria-hidden', 'true')
@@ -1489,11 +1643,20 @@
         new Date(t).toLocaleTimeString([], { hour12: false, timeZone: undefined })
       const tokensText = (n) =>
         n >= 1000 ? `~${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : `~${n}`
+      const costText = (usd, unpriced) => `$${usd.toFixed(2)}${unpriced.length ? ' +?' : ''}`
+      // "claude-opus-5-5" for one name, "claude-opus-5-5 ×12, claude-sonnet-5-5 ×3" for several.
+      const seenText = (counts) => {
+        const entries = Object.entries(counts)
+        return entries.length === 1
+          ? entries[0][0]
+          : entries.map(([name, n]) => `${name} ×${n}`).join(', ') || '–'
+      }
       const STATE_LABEL = { building: 'Building', blocked: 'Blocked', pr_open: 'PR open' }
       const STATE_CLASS = { building: 'building', blocked: 'blocked', pr_open: 'pr' }
       const edgeWindow = replaying ? Math.max(3000, 3000 * speed) : 6000
 
       let dirty = true
+      let infoRev = 0
       let shown = { job: null, rev: -1, run: undefined, follow: undefined }
 
       function drawMode() {
@@ -1555,9 +1718,23 @@
         $('s-attempt').textContent = `${view?.attempt ?? 0}/3`
         $('s-round').textContent = `${view?.round ?? 0}/3`
         $('s-reads').textContent = String(view?.readCount ?? 0)
+        $('s-reads').title = Object.entries(view?.readBy ?? {})
+          .map(([tool, n]) => `${tool} ${n}`)
+          .join(' · ')
         $('s-tokens').textContent = tokensText(view?.tokens ?? 0)
+        const total = view?.cost
+        $('s-cost').textContent = total ? costText(total.usd, total.unpriced) : '$0.00'
+        $('s-cost').title = total?.unpriced.length
+          ? `No price for ${total.unpriced.join(', ')}: its cost is not in the total`
+          : ''
         const breaches = view?.breaches.length ?? 0
         $('s-breaches').textContent = String(breaches)
+        const denied = view?.deniedCount ?? 0
+        $('s-denied').textContent = String(denied)
+        $('s-denied-box').classList.toggle('alert', denied > 0)
+        $('s-denied-box').title = Object.entries(view?.deniedBy ?? {})
+          .map(([kind, n]) => `${kind} ${n}`)
+          .join(' · ')
         const box = $('s-breach-box')
         const wasAlert = box.classList.contains('alert')
         box.classList.toggle('alert', breaches > 0)
@@ -1714,7 +1891,7 @@
           view.marks
             .map(
               (m) =>
-                `<span class="mark${m.fail ? ' fail' : ''}" style="left:${pct(m.t)}" title="${esc(m.kind)}"></span>`,
+                `<span class="mark${m.fail ? ' fail' : ''}" style="left:${pct(m.t)}" title="${esc(markTitle(view, m))}"></span>`,
             )
             .join('') + nowLine
         for (const { run, depth } of lanes) {
@@ -1806,14 +1983,21 @@
         ]
         el.innerHTML = `
           <div class="rline"><span class="rtitle">${esc(runLabel(view, run))}</span><span class="pill ${status === 'running' ? 'run' : status === 'finished' ? 'fin' : 'idle'}">${status}</span>${parent ? `<span class="muted">launched by ${esc(runLabel(view, parent))}</span>` : ''}</div>
-          <div class="kv">${station?.sub ? `<span>model <b>${esc(station.sub)}</b></span>` : ''}<span>reads <b>${run.reads.length}</b></span><span>tokens <b>${tokensText(runTokens(run))}</b></span></div>
+          <div class="kv">${
+            run.usage
+              ? `<span>model <b>${esc(seenText(run.usage.models))}</b></span><span>effort <b>${esc(seenText(run.usage.efforts))}</b></span><span>cost <b>${costText(run.usage.usd, run.usage.unpriced)}</b></span>`
+              : station?.sub
+                ? `<span>model <b>${esc(station.sub)}</b></span>`
+                : ''
+          }<span>reads <b>${run.reads.length}</b></span><span>tokens <b>${tokensText(runTokens(run))}</b></span></div>
+          ${checkHtml(modelCheck(run))}
           ${run.id === 'orchestrator' ? '' : `<p class="prompt">${run.prompt ? esc(run.prompt) : 'Prompt not recorded.'}</p>`}
-          ${run.denied.map((d) => `<div class="warn amber">write denied · ${esc(where(d.target))}${d.detail?.reason ? ` · ${esc(d.detail.reason)}` : ''}</div>`).join('')}
+          ${run.denied.map((d) => `<div class="warn amber">${esc(d.kind.replace('.', ' '))} · ${esc(d.detail?.command ? String(d.detail.command).slice(0, 120) : where(d.target))}${d.detail?.reason ? ` · ${esc(d.detail.reason)}` : ''}</div>`).join('')}
           ${run.reads
             .filter((r) => r.breach)
             .map(
               (r) =>
-                `<div class="warn red">breach · ${esc(where(r.target))} · ${esc(r.breach)}</div>`,
+                `<div class="warn red">breach · ${esc(r.via)} · ${esc(where(r.target))} · ${esc(r.breach)}</div>`,
             )
             .join('')}
           <div class="sub">Changed</div>
@@ -1834,7 +2018,7 @@
             list(
               run.reads.slice(-100),
               (r) =>
-                `<li class="${r.breach ? 'bad' : ''}">${esc(where(r.target))}${esc(lineRange(r))} <span class="muted">~${r.tokens ?? 0} tok${r.input ? ` · ${esc(r.input)}` : ''}</span>${r.from ? ` <span class="from">from ${esc(r.from.replace('factory-', ''))}</span>` : ''}</li>`,
+                `<li class="${r.breach ? 'bad' : ''}"><span class="muted">${esc(r.via)}</span> ${esc(where(r.target))}${esc(lineRange(r))} <span class="muted">${r.tokens === undefined ? '' : `~${r.tokens} tok`}${r.input ? ` · ${esc(r.input)}` : ''}</span>${r.from ? ` <span class="from">from ${esc(r.from.replace('factory-', ''))}</span>` : ''}</li>`,
             ),
             false,
           )}
@@ -1870,16 +2054,149 @@
           void b.offsetWidth
           b.style.animation = ''
         }
+        const by = Object.entries(view?.deniedBy ?? {})
+          .map(([kind, count]) => `${kind.replace('.denied', '')} ${count}`)
+          .join(', ')
+        const tools = Object.entries(view?.readBy ?? {})
+          .map(([tool, count]) => `${tool} ${count}`)
+          .join(', ')
         $('iso-text').textContent =
-          `read${n === 1 ? '' : 's'} outside an agent's allowed context · ${denied} write${denied === 1 ? '' : 's'} denied at the boundary`
+          `breach${n === 1 ? '' : 'es'}: reads (${tools || 'none'}) outside an agent's allowed context, or denied · ${denied} call${denied === 1 ? '' : 's'} denied at the boundary${by ? ` (${by})` : ''}`
         $('breaches').innerHTML = (view?.breaches ?? [])
           .slice(-50)
           .reverse()
           .map(
             ({ ev, run }) =>
-              `<li class="bad">${esc(clockTime(Date.parse(ev.t)))} · ${esc(runLabel(view, run))}: ${esc(ev.breach)}</li>`,
+              `<li class="bad">${esc(clockTime(Date.parse(ev.t)))} · ${esc(runLabel(view, run))} · ${esc(ev.kind === 'read' ? 'Read' : ev.kind)}: ${esc(ev.breach)}</li>`,
           )
           .join('')
+      }
+
+      // ---- Panels: decision, risk, seal, rulings, models, sandboxes --------------------------------
+      const tag = (text, cls = '') => `<span class="tag ${cls}">${esc(text)}</span>`
+      const short = (hash) => String(hash ?? '').slice(0, 12)
+
+      function checkHtml(check) {
+        if (check.status === 'unplanned') return ''
+        const plan = `${check.planned.model}/${check.planned.effort}`
+        if (check.status === 'pending')
+          return `<p class="note">planned ${esc(plan)} · no usage yet</p>`
+        if (check.status === 'ok')
+          return `<p class="note">${tag('as planned', 'ok')} ${esc(plan)}</p>`
+        return `<div class="warn red">model/effort mismatch · planned ${esc(plan)} · ${esc(check.problems.join(' · '))}</div>`
+      }
+
+      function drawDecision(view) {
+        const box = $('decision')
+        const d = view ? decisionOf(view) : { pending: null, history: [] }
+        box.classList.toggle('hidden', !d.history.length)
+        if (!d.history.length) return
+        $('dr-sub').textContent = d.pending
+          ? 'blocked · waiting on you'
+          : `${d.history.length} raised`
+        const pending = d.pending
+          ? `<pre class="drtext">${esc(pending_text(d.pending))}</pre><p class="waiting">Waiting for: ${esc(d.pending.waitingFor)}</p>`
+          : ''
+        const history = d.history
+          .map(
+            (h) =>
+              `<li class="${h.answered ? '' : 'bad'}">Request ${h.n} · ${h.answered ? `answered${h.answer ? `: ${esc(h.answer)}` : ''}` : 'open'}</li>`,
+          )
+          .join('')
+        $('dr-body').innerHTML = `${pending}<ul class="files">${history}</ul>`
+      }
+      const pending_text = (p) => p.text ?? 'The request file is not on disk any more.'
+
+      function drawRisk(view) {
+        const el = $('risk')
+        if (!view) return void (el.innerHTML = '<p class="empty">No job yet.</p>')
+        const risk = riskOf(view)
+        const plans = reviewPlansOf(view)
+        const head = `<p class="lock">declared ${risk.declared ? tag(risk.declared, risk.declared) : '–'} → effective ${risk.effective ? tag(risk.effective, risk.effective) : '–'}${risk.raised ? ` ${tag('raised', 'bad')}` : ''}</p>${risk.raised ? `<p class="note">raised by ${risk.raisedBy.length ? risk.raisedBy.map(esc).join(', ') : 'the diff'}</p>` : ''}`
+        const rows = plans
+          .map((plan) => {
+            const roles = Object.entries(plan.roles)
+              .map(([role, task]) => `${esc(role)} ${tag(task, task)}`)
+              .join(' · ')
+            return `<tr><td>pass ${plan.pass}</td><td>${roles}</td><td>${tag(plan.risk, plan.risk)}</td></tr>`
+          })
+          .join('')
+        el.innerHTML = `${head}${rows ? `<table class="tbl"><tbody>${rows}</tbody></table>` : '<p class="empty">No review planned yet.</p>'}`
+      }
+
+      function drawSeal(view) {
+        const el = $('seal')
+        if (!view) return void (el.innerHTML = '<p class="empty">No job yet.</p>')
+        const { sealed, lifted } = sealOf(view)
+        const ticks = (seal) =>
+          seal.roles
+            .map((role) => `${seal.blind.includes(role) ? '✓' : '○'} ${esc(role)}`)
+            .join(' · ')
+        let html = ''
+        if (sealed) {
+          html += `<p class="lock shut">🔒 sealed · pass ${sealed.pass} since ${esc(clockTime(sealed.sealedAt))}</p><p class="note">blind pass written: ${ticks(sealed)}</p>`
+        } else html += '<p class="lock">🔓 not sealed</p>'
+        html += lifted
+          .map(
+            (seal) =>
+              `<p class="note">pass ${seal.pass}: sealed ${esc(clockTime(seal.sealedAt))}, unsealed ${esc(clockTime(seal.unsealedAt))} · ${ticks(seal)}</p>`,
+          )
+          .join('')
+        el.innerHTML = html
+      }
+
+      function drawRulings(view) {
+        const el = $('rulings')
+        const rows = view ? rulingsOf(view) : []
+        el.innerHTML = rows.length
+          ? `<table class="tbl"><thead><tr><th>#</th><th>diff</th><th>verdict</th><th>fix</th></tr></thead><tbody>${rows
+              .map(
+                (r) =>
+                  `<tr><td>${r.ruling}</td><td title="${esc(r.diff)}">${esc(short(r.diff))}</td><td>${r.verdict ? tag(r.verdict, r.verdict === 'same-guarantee' ? 'ok' : 'warn') : tag('no verdict', '')}</td><td>${r.committed ? `committed ${esc(short(r.committed.sha ?? ''))}` : '–'}</td></tr>`,
+              )
+              .join('')}</tbody></table>`
+          : '<p class="empty">No ruling asked for.</p>'
+      }
+
+      function drawModels(view) {
+        const el = $('models')
+        const runs = view ? [...view.runs.values()].filter((r) => r.started && !r.parent) : []
+        const rows = runs
+          .map((run) => ({ run, check: modelCheck(run) }))
+          .filter(({ check }) => check.status !== 'unplanned')
+        el.innerHTML = rows.length
+          ? `<table class="tbl"><thead><tr><th>run</th><th>planned</th><th>actual</th><th></th></tr></thead><tbody>${rows
+              .map(({ run, check }) => {
+                const actual = check.actual
+                  ? `${esc(check.actual.models.join(', ') || '–')} / ${esc(check.actual.efforts.join(', ') || '–')}`
+                  : '–'
+                const state =
+                  check.status === 'ok'
+                    ? tag('ok', 'ok')
+                    : check.status === 'mismatch'
+                      ? tag('mismatch', 'bad')
+                      : tag('pending', '')
+                return `<tr><td>${esc(runLabel(view, run))}</td><td>${esc(check.planned.model)}/${esc(check.planned.effort)}</td><td>${actual}</td><td>${state}</td></tr>`
+              })
+              .join(
+                '',
+              )}</tbody></table>${mismatches(view).length ? `<p class="note">${mismatches(view).length} run(s) did not use what was planned.</p>` : ''}`
+          : '<p class="empty">No planned run with usage yet.</p>'
+      }
+
+      function drawSandboxes(view) {
+        const el = $('sandboxes')
+        const strip = view ? sandboxesOf(view) : { source: 'none', rows: [] }
+        if (strip.source === 'none') {
+          el.innerHTML =
+            '<p class="empty">No reviewer sandbox: none logged, and no folder under sandbox/.</p>'
+          return
+        }
+        el.innerHTML = `<table class="tbl"><tbody>${strip.rows
+          .map((r) => `<tr><td>${esc(r.role)}</td><td>${esc(r.detail)}</td></tr>`)
+          .join(
+            '',
+          )}</tbody></table>${strip.source === 'folders' ? '<p class="note">From the folders under sandbox/: no sandbox event is logged.</p>' : ''}`
       }
 
       function drawAll() {
@@ -1889,13 +2206,17 @@
         drawMap(view)
         drawFeed(view)
         // The inspector and the lists only change with events, selection or a new live run.
-        const sig = view
-          ? `${view.number}:${view.rev}:${selectedRun}:${view.info?.title ?? ''}`
-          : ''
+        const sig = view ? `${view.number}:${view.rev}:${selectedRun}:${infoRev}` : ''
         if (sig !== shown.sig) {
           shown.sig = sig
           drawRun(view)
           drawIsolation(view)
+          drawDecision(view)
+          drawRisk(view)
+          drawSeal(view)
+          drawRulings(view)
+          drawModels(view)
+          drawSandboxes(view)
         }
         drawTimeline(view)
         dirty = false
@@ -1904,9 +2225,10 @@
       // ---- The stream ------------------------------------------------------------------------
       const queue = []
       function connect() {
-        const source = new EventSource(
-          replayJob ? `/events?job=${encodeURIComponent(replayJob)}` : '/events',
-        )
+        // The server answers only with the token the page was opened with.
+        const stream = new URLSearchParams({ token: params.get('token') ?? '' })
+        if (replayJob) stream.set('job', replayJob)
+        const source = new EventSource(`/events?${stream}`)
         source.addEventListener('open', () => {
           connection = 'open'
           dirty = true
@@ -1919,6 +2241,7 @@
           const info = JSON.parse(m.data)
           if (info) {
             viewOf(info.number).info = info
+            infoRev += 1
             dirty = true
           }
         })

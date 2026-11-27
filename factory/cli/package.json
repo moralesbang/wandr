@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p .",
-    "test": "bun test"
+    "test": "bun test",
+    "e2e": "bun test ./src/sandbox.integration.ts --timeout 600000"
   },
   "dependencies": {
     "fast-xml-parser": "5.12.0",

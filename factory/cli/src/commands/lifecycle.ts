@@ -1,30 +1,63 @@
 import { $ } from 'bun'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import {
   countAttempt,
   countRound,
   handoffDir,
+  latestAnswer,
   listJobs,
+  reviewPass,
   saveJob,
   stateDir,
   type Job,
 } from '../job.ts'
+import { readEvents } from '../events.ts'
 import { isAcceptanceTest } from '../paths.ts'
+import { COPIED_WORDS, sharedPhrase } from '../phrases.ts'
+import { removeSandboxes } from '../sandbox.ts'
+import { refuseWhileSealed } from '../seal.ts'
 import { commitAll, gh, git, uncommitted } from '../shell.ts'
-import { LABELS, record, Refusal, requireJob } from './common.ts'
-import { DECISION_REQUEST_MARKER, moveLabel } from './start.ts'
+import { LABELS, record, Refusal, refuseWhileBlocked, requireJob, withCliCommit } from './common.ts'
+import { parseRuling, requireSameGuarantee, rulingFile } from './ruling.ts'
+import { moveLabel } from './start.ts'
 
 export function attempt(root: string, number: number): Job {
-  const counted = countAttempt(requireJob(root, number))
+  const job = requireJob(root, number)
+  refuseWhileBlocked(job, 'a build attempt')
+  refuseWhileSealed(root, job, 'a build attempt')
+  const counted = countAttempt(job)
   if (!counted.ok) throw new Refusal(counted.reason)
   saveJob(root, counted.job)
   record(root, number, 'attempt', { attempt: counted.job.attempts })
   return counted.job
 }
 
+export { COPIED_WORDS, sharedPhrase }
+
+/**
+ * Starts a new round with the pass's merged findings. Refused without them, and when they copy the
+ * build notes: findings carry the reviewers' evidence, not the build's reasoning handed back.
+ */
 export function round(root: string, number: number): Job {
-  const counted = countRound(requireJob(root, number))
+  const job = requireJob(root, number)
+  refuseWhileBlocked(job, 'a new round')
+  refuseWhileSealed(root, job, 'a new round')
+  const pass = reviewPass(job)
+  const findingsFile = join(handoffDir(job), 'reviews', `${pass}.findings.md`)
+  if (!existsSync(findingsFile)) {
+    throw new Refusal(`Write the merged findings of review pass ${pass} in ${findingsFile} first.`)
+  }
+  const notesFile = join(handoffDir(job), 'build-notes.md')
+  const copied =
+    existsSync(notesFile) &&
+    sharedPhrase(readFileSync(findingsFile, 'utf8'), readFileSync(notesFile, 'utf8'), COPIED_WORDS)
+  if (copied) {
+    throw new Refusal(
+      `reviews/${pass}.findings.md shares "${copied}" with build-notes.md. Write each finding in the reviewers' words, with their evidence (command, output, file:line), not the build notes'.`,
+    )
+  }
+  const counted = countRound(job)
   if (!counted.ok) throw new Refusal(counted.reason)
   saveJob(root, counted.job)
   record(root, number, 'round', { round: counted.job.rounds })
@@ -35,8 +68,7 @@ export function round(root: string, number: number): Job {
 async function commitAcceptanceChange(
   job: Job,
   what: string,
-  message: (note: string) => string,
-  note: string,
+  message: string,
 ): Promise<{ sha: string; files: string[] }> {
   const changed = await uncommitted(job.worktree)
   if (changed.length === 0) throw new Refusal('Nothing changed.')
@@ -44,55 +76,122 @@ async function commitAcceptanceChange(
   if (others.length) {
     throw new Refusal(`${what} changes only acceptance tests; these aren't: ${others.join(', ')}`)
   }
-  return { sha: await commitAll(job.worktree, message(note)), files: changed }
+  return { sha: await commitAll(job.worktree, message), files: changed }
 }
 
-/** Commits the test agent's same-guarantee fix to acceptance tests, and nothing else. */
-export async function atfix(root: string, number: number, note: string): Promise<Job> {
+/**
+ * What a commit says about the user's answer: its text for the body and the trailer that cites it.
+ * Null when the latest Decision Request has no answer, or a commit already cited it: one answer
+ * authorizes one rewrite or one acceptance-test fix.
+ */
+function citation(job: Job) {
+  const answer = latestAnswer(job)
+  if (!answer || answer.cited) return null
+  return {
+    answer,
+    body: `The user answered Decision Request ${answer.request}:\n\n${answer.text}`,
+    trailer: `Authorized-By: factory answer ${answer.at} (#${job.number}, Decision Request ${answer.request})`,
+  }
+}
+
+const markCited = (job: Job): Job => ({
+  ...job,
+  answers: job.answers.map((answer) =>
+    answer.request === job.decisionRequests.length ? { ...answer, cited: true } : answer,
+  ),
+})
+
+const commitMessage = (
+  subject: string,
+  note: string,
+  number: number,
+  cited: ReturnType<typeof citation>,
+) =>
+  [
+    subject,
+    note,
+    ...(cited ? [cited.body] : []),
+    [`Factory-Job: #${number}`, ...(cited ? [cited.trailer] : [])].join('\n'),
+  ].join('\n\n')
+
+/**
+ * Commits the test agent's fix to acceptance tests, and nothing else, on one of two grounds: a fresh
+ * test reviewer's same-guarantee ruling on exactly this diff (`factory ruling`), or the user's
+ * answer to a Decision Request raised on a changed-guarantee ruling (`factory block` records the
+ * link), which the commit cites and uses up. An answer to any other request authorizes no fix.
+ */
+export async function atfix(
+  root: string,
+  number: number,
+  note: string,
+  options: { ruling?: number } = {},
+): Promise<Job> {
   const job = requireJob(root, number)
+  refuseWhileBlocked(job, 'an acceptance-test fix')
+  refuseWhileSealed(root, job, 'an acceptance-test fix')
   if (!note.trim()) throw new Refusal('Say what the fix changes: factory atfix <n> --note "…"')
+  const answered = options.ruling === undefined ? citation(job) : null
+  const onRuling = answered && job.decisionRequests[answered.answer.request - 1]?.ruling
+  const cited = onRuling ? answered : null
+  if (options.ruling === undefined && !cited) {
+    throw new Refusal(
+      `An acceptance-test fix needs a ruling that it keeps the guarantee. Run factory ruling ${number}, launch a fresh factory-test-reviewer (task ruling) to write the file it names, then: factory atfix ${number} --ruling <m> --note "…". A changed guarantee goes to the user: factory block ${number} <file>; the user's answer to that request authorizes one atfix or rewrite.`,
+    )
+  }
+  const ruled =
+    options.ruling === undefined
+      ? null
+      : {
+          ruling: options.ruling,
+          diff: await requireSameGuarantee(job, options.ruling, readEvents(root, number)),
+        }
+  const subject = `test(#${number}): fix an acceptance test`
+  const message = commitMessage(subject, note, number, cited)
   const { sha, files } = await commitAcceptanceChange(
     job,
     'An acceptance-test fix',
-    (text) => `test(#${number}): fix an acceptance test\n\n${text}\n\nFactory-Job: #${number}`,
-    note,
+    ruled ? `${message}\nFactory-Ruling: ${ruled.ruling} (diff ${ruled.diff})` : message,
   )
   const updated: Job = {
-    ...job,
-    cliCommits: [...job.cliCommits, sha],
-    atfixes: [...job.atfixes, { sha, note, files }],
+    ...(cited ? markCited(job) : job),
+    ...(await withCliCommit(job, sha)),
+    atfixes: [...job.atfixes, { sha, note, files, ...(ruled ? { ruling: ruled.ruling } : {}) }],
   }
   saveJob(root, updated)
-  record(root, number, 'atfix', { sha, note, files })
+  record(root, number, 'atfix', { sha, note, files, ...(ruled ? { ruling: ruled.ruling } : {}) })
   return updated
 }
 
 /**
  * Commits the test agent's rewrite of acceptance tests after the user authorized a change of
- * guarantee on the issue. The note cites that authorization.
+ * guarantee by answering a Decision Request. The commit cites that answer; the note describes the
+ * change.
  */
 export async function rewrite(root: string, number: number, note: string): Promise<Job> {
   const job = requireJob(root, number)
-  if (!note.trim()) {
+  refuseWhileBlocked(job, 'a rewrite')
+  refuseWhileSealed(root, job, 'a rewrite')
+  const cited = citation(job)
+  if (!cited) {
     throw new Refusal(
-      'Cite the user\'s authorization: factory rewrite <n> --note "<the issue comment URL>"',
+      job.decisionRequests.length === 0
+        ? `Job #${number} has no Decision Request, so no guarantee change can be authorized. Raise one with factory block.`
+        : latestAnswer(job)?.cited
+          ? `The answer to Decision Request ${job.decisionRequests.length} of job #${number} already authorized a commit; one answer authorizes one rewrite or fix. Raise a new Decision Request with factory block.`
+          : `Decision Request ${job.decisionRequests.length} of job #${number} has no answer, so no guarantee change is authorized. The user answers with: ! bun run factory answer ${number} "<answer>"`,
     )
   }
-  if (job.decisionRequests.length === 0) {
-    throw new Refusal(
-      `Job #${number} has no Decision Request, so no guarantee change can be authorized. Raise one with factory block.`,
-    )
+  if (!note.trim()) {
+    throw new Refusal('Say what the rewrite changes: factory rewrite <n> --note "…"')
   }
   const { sha, files } = await commitAcceptanceChange(
     job,
     'An authorized rewrite',
-    (text) =>
-      `test(#${number}): rewrite acceptance tests as authorized\n\n${text}\n\nFactory-Job: #${number}`,
-    note,
+    commitMessage(`test(#${number}): rewrite acceptance tests as authorized`, note, number, cited),
   )
   const updated: Job = {
-    ...job,
-    cliCommits: [...job.cliCommits, sha],
+    ...markCited(job),
+    ...(await withCliCommit(job, sha)),
     rewrites: [...job.rewrites, { commit: sha, note, at: new Date().toISOString() }],
   }
   saveJob(root, updated)
@@ -100,26 +199,53 @@ export async function rewrite(root: string, number: number, note: string): Promi
   return updated
 }
 
-/** Posts a Decision Request on the issue and blocks the job until the user answers there. */
-export async function block(root: string, number: number, file: string): Promise<Job> {
+/**
+ * The changed-guarantee ruling a new Decision Request is raised on: the latest ruling, when it says
+ * the fix changes the guarantee and no earlier request cites it yet.
+ */
+function changedRuling(job: Job): number | undefined {
+  const latest = job.rulings.at(-1)
+  if (!latest || job.decisionRequests.some((request) => request.ruling === latest.ruling)) {
+    return undefined
+  }
+  const file = rulingFile(job, latest.ruling)
+  if (!existsSync(file)) return undefined
+  return parseRuling(readFileSync(file, 'utf8')).verdict === 'changed-guarantee'
+    ? latest.ruling
+    : undefined
+}
+
+/**
+ * Keeps a Decision Request in the job's folder and blocks the job until the user answers with
+ * `factory answer`. Nothing is posted on the issue: no one but the user may answer, so the request
+ * goes to the terminal; the caller prints the returned text. A request raised on a
+ * changed-guarantee ruling records which one.
+ */
+export async function block(
+  root: string,
+  number: number,
+  file: string,
+): Promise<{ job: Job; request: string }> {
   const job = requireJob(root, number)
+  // A second request would leave the first one's answer pointing at the wrong question.
+  refuseWhileBlocked(job, 'another Decision Request')
+  // Kept in decision-requests/, the request would be sealed material the seal never recorded.
+  refuseWhileSealed(root, job, 'a Decision Request')
   const dir = join(handoffDir(job), 'decision-requests')
   mkdirSync(dir, { recursive: true })
   const kept = join(dir, `${job.decisionRequests.length + 1}.md`)
   copyFileSync(file, kept)
-  const posted = join(dir, `${job.decisionRequests.length + 1}.posted.md`)
-  writeFileSync(posted, `${DECISION_REQUEST_MARKER}\n${readFileSync(file, 'utf8')}`)
   const at = new Date().toISOString()
-  await gh('issue', 'comment', String(number), '--body-file', posted)
   await moveLabel(number, LABELS.blocked)
+  const ruling = changedRuling(job)
   const updated: Job = {
     ...job,
     state: 'blocked',
-    decisionRequests: [...job.decisionRequests, { at, file: kept }],
+    decisionRequests: [...job.decisionRequests, { at, file: kept, ...(ruling ? { ruling } : {}) }],
   }
   saveJob(root, updated)
-  record(root, number, 'blocked', { file: kept })
-  return updated
+  record(root, number, 'blocked', { file: kept, ...(ruling ? { ruling } : {}) })
+  return { job: updated, request: readFileSync(kept, 'utf8') }
 }
 
 export function status(root: string): string {
@@ -176,6 +302,8 @@ const exitsZero = async (command: ReturnType<typeof $>) =>
  */
 export async function abandon(root: string, number: number): Promise<string[]> {
   const job = requireJob(root, number)
+  // Only the user runs clean (the guard denies it from any tool call), so a blocked job is theirs
+  // to discard without answering first.
   const prs = JSON.parse(
     await gh('pr', 'list', '--head', job.branch, '--state', 'all', '--json', 'url,state'),
   ) as { url: string; state: string }[]
@@ -198,6 +326,8 @@ export async function abandon(root: string, number: number): Promise<string[]> {
   })
 
   const done = [await downWorktreeStack(root, job.worktree)]
+  // Before the worktree goes: a sandbox reads its service settings from it.
+  done.push(...(await removeSandboxes(root, job)))
 
   if (existsSync(job.worktree)) {
     await git(root, 'worktree', 'remove', '--force', job.worktree)
@@ -228,6 +358,7 @@ export async function clean(root: string, number: number): Promise<void> {
     ? (JSON.parse(await gh('pr', 'view', job.pr, '--json', 'state')) as { state: string }).state
     : 'NONE'
   if (state !== 'MERGED') throw new Refusal(`Job #${number}'s PR isn't merged (${state}).`)
+  await removeSandboxes(root, job)
   await git(root, 'worktree', 'remove', '--force', job.worktree)
   await git(root, 'branch', '-D', job.branch)
   rmSync(stateDir(root, number), { recursive: true, force: true })

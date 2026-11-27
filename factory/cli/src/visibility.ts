@@ -6,6 +6,7 @@
 // checkout and its copy of the job's folder included).
 
 import { isAcceptanceTest, protectedFromBuild, ruleProtecting } from './paths.ts'
+import { reviewerRole, verifierMayRead } from './review-plan.ts'
 
 export type Area = 'repo' | 'job' | 'outside'
 export type Target = { area: Area; path: string }
@@ -15,6 +16,7 @@ export const AGENTS = [
   'factory-build',
   'factory-evaluator',
   'factory-test-reviewer',
+  'factory-diagnose',
 ] as const
 export type AgentType = (typeof AGENTS)[number]
 
@@ -44,6 +46,29 @@ const BUILD_NOTES: Input = {
   from: 'after-blind-pass',
 }
 
+// What repeats or cites the build agent's reasoning, so a reviewer sees it only after its blind
+// pass, like the notes: a Decision Request restates the build's escalation, and an earlier round's
+// final reports and merged findings were written after reading the notes. `factory seal` moves all
+// of it out of the worktree for the blind pass (seal.ts).
+const DECISION_REQUESTS: Input = {
+  label: 'Decision Requests',
+  paths: ['job:decision-requests/**'],
+  from: 'after-blind-pass',
+}
+const FINDINGS: Input = {
+  label: 'Merged findings',
+  paths: ['job:reviews/*.findings.md'],
+  from: 'after-blind-pass',
+}
+const ORCHESTRATOR_NOTES: Input = {
+  label: "The orchestrator's diagnosis and summary",
+  paths: ['job:diagnosis.md', 'job:summary.md'],
+  from: 'after-blind-pass',
+}
+
+/** A reviewer's disposable checkout, made by `factory sandbox`, inside the job's folder. */
+const sandboxGlob = (role: string) => `sandbox/${role}/**`
+
 const reviewer = (role: 'evaluator' | 'test-reviewer'): Input[] => [
   ISSUE,
   INSTRUCTIONS,
@@ -52,8 +77,16 @@ const reviewer = (role: 'evaluator' | 'test-reviewer'): Input[] => [
   { label: 'The repo at the branch', paths: ['repo:**'], from: 'start' },
   CHECKS,
   { label: 'The gate and its test changes', paths: ['job:gate.json'], from: 'start' },
-  { label: 'Its own reports', paths: [`job:reviews/*.${role}*.md`], from: 'start' },
+  // The test agent's map from each AC to its tests: written before the build, so nothing in it
+  // comes from the build notes.
+  { label: 'The AC map', paths: ['job:acceptance.md'], from: 'start' },
+  { label: 'Its own blind passes', paths: [`job:reviews/*.${role}.blind.md`], from: 'start' },
+  { label: 'Its own sandbox', paths: [`job:${sandboxGlob(role)}`], from: 'start' },
   BUILD_NOTES,
+  { label: 'Its own final reports', paths: [`job:reviews/*.${role}.md`], from: 'after-blind-pass' },
+  FINDINGS,
+  DECISION_REQUESTS,
+  ORCHESTRATOR_NOTES,
 ]
 
 export const INPUTS: Record<AgentType, readonly Input[]> = {
@@ -116,7 +149,19 @@ export const INPUTS: Record<AgentType, readonly Input[]> = {
     },
   ],
   'factory-evaluator': reviewer('evaluator'),
-  'factory-test-reviewer': reviewer('test-reviewer'),
+  'factory-test-reviewer': [
+    ...reviewer('test-reviewer'),
+    // A ruling on an acceptance-test fix: the uncommitted diff is in the repo.
+    { label: 'Its own rulings', paths: ['job:rulings/**'], from: 'start' },
+  ],
+  // Diagnoses a second failed build: sees what the evaluator sees after its blind pass, from the
+  // start, since it has no blind pass of its own.
+  'factory-diagnose': [
+    ISSUE,
+    INSTRUCTIONS,
+    { label: 'The repo at the branch', paths: ['repo:**'], from: 'start' },
+    { label: "The job's folder", paths: ['job:**'], from: 'start' },
+  ],
 }
 
 const matches = (glob: string, target: Target) => {
@@ -126,17 +171,26 @@ const matches = (glob: string, target: Target) => {
 
 export type ReadVerdict = { ok: true; input: string } | { ok: false; reason: string }
 
+export type ReadState = {
+  blindPassWritten: boolean
+  /**
+   * The reader is a reviewer planned to verify in this pass: it has no blind pass, and reads the
+   * previous merged findings and its own previous final report (review-plan.ts verifierMayRead).
+   */
+  verifying?: boolean
+}
+
 /**
  * The breach rule: a read is fine only if the target is one of the agent's inputs and that input
  * is visible at this moment.
  */
-export function classifyRead(
-  agent: AgentType,
-  target: Target,
-  state: { blindPassWritten: boolean },
-): ReadVerdict {
+export function classifyRead(agent: AgentType, target: Target, state: ReadState): ReadVerdict {
   if (target.area === 'outside') {
     return { ok: false, reason: `Read outside the job's worktree and folder: ${target.path}` }
+  }
+  const role = reviewerRole(agent)
+  if (state.verifying && role && target.area === 'job' && verifierMayRead(role, target.path)) {
+    return { ok: true, input: 'Previous findings and its own report (verify pass)' }
   }
   const input = INPUTS[agent].find((candidate) =>
     candidate.paths.some((glob) => matches(glob, target)),
@@ -192,14 +246,20 @@ export function classifyWrite(agent: string, target: Target): WriteVerdict {
           )
         : { ok: true }
     }
+    case 'factory-diagnose':
+      return target.area === 'job' && target.path === 'diagnosis.md'
+        ? { ok: true }
+        : deny('The diagnosis agent writes only diagnosis.md in the job folder.')
     case 'factory-evaluator':
     case 'factory-test-reviewer': {
       const role = agent.replace('factory-', '')
-      const own = new Bun.Glob(`reviews/*.${role}*.md`)
-      return target.area === 'job' && own.match(target.path)
+      const own = [`reviews/*.${role}*.md`, sandboxGlob(role), `sandbox/${role}`]
+      const ruling = role === 'test-reviewer' && /^rulings\/\d+\.md$/.test(target.path)
+      return target.area === 'job' &&
+        (ruling || own.some((glob) => new Bun.Glob(glob).match(target.path)))
         ? { ok: true }
         : deny(
-            `A reviewer writes only its own reports, reviews/<pass>.${role}[.blind].md in the job folder. Report the problem as a finding instead.`,
+            `A reviewer writes only its own reports, reviews/<pass>.${role}[.blind].md in the job folder, ${role === 'test-reviewer' ? 'the ruling factory ruling names (rulings/<m>.md), ' : ''}and anything in its own sandbox, sandbox/${role}/ (factory sandbox <n> ${role}). Report the problem as a finding instead.`,
           )
     }
     default:

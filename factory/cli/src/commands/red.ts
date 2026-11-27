@@ -15,7 +15,7 @@ import {
 } from '../report.ts'
 import { commitAll, runLogged, uncommitted } from '../shell.ts'
 import { styleProblems } from '../style.ts'
-import { record, Refusal, requireJob } from './common.ts'
+import { record, Refusal, refuseWhileBlocked, requireJob, withCliCommit } from './common.ts'
 
 const reporter = (runner: 'vitest' | 'playwright') =>
   fileURLToPath(new URL(`../reporters/${runner}.ts`, import.meta.url))
@@ -45,6 +45,7 @@ function readRun(runner: Runner, path: string): Report {
  */
 export async function red(root: string, number: number): Promise<{ job: Job; problems: string[] }> {
   const job = requireJob(root, number)
+  refuseWhileBlocked(job, 'a red')
   const allowed = canTryRed(job)
   if (!allowed.ok) throw new Refusal(allowed.reason)
   const changed = await uncommitted(job.worktree)
@@ -135,7 +136,7 @@ export async function red(root: string, number: number): Promise<{ job: Job; pro
     job.worktree,
     `test(#${number}): add the acceptance tests for "${job.title}"\n\nFactory-Job: #${number}`,
   )
-  const updated = { ...job, redCommit: sha, cliCommits: [...job.cliCommits, sha] }
+  const updated = { ...job, redCommit: sha, ...(await withCliCommit(job, sha)) }
   saveJob(root, updated)
   record(root, number, 'red.accepted', { sha, files: acceptance })
   return { job: updated, problems }

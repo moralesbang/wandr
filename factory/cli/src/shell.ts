@@ -5,8 +5,15 @@ import { closeSync, copyFileSync, existsSync, openSync, rmSync, utimesSync } fro
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
+/**
+ * Every git the CLI runs ignores the repo's hooks: an agent can't set core.hooksPath (the guard
+ * denies `git config`), but a hook file it wrote into the checkout would run with the user's
+ * account when the CLI commits or pushes. The repo has no hooks of its own (no husky, no lefthook).
+ */
+const NO_HOOKS = ['-c', 'core.hooksPath=/dev/null']
+
 export async function git(cwd: string, ...args: string[]): Promise<string> {
-  return (await $`git -C ${cwd} ${args}`.quiet().text()).trim()
+  return (await $`git -C ${cwd} ${NO_HOOKS} ${args}`.quiet().text()).trim()
 }
 
 export async function gh(...args: string[]): Promise<string> {
@@ -31,8 +38,8 @@ export async function workingTree(worktree: string): Promise<string> {
   }
   try {
     const env = { ...process.env, GIT_INDEX_FILE: scratch }
-    await $`git -C ${worktree} add -A`.env(env).quiet()
-    return (await $`git -C ${worktree} write-tree`.env(env).quiet().text()).trim()
+    await $`git -C ${worktree} ${NO_HOOKS} add -A`.env(env).quiet()
+    return (await $`git -C ${worktree} ${NO_HOOKS} write-tree`.env(env).quiet().text()).trim()
   } finally {
     rmSync(scratch, { force: true })
   }
@@ -53,8 +60,21 @@ export async function changedBetween(
 /** Uncommitted changes in a worktree, untracked files included. */
 export async function uncommitted(cwd: string): Promise<string[]> {
   // Not through git(): trimming would eat the leading space of the first " M path" line.
-  const output = await $`git -C ${cwd} status --porcelain=v1 -uall --no-renames`.quiet().text()
+  const output = await $`git -C ${cwd} ${NO_HOOKS} status --porcelain=v1 -uall --no-renames`
+    .quiet()
+    .text()
   return lines(output).map((line) => line.slice(3))
+}
+
+/**
+ * The commit's patch id (`git patch-id --stable`): a hash of what the commit changes, equal after a
+ * rebase moved it onto another base. Empty when the commit changes nothing.
+ */
+export async function patchId(cwd: string, sha: string): Promise<string> {
+  const out = (
+    await $`git -C ${cwd} ${NO_HOOKS} show ${sha} | git patch-id --stable`.quiet().text()
+  ).trim()
+  return out.split(/\s+/)[0] ?? ''
 }
 
 export async function commitAll(cwd: string, message: string): Promise<string> {
