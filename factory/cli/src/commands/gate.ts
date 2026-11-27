@@ -4,7 +4,7 @@ import { handoffDir, saveJob, type Job } from '../job.ts'
 import { protectedFromBuild } from '../paths.ts'
 import { git, lines, uncommitted } from '../shell.ts'
 import { testChanges, type TestChanges } from '../test-changes.ts'
-import { record, requireJob } from './common.ts'
+import { record, refuseWhileBlocked, requireJob } from './common.ts'
 
 export type GateResult = { passed: boolean; problems: string[]; tests: TestChanges; head: string }
 
@@ -38,6 +38,7 @@ export async function gate(
   number: number,
 ): Promise<{ job: Job; result: GateResult }> {
   const job = requireJob(root, number)
+  refuseWhileBlocked(job, 'the gate')
   const cwd = job.worktree
   const head = await git(cwd, 'rev-parse', 'HEAD')
   const headTree = await git(cwd, 'rev-parse', 'HEAD^{tree}')

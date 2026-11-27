@@ -182,3 +182,43 @@ describe('the evaluator carries its approval while the test reviewer verifies (n
     },
   )
 })
+
+// Nothing is sealed when every role verifies or carries, yet a verify pass is still no blind pass
+// for the sealed names: the verifier reads its own inputs among them, until its report is written.
+describe('the test reviewer verifies, nothing sealed', () => {
+  beforeEach(() => setUp({ evaluator: 'carry', 'test-reviewer': 'verify' }))
+
+  test.each([
+    ['Read the build notes', () => read(TEST_REVIEWER, join(handoff, 'build-notes.md'))],
+    [
+      "cat the notes, a Decision Request and the other reviewer's report",
+      () =>
+        bash(
+          TEST_REVIEWER,
+          `cat ${handoff}/build-notes.md ${handoff}/decision-requests/1.md ${handoff}/reviews/1.evaluator.md`,
+        ),
+    ],
+    [
+      'Grep the Decision Requests',
+      () => call(TEST_REVIEWER, 'Grep', { pattern: 'x', path: join(handoff, 'decision-requests') }),
+    ],
+    ['cat them by glob', () => bash(TEST_REVIEWER, 'cat factory/.jobs/7/decision-requests/*')],
+  ])('denies the verifier: %s', (_what, run) => {
+    expect(run()?.permissionDecision).toBe('deny')
+  })
+
+  test.each([
+    ['its previous findings', () => read(TEST_REVIEWER, join(handoff, 'reviews/1.findings.md'))],
+    ['its own report', () => bash(TEST_REVIEWER, `cat ${handoff}/reviews/1.test-reviewer.md`)],
+    ['the issue', () => read(TEST_REVIEWER, join(handoff, 'issue.md'))],
+    ['the repo', () => read(TEST_REVIEWER, join(worktree, 'apps', 'x.ts'))],
+    ['the diff', () => bash(TEST_REVIEWER, 'git diff head1 head2')],
+  ])('lets the verifier read %s', (_what, run) => {
+    expect(run()).toBeNull()
+  })
+
+  test('once its final report is written, the verifier reads the rest', () => {
+    put(join(handoff, 'reviews', '2.test-reviewer.md'), 'Verdict: approve\n')
+    expect(read(TEST_REVIEWER, join(handoff, 'build-notes.md'))).toBeNull()
+  })
+})

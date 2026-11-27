@@ -21,7 +21,7 @@ import { atfix, attempt, block, rewrite, round } from './commands/lifecycle.ts'
 import { pr } from './commands/pr.ts'
 import { start } from './commands/start.ts'
 import { readEvents } from './events.ts'
-import { installFakeGh, makeJob } from './job-fixture.ts'
+import { installFakeGh, makeJob, writeBlindPass } from './job-fixture.ts'
 import { loadJob, saveJob, stateDir } from './job.ts'
 import { describeSeal, loadSeal, seal, unseal } from './seal.ts'
 
@@ -95,8 +95,8 @@ const settle = async (run: () => unknown) => {
   return null
 }
 const writeBlindPasses = () => {
-  put('reviews/2.evaluator.blind.md', 'blind\n')
-  put('reviews/2.test-reviewer.blind.md', 'blind\n')
+  writeBlindPass(root, 7, 2, 'evaluator')
+  writeBlindPass(root, 7, 2, 'test-reviewer')
 }
 
 describe('factory seal', () => {
@@ -170,7 +170,11 @@ describe('factory unseal', () => {
     })
     expect(existsSync(join(stateDir(root, 7), 'sealed'))).toBe(false)
     expect(loadSeal(root, 7)).toBeNull()
-    expect(readEvents(root, 7).map((event) => event.kind)).toEqual(['sealed', 'unsealed'])
+    expect(
+      readEvents(root, 7)
+        .map((event) => event.kind)
+        .filter((kind) => kind !== 'write'),
+    ).toEqual(['sealed', 'unsealed'])
   })
 
   test("refuses, moving nothing, when a sealed file's place was taken meanwhile", () => {
@@ -187,6 +191,37 @@ describe('factory unseal', () => {
 
   test('refuses a job that is not sealed', () => {
     expect(refusal(() => unseal(root, 7))).toBeInstanceOf(Refusal)
+  })
+
+  // A blind pass lifts the seal for every reviewer, so it must be the reviewer's own: an `echo`
+  // from Bash, or a file another run wrote, proves no blind review was made.
+  test.each([
+    [
+      'a blind pass no run wrote with the Write tool',
+      () => put('reviews/2.test-reviewer.blind.md', 'blind\n'),
+    ],
+    [
+      "a blind pass the other reviewer's run wrote",
+      () => {
+        writeBlindPass(root, 7, 2, 'test-reviewer')
+        const events = join(stateDir(root, 7), 'events.jsonl')
+        const lines = readFileSync(events, 'utf8').replaceAll(
+          '"type":"factory-test-reviewer"',
+          '"type":"factory-evaluator"',
+        )
+        writeFileSync(events, lines)
+      },
+    ],
+    ['an empty blind pass', () => writeBlindPass(root, 7, 2, 'test-reviewer', '  \n')],
+  ])('refuses %s, and keeps the files sealed', (_what, write) => {
+    seal(root, 7, BOTH)
+    writeBlindPass(root, 7, 2, 'evaluator')
+    write()
+    const error = refusal(() => unseal(root, 7))
+    expect(error).toBeInstanceOf(Refusal)
+    expect((error as Refusal).message).toContain('test-reviewer')
+    expect(existsSync(join(handoff, 'build-notes.md'))).toBe(false)
+    expect(loadSeal(root, 7)).not.toBeNull()
   })
 })
 

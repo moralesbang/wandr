@@ -1,8 +1,8 @@
 // Entry points for Claude Code's hooks (.claude/settings.json). Each reads the hook input on
 // stdin; outside a factory job both do nothing.
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join, relative, resolve } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   appendEvent,
   eventsFromHook,
@@ -11,15 +11,20 @@ import {
   type FactoryEvent,
   type Places,
 } from '../events.ts'
-import { findJobBySession, handoffDir, jobsDir, reviewPass, stateDir, type Job } from '../job.ts'
-import { isWithin } from '../paths.ts'
+import {
+  findJobBySession,
+  handoffDir,
+  hookErrorsLog,
+  logHookError,
+  stateDir,
+  type Job,
+} from '../job.ts'
+import { canonical } from '../paths.ts'
 import { changedBetween, workingTree } from '../shell.ts'
 import { bashPolicy } from '../bash-policy.ts'
-import { allow, deny, type Policy } from '../policy.ts'
+import type { Policy } from '../policy.ts'
 import { agentPolicy, messagePolicy, readPolicy } from '../read-guard.ts'
-import { plannedTask, reviewerRole } from '../review-plan.ts'
-import { isSealedName, loadSeal } from '../seal.ts'
-import { classifyWrite } from '../visibility.ts'
+import { writePolicy } from '../write-guard.ts'
 
 const readText = (path: string) => {
   try {
@@ -37,12 +42,15 @@ function find(root: string, stdin: string): { input: HookInput; job: Job } | nul
 }
 
 const logError = (root: string, hook: string, error: unknown) => {
-  mkdirSync(jobsDir(root), { recursive: true })
-  appendFileSync(
-    join(jobsDir(root), 'hook-errors.log'),
-    `${new Date().toISOString()} ${hook} ${String(error)}\n`,
-  )
+  try {
+    logHookError(root, hook, error)
+  } catch {
+    // Nowhere left to say it.
+  }
 }
+
+/** Claude Code's agent ids are letters, digits, `_` and `-`; the log names files after them. */
+const AGENT_ID = /^[A-Za-z0-9_-]+$/
 
 /** Records the worktree's state when an agent starts, and what it changed when it stops. */
 async function withRunChanges(events: FactoryEvent[], input: HookInput, job: Job, root: string) {
@@ -69,6 +77,10 @@ export async function hookLog(root: string, stdin: string): Promise<void> {
     const found = find(root, stdin)
     if (!found) return
     const { input, job } = found
+    if (input.agent_id !== undefined && !AGENT_ID.test(input.agent_id)) {
+      logError(root, 'log', `ignored an event with the agent id ${JSON.stringify(input.agent_id)}`)
+      return
+    }
     const events = eventsFromHook(input, {
       job,
       handoffDir: handoffDir(job),
@@ -81,64 +93,36 @@ export async function hookLog(root: string, stdin: string): Promise<void> {
   }
 }
 
-/**
- * Edit and Write by an agent stay inside its write column. Nobody, the orchestrator included, writes
- * the job's state in the main checkout (only the CLI and the hooks do) or, while the job is sealed,
- * a sealed name in the job's folder: `factory unseal` would refuse to overwrite it. Two exceptions
- * follow the pass's review plan: a reviewer planned to verify writes its own final report while
- * another's blind pass keeps the job sealed, and a reviewer whose approval carries writes no report.
- */
-const writePolicy: Policy = ({ root, job, input, places, agent }) => {
-  const path = input.tool_input?.file_path ?? input.tool_input?.notebook_path
-  if (typeof path !== 'string') return allow
-  const absolute = resolve(path)
-  if (!agent && isWithin(absolute, jobsDir(root))) {
-    return deny(
-      `${absolute} is the job's state in the main checkout, written only by the CLI and the hooks. Use \`bun run factory <command>\`; what you hand an agent goes in ${places.handoffDir}.`,
-    )
-  }
-  const sealed = loadSeal(root, job.number)
-  const rel = relative(places.handoffDir, absolute)
-  const inHandoff = isWithin(absolute, places.handoffDir)
-  const role = agent ? reviewerRole(agent.type) : null
-  const verifiersReport =
-    sealed &&
-    role &&
-    plannedTask(job, sealed.pass, role) === 'verify' &&
-    rel === `reviews/${sealed.pass}.${role}.md`
-  if (sealed && inHandoff && isSealedName(rel) && !verifiersReport) {
-    return deny(
-      `Job #${job.number} is sealed for review pass ${sealed.pass}: ${rel} is sealed material, and \`bun run factory unseal ${job.number}\` would refuse to overwrite it. Write it after the unseal.`,
-    )
-  }
-  const pass = reviewPass(job)
-  if (
-    role &&
-    inHandoff &&
-    plannedTask(job, pass, role) === 'carry' &&
-    new RegExp(`^reviews/${pass}\\.${role}(?:\\.blind)?\\.md$`).test(rel)
-  ) {
-    return deny(
-      `In review pass ${pass} the ${role}'s approval from the previous pass carries: only tests changed since. It writes no report for this pass.`,
-    )
-  }
-  if (!agent) return allow
-  return classifyWrite(agent.type, locate(path, places))
-}
+type Entry = { policy: Policy; kind: string }
+
+const BASH: Entry = { policy: bashPolicy, kind: 'bash.denied' }
 
 /** Which policy judges each tool, and the event a denial logs. */
-const POLICIES: Record<string, { policy: Policy; kind: string }> = {
+const POLICIES: Record<string, Entry> = {
   Edit: { policy: writePolicy, kind: 'write.denied' },
   Write: { policy: writePolicy, kind: 'write.denied' },
   NotebookEdit: { policy: writePolicy, kind: 'write.denied' },
   Read: { policy: readPolicy, kind: 'read.denied' },
   Grep: { policy: readPolicy, kind: 'read.denied' },
   Glob: { policy: readPolicy, kind: 'read.denied' },
-  Bash: { policy: bashPolicy, kind: 'bash.denied' },
+  Bash: BASH,
+  // Monitor runs a shell command in the background, as Bash does.
+  Monitor: BASH,
   Agent: { policy: agentPolicy, kind: 'agent.denied' },
   Task: { policy: agentPolicy, kind: 'agent.denied' },
   SendMessage: { policy: messagePolicy, kind: 'agent.denied' },
 }
+
+/**
+ * The tools a subagent of a job may call: the ones the guard judges, and a few that touch no file
+ * (a todo list, loading a deferred tool's schema, stopping its own background task). Any other
+ * tool, an MCP server's included, reads or reaches what the guard can't judge.
+ */
+const SUBAGENT_TOOLS = new Set([...Object.keys(POLICIES), 'TodoWrite', 'ToolSearch', 'TaskStop'])
+
+/** The policy for a tool: its own, or Bash's for any tool that takes a shell command. */
+const entryFor = (input: HookInput): Entry | null =>
+  POLICIES[input.tool_name ?? ''] ?? (typeof input.tool_input?.command === 'string' ? BASH : null)
 
 /** What a denial logs besides its reason: the path it read or wrote, the command, the recipient. */
 function deniedTarget(input: HookInput, places: Places): Partial<FactoryEvent> {
@@ -146,7 +130,7 @@ function deniedTarget(input: HookInput, places: Places): Partial<FactoryEvent> {
   const text = (key: string) => (typeof toolInput[key] === 'string' ? toolInput[key] : undefined)
   const path = text('file_path') ?? text('notebook_path') ?? text('path')
   return {
-    ...(path ? { target: locate(resolve(path), places) } : {}),
+    ...(path ? { target: locate(path, places) } : {}),
     detail: {
       ...(text('command') ? { command: text('command')?.slice(0, 300) } : {}),
       ...(text('pattern') ? { pattern: text('pattern') } : {}),
@@ -156,43 +140,69 @@ function deniedTarget(input: HookInput, places: Places): Partial<FactoryEvent> {
   }
 }
 
+const denial = (reason: string) =>
+  JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: reason,
+    },
+  })
+
 /**
  * The synchronous PreToolUse guard: asks the tool's policy, logs a denial and prints the decision
- * on stdout; prints nothing to let the call through. Fails open: the CLI gate is the final verdict.
+ * on stdout; prints nothing to let the call through. Outside a factory job it lets everything
+ * through. Inside one it fails closed: a call it can't judge, for any error, is denied.
  */
-export function hookGuard(root: string, stdin: string): string {
+export function hookGuard(mainRoot: string, stdin: string): string {
+  let found: ReturnType<typeof find>
   try {
-    const found = find(root, stdin)
-    if (!found) return ''
-    const { input, job } = found
-    const entry = POLICIES[input.tool_name ?? '']
-    if (!entry) return ''
-    const places = { worktree: job.worktree, handoffDir: handoffDir(job) }
-    const agent = input.agent_id
-      ? { id: input.agent_id, type: input.agent_type ?? 'unknown' }
-      : undefined
-    const verdict = entry.policy({ root, job, input, places, ...(agent ? { agent } : {}) })
-    if (verdict.ok) return ''
-    const denied = deniedTarget(input, places)
-    appendEvent(root, {
-      t: new Date().toISOString(),
-      job: job.number,
-      source: 'hook',
-      ...(agent ? { agent } : {}),
-      kind: entry.kind,
-      ...(input.tool_use_id ? { toolUseId: input.tool_use_id } : {}),
-      ...denied,
-      detail: { ...denied.detail, reason: verdict.reason },
-    })
-    return JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        permissionDecision: 'deny',
-        permissionDecisionReason: verdict.reason,
-      },
-    })
+    found = find(mainRoot, stdin)
   } catch (error) {
-    logError(root, 'guard', error)
+    logError(mainRoot, 'guard', error)
     return ''
   }
+  if (!found) return ''
+  try {
+    return judge(mainRoot, found.input, found.job)
+  } catch (error) {
+    logError(mainRoot, 'guard', error)
+    return denial(
+      `The factory guard failed on this call (the error is in ${hookErrorsLog(mainRoot)}), and during a job a call it can't judge is denied. Try it another way, or report the failure in your reply.`,
+    )
+  }
+}
+
+/** The verdict on one call of a job's session; every path judged where its symlinks lead. */
+function judge(mainRoot: string, input: HookInput, found: Job): string {
+  const root = canonical(mainRoot)
+  const job = { ...found, worktree: canonical(found.worktree) }
+  const places = { worktree: job.worktree, handoffDir: handoffDir(job) }
+  const agent = input.agent_id
+    ? { id: input.agent_id, type: input.agent_type ?? 'unknown' }
+    : undefined
+  const tool = input.tool_name ?? ''
+  const entry = entryFor(input)
+  const verdict =
+    agent && !SUBAGENT_TOOLS.has(tool)
+      ? {
+          ok: false as const,
+          reason: `${tool} is not a tool an agent of a factory job uses: the guard can't judge what it reads or reaches. Use Read, Grep, Glob, Bash, Edit or Write.`,
+        }
+      : entry
+        ? entry.policy({ root, job, input, places, ...(agent ? { agent } : {}) })
+        : null
+  if (!verdict || verdict.ok) return ''
+  const denied = deniedTarget(input, places)
+  appendEvent(root, {
+    t: new Date().toISOString(),
+    job: job.number,
+    source: 'hook',
+    ...(agent ? { agent } : {}),
+    kind: entry?.kind ?? 'tool.denied',
+    ...(input.tool_use_id ? { toolUseId: input.tool_use_id } : {}),
+    ...denied,
+    detail: { ...denied.detail, reason: verdict.reason },
+  })
+  return denial(verdict.reason)
 }

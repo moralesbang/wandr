@@ -126,7 +126,11 @@ describe('factory atfix', () => {
   })
 
   test('cites an answered request the first commit after it, and not again', async () => {
-    saveJob(root, makeJob({ worktree: tree, ...answered() }))
+    // Raised on a changed-guarantee ruling: only such an answer stands in for a ruling.
+    saveJob(
+      root,
+      makeJob({ worktree: tree, ...answered(), decisionRequests: [{ ...DR, ruling: 1 }] }),
+    )
     writeFileSync(join(tree, 'x.acceptance.test.ts'), 'x\n')
     const first = await atfix(root, 7, 'apply the answer')
     const message = await git(tree, 'log', '-1', '--format=%B')

@@ -5,11 +5,19 @@
 // sealed with real files.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { readEvents, type FactoryEvent } from '../events.ts'
-import { makeJob } from '../job-fixture.ts'
+import { makeJob, writeBlindPass } from '../job-fixture.ts'
 import { saveJob, stateDir } from '../job.ts'
 import { seal, unseal } from '../seal.ts'
 import { annotate } from '../annotate.ts'
@@ -82,8 +90,8 @@ const launch = (prompt: string) =>
   call(null, 'Agent', { subagent_type: 'factory-evaluator', description: 'review', prompt })
 const message = (text: string) => call(null, 'SendMessage', { to: 'evaluator', message: text })
 const blindPassesWritten = () => {
-  put(join(handoff, 'reviews', '2.evaluator.blind.md'), 'blind\n')
-  put(join(handoff, 'reviews', '2.test-reviewer.blind.md'), 'blind\n')
+  writeBlindPass(root, 7, 2, 'evaluator')
+  writeBlindPass(root, 7, 2, 'test-reviewer')
 }
 
 describe('the job folder, before the blind pass', () => {
@@ -436,5 +444,149 @@ describe("replay: job #13's reviewers through the guard", () => {
     } finally {
       rmSync(main, { recursive: true, force: true })
     }
+  })
+})
+
+// The adversarial review of factory v1.3 reached the sealed store through each of these.
+const store = () => join(stateDir(root, 7), 'sealed')
+/** The sealed store as a path relative to `/`. */
+const fromRoot = () => store().slice(1)
+
+describe.each(SUBAGENTS)('ways around the main checkout, for %s', (_who, who) => {
+  test.each([
+    ['link the file system root', () => bash(who, 'ln -s / r')],
+    ['link the main checkout through $PWD', () => bash(who, 'ln -s $PWD/../../.. m')],
+    [
+      'link it in one go and read through it',
+      () => bash(who, `ln -s / r && cat r${store()}/build-notes.md`),
+    ],
+    ['pushd to the root', () => bash(who, `pushd / && cat ${fromRoot()}/build-notes.md`)],
+    ['cd -P to the root', () => bash(who, `cd -P / && cat ${fromRoot()}/build-notes.md`)],
+    ['builtin cd to the root', () => bash(who, `builtin cd / && cat ${fromRoot()}/build-notes.md`)],
+    [
+      'find from the root',
+      () => bash(who, "find / -name build-notes.md -path '*sealed*' -exec cat {} +"),
+    ],
+    ['rg from the root', () => bash(who, 'rg -uu --no-messages Adding /')],
+    ['grep -r from /private', () => bash(who, 'grep -rl Adding /private')],
+    ['du the home folder', () => bash(who, `du -a ${homedir()}`)],
+    [
+      'Grep from the root',
+      () => call(who, 'Grep', { pattern: 'Adding', path: '/', glob: '**/sealed/**' }),
+    ],
+    ['Glob from the root', () => call(who, 'Glob', { pattern: '**/sealed/**', path: '/' })],
+    [
+      'Glob an absolute pattern from the root',
+      () => call(who, 'Glob', { pattern: '/**/sealed/**' }),
+    ],
+    [
+      'quote $HOME back up to the root',
+      () => bash(who, `cat "$HOME/../..${store()}/build-notes.md"`),
+    ],
+    [
+      'run the CLI sandbox with a path relative to it',
+      () =>
+        bash(
+          who,
+          `bun run factory sandbox exec 7 evaluator -- cat ${relative(join(handoff, 'sandbox', 'evaluator'), join(store(), 'build-notes.md'))}`,
+        ),
+    ],
+  ])('denies: %s', (_what, run) => {
+    expect(run()?.permissionDecision).toBe('deny')
+  })
+
+  test('denies a read through a link that already exists', () => {
+    symlinkSync('/', join(worktree, 'r'))
+    expect(read(who, join(worktree, 'r', store(), 'build-notes.md'))?.permissionDecision).toBe(
+      'deny',
+    )
+    expect(bash(who, `cat r${store()}/build-notes.md`)?.permissionDecision).toBe('deny')
+    expect(bash(who, 'cat r/etc/hosts')).toBeNull()
+  })
+
+  test('still lets a lone / be an argument', () => {
+    expect(bash(who, 'echo a/b | tr / -')).toBeNull()
+    expect(bash(who, 'ls /')).toBeNull()
+  })
+})
+
+describe.each(SUBAGENTS)("Claude Code's own files, for %s at all times", (_who, who) => {
+  const claude = join(homedir(), '.claude')
+  test.each([
+    [
+      'grep its file history',
+      () => bash(who, 'grep -rl "Decision Request" ~/.claude/file-history'),
+    ],
+    ['cat its file history', () => bash(who, `cat ${claude}/file-history/*/*`)],
+    [
+      'Grep its file history',
+      () => call(who, 'Grep', { pattern: 'x', path: join(claude, 'file-history') }),
+    ],
+    [
+      'Read a file-history version',
+      () => read(who, join(claude, 'file-history', 'ea6d', 'c69f@v2')),
+    ],
+    ['cat the prompt history', () => bash(who, `cat ${claude}/history.jsonl`)],
+    ['list its tasks', () => bash(who, `ls ${claude}/tasks ${claude}/jobs`)],
+    ['reach it through $USER', () => bash(who, 'cat /Users/$USER/.claude/history.jsonl')],
+    ['reach it through ${HOME}', () => bash(who, 'cat ${HOME}/.claude/history.jsonl')],
+    ['cat a task output in $TMPDIR', () => bash(who, 'cat $TMPDIR/claude-501/x/tasks/abc.output')],
+    [
+      'cat a task output in ${TMPDIR}',
+      () => bash(who, 'cat ${TMPDIR}/claude-501/x/tasks/abc.output'),
+    ],
+    [
+      'cat a task output in a macOS temp folder',
+      () => bash(who, 'cat /var/folders/n6/x/T/claude-501/tasks/a.output'),
+    ],
+  ])('denies: %s', (_what, run) => {
+    const decision = run()
+    expect(decision?.permissionDecision).toBe('deny')
+    expect(decision?.permissionDecisionReason).toContain('tool-results')
+  })
+})
+
+describe("the orchestrator's prompts and writes while sealed, by shingles", () => {
+  test.each([
+    [
+      'a quote cut short of its line',
+      () => 'Review. Context: Adding width and height attributes to the icon links did not',
+    ],
+    [
+      'a quote in other case and spacing',
+      () =>
+        'Review. Context: adding   width and HEIGHT attributes to the icon\nlinks did not help.',
+    ],
+    [
+      'the build notes, unhyphenated',
+      () => 'Review. The build notes say the width attrs did not help.',
+    ],
+    ['the sealed store without a slash', () => `Read ${join(stateDir(root, 7), 'sealed')}`],
+  ])('denies a prompt with %s', (_what, prompt) => {
+    expect(launch(prompt())?.permissionDecision).toBe('deny')
+  })
+
+  test.each(['context.md', 'issue.md'])(
+    'denies the orchestrator writing sealed text into the job folder (%s)',
+    (name) => {
+      const decision = call(null, 'Write', { file_path: join(handoff, name), content: NOTES_LINE })
+      expect(decision?.permissionDecision).toBe('deny')
+      expect(
+        call(null, 'Edit', {
+          file_path: join(handoff, name),
+          old_string: 'a',
+          new_string: `x ${NOTES_LINE}`,
+        })?.permissionDecision,
+      ).toBe('deny')
+    },
+  )
+
+  test('lets the orchestrator write its own words there', () => {
+    expect(
+      call(null, 'Write', {
+        file_path: join(handoff, 'issue.md'),
+        content: '# Add a thing (#7)\n',
+      }),
+    ).toBeNull()
   })
 })

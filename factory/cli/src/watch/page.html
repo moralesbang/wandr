@@ -2225,9 +2225,10 @@
       // ---- The stream ------------------------------------------------------------------------
       const queue = []
       function connect() {
-        const source = new EventSource(
-          replayJob ? `/events?job=${encodeURIComponent(replayJob)}` : '/events',
-        )
+        // The server answers only with the token the page was opened with.
+        const stream = new URLSearchParams({ token: params.get('token') ?? '' })
+        if (replayJob) stream.set('job', replayJob)
+        const source = new EventSource(`/events?${stream}`)
         source.addEventListener('open', () => {
           connection = 'open'
           dirty = true

@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -9,6 +17,7 @@ import {
   countRound,
   listJobs,
   loadJob,
+  findJobBySession,
   mainRoot,
   reviewPass,
   saveJob,
@@ -88,6 +97,28 @@ describe('job state on disk', () => {
     saveJob(root, makeJob({ number: 12 }))
     saveJob(root, makeJob({ number: 3 }))
     expect(listJobs(root).map((job) => job.number)).toEqual([3, 12])
+  })
+})
+
+// A job.json that doesn't parse (written by hand, or cut short) must not hide every other job from
+// the guard: the guard finds a session's job through this list.
+describe('a job that does not read', () => {
+  test('listJobs skips it, logs it to hook-errors.log, and lists the rest', () => {
+    saveJob(root, makeJob({ number: 7, session: 'job-session' }))
+    mkdirSync(join(root, 'factory', '.jobs', '99'), { recursive: true })
+    writeFileSync(join(root, 'factory', '.jobs', '99', 'job.json'), '{\n')
+    expect(listJobs(root).map((job) => job.number)).toEqual([7])
+    expect(findJobBySession(root, 'job-session')?.number).toBe(7)
+    const log = readFileSync(join(root, 'factory', '.jobs', 'hook-errors.log'), 'utf8')
+    expect(log).toContain('factory/.jobs/99/job.json')
+  })
+
+  test('saveJob replaces job.json whole and leaves no temporary file', () => {
+    saveJob(root, makeJob({ number: 7 }))
+    saveJob(root, makeJob({ number: 7, attempts: 2 }))
+    expect(loadJob(root, 7)?.attempts).toBe(2)
+    expect(readdirSync(join(root, 'factory', '.jobs', '7'))).toEqual(['job.json'])
+    expect(existsSync(join(root, 'factory', '.jobs', '7', 'job.json'))).toBe(true)
   })
 })
 

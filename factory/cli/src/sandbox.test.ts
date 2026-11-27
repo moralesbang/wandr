@@ -2,44 +2,54 @@
 // and how a command reaches it. The services themselves are exercised by sandbox.integration.ts.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { Refusal } from './commands/common.ts'
-import { runInSandbox, sandboxEnv, sandboxNames, withOverrides, type Sandbox } from './sandbox.ts'
+import { makeJob } from './job-fixture.ts'
+import {
+  freePort,
+  recordedPorts,
+  removeSandbox,
+  runInSandbox,
+  sandboxEnv,
+  sandboxNames,
+  withOverrides,
+  type Sandbox,
+} from './sandbox.ts'
 
 describe('sandboxNames', () => {
   test.each([
     [13, 'evaluator', 'wandr_test_13_evaluator', 'wandr-test-13-evaluator'],
     [13, 'test-reviewer', 'wandr_test_13_test_reviewer', 'wandr-test-13-test-reviewer'],
-    [7, 'Probe-2', 'wandr_test_7_probe_2', 'wandr-test-7-probe-2'],
   ])('job %d, role %s: database %s, bucket %s', (job, role, database, bucket) => {
     expect(sandboxNames(job, role)).toEqual({ database, bucket })
   })
 
   test('the main checks keep their own database and bucket', () => {
-    const { database, bucket } = sandboxNames(13, 'test')
-    expect(database).not.toBe('wandr_test')
-    expect(bucket).not.toBe('wandr-test')
+    for (const role of ['evaluator', 'test-reviewer']) {
+      const { database, bucket } = sandboxNames(13, role)
+      expect(database).not.toBe('wandr_test')
+      expect(bucket).not.toBe('wandr-test')
+    }
   })
 
-  test.each(['', '../evaluator', 'a/b', 'evaluator;drop', '-x', 'role with space'])(
-    'refuses the role %p: it names a folder and a database',
-    (role) => {
-      expect(() => sandboxNames(13, role)).toThrow(Refusal)
-    },
-  )
-
-  test('a long role stays within the services limits and distinct from its neighbour', () => {
-    const a = sandboxNames(13, `${'r'.repeat(60)}-a`)
-    const b = sandboxNames(13, `${'r'.repeat(60)}-b`)
-    for (const names of [a, b]) {
-      expect(names.database.length).toBeLessThanOrEqual(63)
-      expect(names.bucket.length).toBeLessThanOrEqual(63)
-      expect(names.bucket).toMatch(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/)
-    }
-    expect(a.database).not.toBe(b.database)
-    expect(a.bucket).not.toBe(b.bucket)
+  // A sandbox is a reviewer's, and the guard keeps each reviewer out of the other's: a role that
+  // only looks like one (Evaluator, a third name) would be a sandbox no rule covers.
+  test.each([
+    '',
+    '../evaluator',
+    'a/b',
+    'evaluator;drop',
+    '-x',
+    'role with space',
+    'Evaluator',
+    'TEST-REVIEWER',
+    'probe-2',
+    'test',
+    'evaluator-2',
+  ])('refuses the role %p: only evaluator and test-reviewer have sandboxes', (role) => {
+    expect(() => sandboxNames(13, role)).toThrow(Refusal)
   })
 })
 
@@ -100,5 +110,68 @@ describe('runInSandbox', () => {
     expect(seen.argv).toEqual(args)
     expect(seen.cwd).toEndWith('/checkout')
     expect(seen.env).toEqual(sandboxEnv(sandbox('')))
+  })
+})
+
+describe('sandbox ports', () => {
+  let root = ''
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'factory-sandbox-ports-'))
+  })
+  afterEach(() => rmSync(root, { recursive: true, force: true }))
+
+  const record = (job: number, role: string, port: number) => {
+    mkdirSync(join(root, 'factory', '.jobs', String(job), 'sandbox'), { recursive: true })
+    writeFileSync(
+      join(root, 'factory', '.jobs', String(job), 'sandbox', `${role}.json`),
+      JSON.stringify({ ...sandbox('/x'), role, port }),
+    )
+  }
+
+  test("every job's recorded sandbox holds its port", () => {
+    record(7, 'evaluator', 45001)
+    record(9, 'test-reviewer', 45002)
+    expect([...recordedPorts(root)].toSorted()).toEqual([45001, 45002])
+  })
+
+  // A sandbox's server is down between runs, so the OS may offer its port to the next sandbox.
+  test('a new sandbox never gets a port another sandbox holds', () => {
+    const offered = [45001, 45001, 45003]
+    expect(freePort(new Set([45001, 45002]), () => offered.shift())).toBe(45003)
+  })
+})
+
+describe('removing a sandbox', () => {
+  let root = ''
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'factory-sandbox-rm-'))
+  })
+  afterEach(() => rmSync(root, { recursive: true, force: true }))
+
+  const job = () => makeJob({ worktree: join(root, '.claude', 'worktrees', '7-gone') })
+  const recordFile = () => join(root, 'factory', '.jobs', '7', 'sandbox', 'evaluator.json')
+  const keepRecord = () => {
+    mkdirSync(dirname(recordFile()), { recursive: true })
+    writeFileSync(recordFile(), JSON.stringify(sandbox('/x')))
+  }
+
+  test('keeps the record when no checkout says where the services are', async () => {
+    keepRecord()
+    const error = await removeSandbox(root, job(), 'evaluator').catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(Refusal)
+    expect(existsSync(recordFile())).toBe(true)
+  })
+
+  test("reads the services from the main checkout once the job's worktree is gone, and keeps the record while the drop fails", async () => {
+    keepRecord()
+    mkdirSync(join(root, 'apps', 'api'), { recursive: true })
+    writeFileSync(
+      join(root, 'apps', 'api', '.env.test'),
+      'DATABASE_URL=postgres://u:p@127.0.0.1:1/wandr_test\nS3_ENDPOINT=http://127.0.0.1:1\nS3_REGION=us-east-1\nS3_ACCESS_KEY_ID=a\nS3_SECRET_ACCESS_KEY=b\n',
+    )
+    const error = await removeSandbox(root, job(), 'evaluator').catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(Error)
+    expect(String(error)).not.toContain('.env.test')
+    expect(existsSync(recordFile())).toBe(true)
   })
 })

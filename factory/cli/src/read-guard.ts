@@ -4,26 +4,41 @@
 // Two layers keep a reviewer's blind pass blind. The seal (seal.ts) moves the sealed material out
 // of the worktree; this guard denies the other channels to it:
 // - for every subagent of the job, at all times: the main checkout outside the job's worktree (the
-//   job's state and the sealed store included), and Claude Code's transcripts and task outputs,
-//   which hold the build agent's and the orchestrator's reasoning;
+//   job's state and the sealed store included), and Claude Code's own files (~/.claude, its
+//   transcripts and file history, and its task outputs in the temp folder), which hold the build
+//   agent's and the orchestrator's reasoning; a search from `/` reaches all of them;
+// - for a reviewer, at all times: the other reviewer's sandbox;
 // - while the job is sealed, until a reviewer's own blind pass is written: the sealed names in the
 //   job's folder, a second layer should a sealed file be written back there;
 // - while the job is sealed: an orchestrator's prompt that names or quotes sealed material.
 //
-// A reviewer planned to verify in the sealed pass (review-plan.ts) has no blind pass: it reads the
-// previous merged findings and its own earlier final reports, in the sealed store or by their names,
-// and the orchestrator may name them to it. The rest of the sealed material stays closed to it.
+// A reviewer planned to verify in the pass under way (review-plan.ts) has no blind pass: until its
+// final report is written, it reads the previous merged findings and its own earlier final reports,
+// in the sealed store or by their names, and the orchestrator may name them to it. The rest of the
+// sealed names stays closed to it, sealed or not.
+//
+// Every path is judged where it leads (paths.ts canonical): a symlink reaches nothing its target
+// wouldn't.
 //
 // A nested run (an agent's Explore) has its own agent type, so these rules hold for any subagent,
 // not only the four factory agents. The orchestrator (no agent) reads anything.
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 import { commandPaths, type NamedPath } from './bash-words.ts'
-import { jobsDir } from './job.ts'
-import { isWithin } from './paths.ts'
-import { allow, deny, type GuardContext, type Policy, type Verdict } from './policy.ts'
+import { jobsDir, REVIEWER_ROLES, reviewPass } from './job.ts'
+import { canonical, isWithin } from './paths.ts'
+import { COPIED_WORDS, sharedPhrase } from './phrases.ts'
+import {
+  allow,
+  bashWhere,
+  deny,
+  first,
+  type GuardContext,
+  type Policy,
+  type Verdict,
+} from './policy.ts'
 import { plannedTask, reviewerRole, verifierMayRead } from './review-plan.ts'
 import {
   blindPassFile,
@@ -45,13 +60,22 @@ const literalPrefix = (path: string) => {
   return at === -1 ? path : dirname(`${path.slice(0, at)}x`)
 }
 
-/** Where Claude Code keeps transcripts: ~/.claude/projects, and CLAUDE_CONFIG_DIR's when set. */
-const transcripts = () => [
-  join(homedir(), '.claude', 'projects'),
-  ...(process.env.CLAUDE_CONFIG_DIR ? [join(process.env.CLAUDE_CONFIG_DIR, 'projects')] : []),
+/**
+ * Claude Code's own folders: ~/.claude, and CLAUDE_CONFIG_DIR when set. Its transcripts, file
+ * history, task lists and history hold every session's reasoning and every file it wrote.
+ */
+const claudeDirs = () => [
+  canonical(join(homedir(), '.claude')),
+  ...(process.env.CLAUDE_CONFIG_DIR ? [canonical(process.env.CLAUDE_CONFIG_DIR)] : []),
 ]
-/** Claude Code keeps task outputs and scratchpads in /tmp/claude-<uid>/ (/private/tmp on macOS). */
-const TASK_OUTPUTS = /^\/(?:private\/)?tmp\/claude-/
+
+/** Where Claude Code keeps task outputs and scratchpads: claude-<uid>/ in /tmp and in $TMPDIR. */
+const taskOutputDirs = () => {
+  const uid = process.getuid?.() ?? 0
+  return [`/private/tmp/claude-${uid}`, canonical(join(tmpdir(), `claude-${uid}`))]
+}
+/** Task outputs of any user, in /tmp or in a macOS per-user temp folder. */
+const TASK_OUTPUTS = /^\/(?:private\/)?(?:tmp|var\/folders\/[^/]+\/[^/]+\/T)\/claude-/
 
 /**
  * Where Claude Code saves a tool call's output too long to return: a file the agent is then told
@@ -59,16 +83,22 @@ const TASK_OUTPUTS = /^\/(?:private\/)?tmp\/claude-/
  */
 const isToolResult = (path: string) =>
   !isGlob(path) &&
-  transcripts().some((dir) => /^[^/]+\/[^/]+\/tool-results\/[^/]+$/.test(relative(dir, path)))
+  claudeDirs().some((dir) =>
+    /^projects\/[^/]+\/[^/]+\/tool-results\/[^/]+$/.test(relative(dir, path)),
+  )
 
-const where = (context: GuardContext) => ({
-  cwd: str(context.input.cwd) ?? context.job.worktree,
-  home: homedir(),
-})
+/** Folders that, searched whole, reach the main checkout or Claude Code's files. */
+const searchRoots = () =>
+  new Set(['/', '/private', '/Users', '/var', '/private/var', '/tmp', '/private/tmp', homedir()])
 
-const transcriptsDenied = deny(
-  "Claude Code's transcripts and task outputs (~/.claude/projects, /tmp/claude-*) hold other agents' reasoning: no agent of a factory job reads them, nor keeps files there. Work from the job's folder; when an output is too long, rerun the command narrowed (head, grep) instead of opening the saved file. A reviewer keeps scratch files in its own sandbox (bun run factory sandbox <n> <role>).",
+const claudeDenied = deny(
+  "Claude Code's own files (~/.claude and CLAUDE_CONFIG_DIR: transcripts, file history, history, tasks; and the task outputs in /tmp/claude-* and $TMPDIR/claude-*) hold other agents' reasoning: no agent of a factory job reads them, nor keeps files there. One exception: when Claude Code tells you a long output was saved to a tool-results file, read that file. Work from the job's folder; a reviewer keeps scratch files in its own sandbox (bun run factory sandbox <n> <role>).",
 )
+
+const searchDenied = (path: string) =>
+  deny(
+    `A search from ${path} walks the main checkout and Claude Code's own files. Search the worktree, or name the folder you need.`,
+  )
 
 const mainDenied = (context: GuardContext, path: string) =>
   isWithin(path, jobsDir(context.root))
@@ -81,12 +111,19 @@ const mainDenied = (context: GuardContext, path: string) =>
 
 /**
  * Whether a path, or a glob, reaches into a place: under it, or an ancestor a search would walk.
- * The file system's root is no one's ancestor here: a lone `/` is far more often an argument
- * (`tr / -`) than a search of the whole disk.
+ * The file system's root is an ancestor only for a search: a lone `/` is far more often an
+ * argument (`tr / -`) than a search of the whole disk, and `find /` is denied as a search.
  */
-const reaches = (path: string, place: string) => {
+const reaches = (path: string, place: string, search = false) => {
   const start = isGlob(path) ? literalPrefix(path) : path
-  return isWithin(start, place) || (start !== '/' && isWithin(place, start))
+  return isWithin(start, place) || ((search || start !== '/') && isWithin(place, start))
+}
+
+/** A path as the file system reaches it; for a glob, its literal folder resolved, the rest kept. */
+function judged(path: string): string {
+  if (!isGlob(path)) return canonical(path)
+  const prefix = literalPrefix(path)
+  return `${canonical(prefix)}${path.slice(prefix.length)}`
 }
 
 /**
@@ -116,6 +153,24 @@ function blindSeal(context: GuardContext): Seal | null {
   const role = reviewerRole(context.agent.type)
   // Any other run (an Explore, the build agent) has no blind pass of its own to unlock it.
   return role && existsSync(blindPassFile(context.job, sealed.pass, role)) ? null : sealed
+}
+
+/**
+ * The role of a reviewer planned to verify in the pass under way that hasn't written its final
+ * report: sealed or not, it reads only its own inputs among the sealed names.
+ */
+function pendingVerifier(context: GuardContext): ReviewerRole | null {
+  const role = context.agent ? reviewerRole(context.agent.type) : null
+  const pass = reviewPass(context.job)
+  if (!role || plannedTask(context.job, pass, role) !== 'verify') return null
+  return existsSync(join(context.places.handoffDir, 'reviews', `${pass}.${role}.md`)) ? null : role
+}
+
+/** The other reviewer's sandbox, which a reviewer neither reads nor writes. */
+const otherSandbox = (context: GuardContext): string | null => {
+  const role = context.agent ? reviewerRole(context.agent.type) : null
+  const other = role && REVIEWER_ROLES.find((candidate) => candidate !== role)
+  return other ? join(context.places.handoffDir, 'sandbox', other) : null
 }
 
 /** The verifier's role when the caller is a reviewer planned to verify in the sealed pass. */
@@ -149,19 +204,41 @@ function namesSealed(path: string, sealed: Seal, handoff: string, listing: boole
   )
 }
 
+export type Reading = {
+  /** The program shows names, not content (ls, stat). */
+  listing?: boolean
+  /** The path is the root of a recursive walk, or where a symlink leads. */
+  search?: boolean
+}
+
 /** The verdict on one path a subagent reads or names. */
-export function readVerdict(path: string, context: GuardContext, listing = false): Verdict {
+export function readVerdict(raw: string, context: GuardContext, how: Reading = {}): Verdict {
   if (!context.agent) return allow
+  const { listing = false, search = false } = how
+  const path = judged(raw)
   if (isToolResult(path)) return allow
-  if (transcripts().some((dir) => reaches(path, dir)) || TASK_OUTPUTS.test(path)) {
-    return transcriptsDenied
-  }
-  // `/tmp` itself, walked by a search, reaches the task outputs too.
-  if (!isGlob(path) && ['/tmp', '/private/tmp'].includes(path)) return transcriptsDenied
   const start = isGlob(path) ? literalPrefix(path) : path
+  if (search && searchRoots().has(start)) return searchDenied(start)
+  if (
+    claudeDirs().some((dir) => reaches(path, dir, search)) ||
+    taskOutputDirs().some((dir) => reaches(path, dir, search)) ||
+    TASK_OUTPUTS.test(path)
+  ) {
+    return claudeDenied
+  }
+  // The temp folders themselves, listed or walked, reach the task outputs too.
+  if (!isGlob(path) && ['/private/tmp', canonical(tmpdir())].includes(path)) return claudeDenied
   const { root, job } = context
-  const sealed = blindSeal(context)
-  const verifier = sealed && verifierIn(job, sealed, context.agent.type)
+  const other = otherSandbox(context)
+  if (other && isWithin(start, other)) {
+    return deny(
+      `${start} is the other reviewer's sandbox: its mutations are its evidence, not yours. Work in your own, ${join(context.places.handoffDir, 'sandbox', reviewerRole(context.agent.type) ?? '')}.`,
+    )
+  }
+  const pending = pendingVerifier(context)
+  const sealed =
+    blindSeal(context) ?? (pending ? { pass: reviewPass(job), roles: [], files: [], at: '' } : null)
+  const verifier = sealed && (pending ?? verifierIn(job, sealed, context.agent.type))
   const store = sealedStore(root, job.number)
   if (verifier && !isGlob(path) && isWithin(path, store)) {
     if (verifierMayRead(verifier, relative(store, path))) return allow
@@ -173,17 +250,12 @@ export function readVerdict(path: string, context: GuardContext, listing = false
     const role = reviewerRole(context.agent.type)
     return deny(
       verifier
-        ? `${name} stays sealed while another reviewer writes its blind pass. A verify pass reads the previous merged findings and your own earlier final report (in ${store}/reviews/) and the diff since the last reviewed HEAD, nothing else.`
+        ? `${name} is not an input of a verify pass. It reads the previous merged findings and your own earlier final report, at the paths the orchestrator gave you, and the diff since the last reviewed HEAD, nothing else.`
         : role
           ? `${name} is sealed until your blind first pass is written. Write ${context.places.handoffDir}/reviews/${sealed.pass}.${role}.blind.md from the issue, the diff, the checks and gate.json alone; the orchestrator sends you the build notes after it.`
           : `${name} is sealed while the reviewers write their blind first passes, and no run reads it until \`factory unseal\`. Work from the issue, the diff, the checks and gate.json.`,
     )
   }
-  return allow
-}
-
-const first = (verdicts: Iterable<Verdict>) => {
-  for (const verdict of verdicts) if (!verdict.ok) return verdict
   return allow
 }
 
@@ -193,19 +265,26 @@ const LISTERS = new Set(['ls', 'stat', 'file', 'du', 'tree', 'cd'])
 /** Every path a subagent's Bash command names, the folder it runs in first. */
 export function bashReadVerdict(command: string, context: GuardContext): Verdict {
   if (!context.agent) return allow
-  const at = where(context)
+  const at = bashWhere(context)
   const named: NamedPath[] = [
-    { path: resolve(at.cwd), program: 'cd', read: false },
+    { path: at.cwd, program: 'cd', read: false },
     ...commandPaths(command, at),
   ]
-  return first(named.map((item) => readVerdict(item.path, context, LISTERS.has(item.program))))
+  return first(
+    named.map((item) =>
+      readVerdict(item.path, context, {
+        listing: LISTERS.has(item.program),
+        search: item.search ?? false,
+      }),
+    ),
+  )
 }
 
 export const readPolicy: Policy = (context) => {
   if (!context.agent) return allow
   const input = context.input.tool_input ?? {}
-  const { cwd } = where(context)
-  const at = (path: string) => (isAbsolute(path) ? resolve(path) : resolve(cwd, path))
+  const { cwd } = bashWhere(context)
+  const at = (path: string) => (isAbsolute(path) ? path : `${cwd}/${path}`)
   switch (context.input.tool_name) {
     case 'Read': {
       const path = str(input.file_path) ?? str(input.notebook_path)
@@ -218,14 +297,18 @@ export const readPolicy: Policy = (context) => {
       const filtered = glob
         ? [join(base, glob), ...(glob.includes('/') ? [] : [join(base, '**', glob)])]
         : []
-      return first([base, ...filtered].map((path) => readVerdict(path, context)))
+      return first(
+        [base, ...filtered].map((path, index) =>
+          readVerdict(path, context, { search: index === 0 }),
+        ),
+      )
     }
     case 'Glob': {
       const base = at(str(input.path) ?? cwd)
       const pattern = str(input.pattern) ?? ''
       return first(
         [base, isAbsolute(pattern) ? pattern : join(base, pattern)].map((path) =>
-          readVerdict(path, context, true),
+          readVerdict(path, context, { listing: true, search: true }),
         ),
       )
     }
@@ -234,38 +317,35 @@ export const readPolicy: Policy = (context) => {
   }
 }
 
-/** Names of sealed material as a prompt would write them. */
+/** Names of sealed material as a prompt would write them; the sealed store with or without `/`. */
 const SEALED_WORDS =
-  /build-notes|decision-requests|diagnosis\.md|summary\.md|findings\.md|reviews\/\d+\.(?:evaluator|test-reviewer)\.md|\/sealed\//gi
+  /build[- ]notes|decision[- ]requests?|diagnosis\.md|summary\.md|findings\.md|reviews\/\d+\.(?:evaluator|test-reviewer)\.md|\/sealed(?![\w.-])/gi
 
 /** What a verifier may be told: where its inputs are, and their names. */
 const verifierMayHear = (role: string, word: string) =>
-  /^(?:findings\.md|\/sealed\/)$/i.test(word) ||
+  /^(?:findings\.md|\/sealed)$/i.test(word) ||
   new RegExp(`^reviews/\\d+\\.${role}\\.md$`, 'i').test(word)
 
-/**
- * Lines long enough that finding one in a prompt means it was pasted, not written anew; `skip`
- * leaves out the files, by their path relative to the store, the prompt's reader may read.
- */
-function sealedLines(dir: string, skip: (rel: string) => boolean, prefix = ''): string[] {
+/** Every sealed file's text, but those `skip` leaves out by their path relative to the store. */
+function sealedTexts(dir: string, skip: (rel: string) => boolean, prefix = ''): string[] {
   if (!existsSync(dir)) return []
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name)
     const rel = prefix ? `${prefix}/${name}` : name
-    if (statSync(path).isDirectory()) return sealedLines(path, skip, rel)
-    if (skip(rel)) return []
-    return readFileSync(path, 'utf8')
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length >= 40)
+    if (statSync(path).isDirectory()) return sealedTexts(path, skip, rel)
+    return skip(rel) ? [] : [readFileSync(path, 'utf8')]
   })
 }
 
+/** Words only: case, punctuation and line breaks don't hide a pasted phrase. */
+const normalized = (text: string) => text.toLowerCase().replaceAll(/[^\p{L}\p{N}]+/gu, ' ')
+
 /**
- * What sealed material a prompt names or quotes, or null when it holds none. A prompt to a
- * verifier may name and quote the verifier's own inputs.
+ * What sealed material a text names or quotes, or null when it holds none. Quoting is sharing
+ * COPIED_WORDS words in a row with a sealed file, as `factory round` judges a findings file. A
+ * prompt to a verifier may name and quote the verifier's own inputs.
  */
-function sealedInPrompt(
+export function sealedIn(
   text: string,
   root: string,
   number: number,
@@ -276,8 +356,12 @@ function sealedInPrompt(
     .find((word) => !verifier || !verifierMayHear(verifier, word))
   if (named) return `names ${named}`
   const skip = (rel: string) => verifier !== null && verifierMayRead(verifier, rel)
-  const quoted = sealedLines(sealedStore(root, number), skip).find((line) => text.includes(line))
-  return quoted ? `quotes "${quoted.slice(0, 60)}…"` : null
+  const ours = normalized(text)
+  for (const sealedText of sealedTexts(sealedStore(root, number), skip)) {
+    const quoted = sharedPhrase(ours, normalized(sealedText), COPIED_WORDS)
+    if (quoted) return `quotes "${quoted.slice(0, 60)}…"`
+  }
+  return null
 }
 
 /** While the job is sealed, the orchestrator's prompt carries no sealed material to any agent. */
@@ -290,7 +374,7 @@ const promptPolicy =
     const text = fields.map((field) => str(context.input.tool_input?.[field]) ?? '').join('\n')
     const recipient = str(context.input.tool_input?.subagent_type)
     const verifier = verifierIn(context.job, sealed, recipient)
-    const found = sealedInPrompt(text, context.root, context.job.number, verifier)
+    const found = sealedIn(text, context.root, context.job.number, verifier)
     if (!found) return allow
     const n = context.job.number
     return deny(

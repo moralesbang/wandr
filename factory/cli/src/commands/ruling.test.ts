@@ -144,12 +144,14 @@ describe('factory atfix --ruling', () => {
     expect(loadJob(root, 7)?.atfixes).toEqual([])
   })
 
-  test('the answered Decision Request path needs no ruling and cites the answer', async () => {
+  test('an answered Decision Request raised on a changed-guarantee ruling needs no ruling and cites the answer', async () => {
     saveJob(
       root,
       makeJob({
         worktree: tree,
-        decisionRequests: [{ at: '2026-01-01T00:00:00Z', file: 'decision-requests/1.md' }],
+        decisionRequests: [
+          { at: '2026-01-01T00:00:00Z', file: 'decision-requests/1.md', ruling: 1 },
+        ],
         answers: [{ request: 1, at: '2026-01-02T00:00:00Z', text: 'Go', cited: false }],
       }),
     )

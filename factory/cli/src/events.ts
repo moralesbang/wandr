@@ -6,6 +6,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { z } from 'zod'
 import { stateDir, type Job } from './job.ts'
+import { canonical } from './paths.ts'
 import { usageOf } from './usage.ts'
 import type { Area, Target } from './visibility.ts'
 
@@ -77,18 +78,20 @@ export type Places = { worktree: string; handoffDir: string }
 /**
  * Places an absolute path in its area: the job's handoff folder, the rest of its worktree, or
  * outside both. The handoff folder sits inside the worktree, so it is matched first. The main
- * checkout, its copy of the job's folder included, is outside.
+ * checkout, its copy of the job's folder included, is outside. Symlinks are resolved on both
+ * sides, so a link in the worktree is placed where it leads.
  */
 export function locate(path: string, places: Places): Target {
+  const real = canonical(path)
   const inside = (dir: string) => {
-    const rel = relative(dir, path)
+    const rel = relative(canonical(dir), real)
     return rel && !rel.startsWith('..') && !rel.startsWith(sep) ? rel.split(sep).join('/') : null
   }
   const asJob = inside(places.handoffDir)
   if (asJob) return { area: 'job', path: asJob }
   const asRepo = inside(places.worktree)
   if (asRepo) return { area: 'repo', path: asRepo }
-  return { area: 'outside' as Area, path }
+  return { area: 'outside' as Area, path: real }
 }
 
 const str = (value: unknown) => (typeof value === 'string' ? value : undefined)

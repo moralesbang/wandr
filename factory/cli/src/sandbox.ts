@@ -20,7 +20,8 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { Refusal } from './commands/common.ts'
-import { handoffDir, stateDir, type Job } from './job.ts'
+import { handoffDir, jobsDir, stateDir, type Job } from './job.ts'
+import { checkRole, isSandboxRole, sandboxNames } from './sandbox-names.ts'
 import { git, runLogged } from './shell.ts'
 
 export type Sandbox = {
@@ -34,39 +35,7 @@ export type Sandbox = {
   createdAt: string
 }
 
-/** A role names a folder, a database and a bucket: lowercase words joined by hyphens. */
-const ROLE = /^[a-z0-9][a-z0-9-]*$/i
-
-const checkRole = (role: string) => {
-  if (!ROLE.test(role)) {
-    throw new Refusal(
-      `A sandbox role is letters, digits and hyphens, like evaluator or test-reviewer; got "${role}".`,
-    )
-  }
-}
-
-/** Postgres truncates identifiers past 63 bytes and S3 caps bucket names at 63 characters. */
-const MAX_NAME = 63
-
-/** Fits a name in the limit; a cut name gets a hash of the whole, so two long roles stay apart. */
-const fit = (name: string, separator: string) => {
-  if (name.length <= MAX_NAME) return name
-  const hash = createHash('sha256').update(name).digest('hex').slice(0, 8)
-  return `${name.slice(0, MAX_NAME - hash.length - 1).replace(/[-_]+$/, '')}${separator}${hash}`
-}
-
-/**
- * The sandbox's database and bucket on the shared services. Never the main checks' `wandr_test` and
- * `wandr-test`: those take the checks lock, sandboxes don't.
- */
-export function sandboxNames(job: number, role: string): { database: string; bucket: string } {
-  checkRole(role)
-  const words = role.toLowerCase().split('-').filter(Boolean)
-  return {
-    database: fit(['wandr_test', job, ...words].join('_'), '_'),
-    bucket: fit(['wandr-test', job, ...words].join('-'), '-'),
-  }
-}
+export { sandboxNames }
 
 export const sandboxesDir = (job: Pick<Job, 'number' | 'worktree'>) =>
   join(handoffDir(job), 'sandbox')
@@ -250,13 +219,44 @@ async function dropBucket(services: Services, bucket: string) {
   }
 }
 
+/** The ports every recorded sandbox holds, any job's: free now, but theirs once they serve. */
+export function recordedPorts(root: string): Set<number> {
+  const ports = new Set<number>()
+  const dir = jobsDir(root)
+  if (!existsSync(dir)) return ports
+  for (const job of readdirSync(dir).filter((name) => /^\d+$/.test(name))) {
+    const records = recordsDir(root, Number(job))
+    if (!existsSync(records)) continue
+    for (const file of readdirSync(records).filter((name) => name.endsWith('.json'))) {
+      try {
+        const { port } = JSON.parse(readFileSync(join(records, file), 'utf8')) as Partial<Sandbox>
+        if (typeof port === 'number') ports.add(port)
+      } catch {
+        // A record cut short: its port is unknown, and the OS check below still holds.
+      }
+    }
+  }
+  return ports
+}
+
 /** A port nothing listens on now; the OS hands out ephemeral ports, never Playwright's 3100. */
-function freePort(): number {
+function unusedPort(): number | undefined {
   const server = Bun.serve({ port: 0, fetch: () => new Response() })
   const port = server.port
   void server.stop(true)
-  if (port === undefined) throw new Error('No free port.')
   return port
+}
+
+/**
+ * A port nothing listens on now and no other sandbox holds: a sandbox's port sits free between
+ * its runs, and the OS would hand it out again.
+ */
+export function freePort(taken: ReadonlySet<number>, pick = unusedPort): number {
+  for (let tries = 0; tries < 100; tries++) {
+    const port = pick()
+    if (port !== undefined && !taken.has(port)) return port
+  }
+  throw new Error('No free port that no sandbox holds.')
 }
 
 /**
@@ -277,7 +277,7 @@ export async function createSandbox(root: string, job: Job, role: string): Promi
   const sandbox: Sandbox = {
     role,
     path,
-    port: freePort(),
+    port: freePort(recordedPorts(root)),
     database,
     bucket,
     databaseUrl: withDatabase(services.databaseUrl, database),
@@ -322,7 +322,15 @@ export async function createSandbox(root: string, job: Job, role: string): Promi
   return sandbox
 }
 
-/** Removes the checkout, drops the database and the bucket. Each step tolerates what is gone. */
+/** The checkout whose apps/api/.env.test reaches the shared services: the job's, or the main one. */
+const servicesCheckout = (root: string, job: Job) =>
+  [job.worktree, root].find((dir) => existsSync(join(dir, 'apps', 'api', '.env.test'))) ?? null
+
+/**
+ * Removes the checkout, drops the database and the bucket. Each step tolerates what is gone. The
+ * record goes last, once the database and the bucket are gone: until then it says what is left,
+ * so `sandbox rm` can be rerun.
+ */
 export async function removeSandbox(root: string, job: Job, role: string): Promise<string[]> {
   const { database, bucket } = sandboxNames(job.number, role)
   const path = join(sandboxesDir(job), role)
@@ -334,12 +342,16 @@ export async function removeSandbox(root: string, job: Job, role: string): Promi
   }
   if (existsSync(job.worktree)) await git(job.worktree, 'worktree', 'prune')
   // The services may be down when a job is cleaned; the names are known, so rm can be rerun.
-  if (existsSync(join(job.worktree, 'apps', 'api', '.env.test'))) {
-    const services = servicesOf(job.worktree)
-    await dropDatabase(services, database)
-    await dropBucket(services, bucket)
-    done.push(`Dropped the database ${database} and the bucket ${bucket}.`)
+  const checkout = servicesCheckout(root, job)
+  if (!checkout) {
+    throw new Refusal(
+      `Neither ${job.worktree} nor ${root} has apps/api/.env.test, so ${database} and ${bucket} can't be reached to drop. The record stays in ${recordPath(root, job.number, role)}; rerun factory sandbox rm ${job.number} ${role} once one exists.`,
+    )
   }
+  const services = servicesOf(checkout)
+  await dropDatabase(services, database)
+  await dropBucket(services, bucket)
+  done.push(`Dropped the database ${database} and the bucket ${bucket}.`)
   rmSync(recordPath(root, job.number, role), { force: true })
   rmSync(logPath(root, job.number, role), { force: true })
   return done
@@ -353,7 +365,7 @@ export function sandboxRoles(root: string, job: Job): string[] {
         .map((file) => file.slice(0, -'.json'.length))
     : []
   const checkouts = existsSync(sandboxesDir(job)) ? readdirSync(sandboxesDir(job)) : []
-  return [...new Set([...records, ...checkouts])].filter((role) => ROLE.test(role)).toSorted()
+  return [...new Set([...records, ...checkouts])].filter(isSandboxRole).toSorted()
 }
 
 /** Removes every sandbox of a job: what `clean` and `clean --abandon` call first. */

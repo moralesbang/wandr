@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { readEvents } from '../events.ts'
-import { makeJob } from '../job-fixture.ts'
+import { makeJob, writeBlindPass } from '../job-fixture.ts'
 import { loadJob, saveJob, type Job } from '../job.ts'
 import { loadSeal } from '../seal.ts'
 import { git } from '../shell.ts'
@@ -52,7 +52,7 @@ const afterFirstPass = async (verdicts: { evaluator: string; 'test-reviewer': st
   save()
   const plan = await review(root, 7)
   for (const [role, verdict] of Object.entries(verdicts)) {
-    put(join(handoff, 'reviews', `1.${role}.blind.md`), 'blind\n')
+    writeBlindPass(root, 7, 1, role)
     put(join(handoff, 'reviews', `1.${role}.md`), `Verdict: ${verdict}\n`)
   }
   const { unseal } = await import('../seal.ts')
@@ -99,8 +99,8 @@ describe('factory review, first pass', () => {
     save()
     await review(root, 7)
     const { unseal } = await import('../seal.ts')
-    put(join(handoff, 'reviews', '1.evaluator.blind.md'), 'blind\n')
-    put(join(handoff, 'reviews', '1.test-reviewer.blind.md'), 'blind\n')
+    writeBlindPass(root, 7, 1, 'evaluator')
+    writeBlindPass(root, 7, 1, 'test-reviewer')
     unseal(root, 7)
     await commit('apps/web/src/other.ts')
     expect(await review(root, 7).catch((caught) => caught)).toBeInstanceOf(Refusal)

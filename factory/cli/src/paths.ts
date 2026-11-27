@@ -1,12 +1,44 @@
 // Which repo paths are acceptance tests and which define the rules a build is judged by.
 // Paths are relative to the repo (or the job's worktree) root, with forward slashes.
 
-import { isAbsolute, relative } from 'node:path'
+import { realpathSync } from 'node:fs'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 /** Whether an absolute path is the folder itself or anything under it. */
 export function isWithin(path: string, dir: string): boolean {
   const rel = relative(dir, path)
   return rel === '' || (rel !== '..' && !rel.startsWith('../') && !isAbsolute(rel))
+}
+
+/**
+ * The path the file system would reach, every symlink resolved: what the guard judges, so a link
+ * in the worktree to `/` or to the main checkout reaches nothing the target itself wouldn't.
+ * Components are followed one by one, `..` after a link included, as the kernel does; from the
+ * first one that doesn't exist yet, the rest is appended as written.
+ */
+export function canonical(path: string, cwd = '/'): string {
+  const absolute = isAbsolute(path) ? path : `${cwd}/${path}`
+  try {
+    return realpathSync(absolute)
+  } catch {
+    // Some component doesn't exist yet, or isn't a folder: walk it.
+  }
+  const parts = absolute.split('/').filter((part) => part && part !== '.')
+  let real = '/'
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]!
+    if (part === '..') {
+      real = dirname(real)
+      continue
+    }
+    const next = join(real, part)
+    try {
+      real = realpathSync(next)
+    } catch {
+      return resolve(next, ...parts.slice(i + 1))
+    }
+  }
+  return real
 }
 
 const match = (patterns: readonly string[], path: string) =>

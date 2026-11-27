@@ -1,8 +1,9 @@
 // A job for tests: every field set, each overridable.
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import type { Job } from './job.ts'
+import { dirname, join } from 'node:path'
+import { appendEvent, eventsFromHook } from './events.ts'
+import { handoffDir, loadJob, type Job } from './job.ts'
 
 export const makeJob = (overrides: Partial<Job> = {}): Job => ({
   number: 7,
@@ -50,4 +51,39 @@ export function installFakeGh(dir: string) {
       process.env.PATH = path
     },
   }
+}
+
+/**
+ * A reviewer's blind pass as a real run leaves it: the file in the job's folder, and the write the
+ * log hook records when the role's own agent writes it with the Write tool (`factory unseal`
+ * checks both).
+ */
+export function writeBlindPass(
+  root: string,
+  number: number,
+  pass: number,
+  role: string,
+  text = 'blind\n',
+): string {
+  const job = loadJob(root, number)
+  if (!job) throw new Error(`No job ${number} in ${root}`)
+  const file = join(handoffDir(job), 'reviews', `${pass}.${role}.blind.md`)
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, text)
+  const input = {
+    session_id: job.session,
+    hook_event_name: 'PostToolUse',
+    agent_id: `${role}-run`,
+    agent_type: `factory-${role}`,
+    tool_name: 'Write',
+    tool_input: { file_path: file, content: text },
+  }
+  const context = {
+    job,
+    handoffDir: handoffDir(job),
+    now: new Date().toISOString(),
+    readText: () => null,
+  }
+  for (const event of eventsFromHook(input, context)) appendEvent(root, event)
+  return file
 }

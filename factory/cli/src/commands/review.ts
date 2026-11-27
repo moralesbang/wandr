@@ -10,7 +10,7 @@ import { planRoles, rolesWith, type PreviousPass } from '../review-plan.ts'
 import { jobRisk } from '../risk.ts'
 import { loadSeal, refuseWhileSealed, seal, sealedStore } from '../seal.ts'
 import { git, lines } from '../shell.ts'
-import { record, Refusal, requireJob } from './common.ts'
+import { record, Refusal, refuseWhileBlocked, requireJob } from './common.ts'
 
 export const REVIEW_USAGE = `  review <n>                 plan the review pass: who reviews blind, verifies or carries; seals the blind reviewers`
 
@@ -26,6 +26,7 @@ const previousPass = (job: Job, plan: ReviewPlan | undefined): PreviousPass | nu
 
 export async function review(root: string, number: number): Promise<ReviewPlan> {
   const job = requireJob(root, number)
+  refuseWhileBlocked(job, 'a review plan')
   const pass = reviewPass(job)
   const head = await git(job.worktree, 'rev-parse', 'HEAD')
   const planned = job.reviews.find((plan) => plan.pass === pass)

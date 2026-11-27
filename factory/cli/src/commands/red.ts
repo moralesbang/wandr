@@ -15,7 +15,7 @@ import {
 } from '../report.ts'
 import { commitAll, runLogged, uncommitted } from '../shell.ts'
 import { styleProblems } from '../style.ts'
-import { record, Refusal, requireJob } from './common.ts'
+import { record, Refusal, refuseWhileBlocked, requireJob } from './common.ts'
 
 const reporter = (runner: 'vitest' | 'playwright') =>
   fileURLToPath(new URL(`../reporters/${runner}.ts`, import.meta.url))
@@ -45,6 +45,7 @@ function readRun(runner: Runner, path: string): Report {
  */
 export async function red(root: string, number: number): Promise<{ job: Job; problems: string[] }> {
   const job = requireJob(root, number)
+  refuseWhileBlocked(job, 'a red')
   const allowed = canTryRed(job)
   if (!allowed.ok) throw new Refusal(allowed.reason)
   const changed = await uncommitted(job.worktree)

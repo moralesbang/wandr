@@ -100,6 +100,8 @@ describe('factory pr follows the review plan', () => {
 
   test('is refused when a reviewer of the pass asks for changes', async () => {
     save([plan(1, { evaluator: 'review', 'test-reviewer': 'review' })])
+    put('reviews/1.evaluator.blind.md', 'Blind: F1.\n')
+    put('reviews/1.test-reviewer.blind.md', 'Blind: F2.\n')
     put('reviews/1.evaluator.md', 'Verdict: changes\n')
     put('reviews/1.test-reviewer.md', 'Verdict: approve\n')
     expect(await refusal()).toBeInstanceOf(Refusal)
@@ -118,8 +120,24 @@ describe('factory pr follows the review plan', () => {
     expect(comment).toContain('carries')
   })
 
+  // A final report without a blind pass rests on the build notes alone.
+  test.each([
+    ['no blind pass', null],
+    ['an empty blind pass', '\n  \n'],
+  ])('is refused when a role that reviewed has %s', async (_what, blind) => {
+    save([plan(1, { evaluator: 'review', 'test-reviewer': 'review' })])
+    put('reviews/1.evaluator.blind.md', 'Blind: F1.\n')
+    if (blind !== null) put('reviews/1.test-reviewer.blind.md', blind)
+    put('reviews/1.evaluator.md', 'Verdict: approve\n')
+    put('reviews/1.test-reviewer.md', 'Verdict: approve\n')
+    const error = await refusal()
+    expect((error as Refusal).message).toContain('reviews/1.test-reviewer.blind.md')
+    expect(fake.calls()).toBe('')
+  })
+
   test('opens a low-risk job on the test reviewer alone', async () => {
     save([{ ...plan(1, { 'test-reviewer': 'review' }), risk: 'low' }])
+    put('reviews/1.test-reviewer.blind.md', 'Blind: F1 and F2.\n')
     put('reviews/1.test-reviewer.md', 'Verdict: approve\n')
     await pr(root, 7)
     expect(fake.calls()).toContain('gh pr create')

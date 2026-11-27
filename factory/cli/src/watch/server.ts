@@ -1,11 +1,17 @@
 // factory watch: tails every job's event log, annotates it against "who sees what", and pushes it
 // to the page over server-sent events. A finished job replays from the same stream.
+//
+// The page shows everything: the build notes' commands, the user's answers, the sealed material's
+// names. So the server answers only a request that carries the token it made at start, which it
+// keeps in the main checkout's state folder (no agent reads there) and prints in the URL for the
+// user. An agent that reaches the port gets nothing.
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { Annotator } from '../annotate.ts'
 import type { FactoryEvent } from '../events.ts'
-import { jobsDir } from '../job.ts'
+import { jobsDir, writeAtomic } from '../job.ts'
 import { jobFrame } from './extras.ts'
 
 type Tail = { offset: number; annotator: Annotator; job: string }
@@ -74,21 +80,65 @@ function poll(
   }
 }
 
-export async function watch(root: string, port: number): Promise<void> {
-  const page = readFileSync(join(import.meta.dir, 'page.html'), 'utf8')
+/** Where the running server keeps its token: the main checkout's state folder. */
+export const watchTokenFile = (root: string) => join(jobsDir(root), 'watch-token')
+
+/** A fresh token, written where only the user and the CLI read it. */
+function newToken(root: string): string {
+  const token = randomBytes(32).toString('hex')
+  mkdirSync(jobsDir(root), { recursive: true })
+  writeAtomic(watchTokenFile(root), `${token}\n`)
+  chmodSync(watchTokenFile(root), 0o600)
+  return token
+}
+
+/** Whether a request carries the token, in its query. */
+function carries(request: Request, token: string): boolean {
+  const given = Buffer.from(new URL(request.url).searchParams.get('token') ?? '')
+  const wanted = Buffer.from(token)
+  return given.length === wanted.length && timingSafeEqual(given, wanted)
+}
+
+const refused = () =>
+  new Response('factory watch: open the URL the command printed; it carries the token.\n', {
+    status: 403,
+    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+  })
+
+/** Starts the live page's server; every route answers only a request with the token. */
+export function serveWatch(root: string, port: number) {
+  const token = newToken(root)
+  // The page imports state.js and opens the stream with the token it was opened with.
+  const page = readFileSync(join(import.meta.dir, 'page.html'), 'utf8').replace(
+    "from '/state.js'",
+    `from '/state.js?token=${token}'`,
+  )
   // state.ts is shared with the tests, so the browser gets it as plain JavaScript, types erased.
   const state = new Bun.Transpiler({ loader: 'ts' }).transformSync(
     readFileSync(join(import.meta.dir, 'state.ts'), 'utf8'),
   )
+  const guarded =
+    (route: (request: Request) => Response) =>
+    (request: Request): Response =>
+      carries(request, token) ? route(request) : refused()
   const server = Bun.serve({
     port,
     idleTimeout: 0,
+    fetch: refused,
     routes: {
-      '/': new Response(page, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }),
-      '/state.js': new Response(state, {
-        headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' },
-      }),
-      '/events': (request) => {
+      '/': guarded(
+        () => new Response(page, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }),
+      ),
+      '/state.js': guarded(
+        () =>
+          new Response(state, {
+            headers: {
+              'Content-Type': 'text/javascript; charset=utf-8',
+              'Cache-Control': 'no-store',
+            },
+          }),
+      ),
+      '/events': guarded((request) => {
         const job = new URL(request.url).searchParams.get('job')
         const only = job ? Number(job) : null
         const tails = new Map<number, Tail>()
@@ -119,9 +169,14 @@ export async function watch(root: string, port: number): Promise<void> {
             Connection: 'keep-alive',
           },
         })
-      },
+      }),
     },
   })
-  console.log(`factory watch: ${server.url}`)
+  return { server, token, url: `${server.url}?token=${token}` }
+}
+
+export async function watch(root: string, port: number): Promise<void> {
+  const { url } = serveWatch(root, port)
+  console.log(`factory watch: ${url}`)
   await new Promise(() => {})
 }

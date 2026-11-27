@@ -13,7 +13,7 @@ import {
 } from '../job.ts'
 import { refuseWhileSealed } from '../seal.ts'
 import { gh, git } from '../shell.ts'
-import { LABELS, record, Refusal, requireJob } from './common.ts'
+import { LABELS, record, Refusal, refuseWhileBlocked, requireJob } from './common.ts'
 import { moveLabel } from './start.ts'
 
 /** GitHub refuses comments and bodies over 65,536 characters. */
@@ -122,7 +122,8 @@ export function prComment(parts: {
 /**
  * What each reviewer says for the pass, by its plan: the final report of a role that reviewed or
  * verified, which must approve; the approval a role carries; or that the risk didn't need it.
- * Refuses when a planned report is missing or doesn't approve.
+ * Refuses when a planned report is missing or doesn't approve, and when a role that reviewed has no
+ * blind pass: its final report would then rest on the build notes alone.
  */
 export function plannedReports(
   job: Pick<Job, 'reviews'>,
@@ -133,6 +134,11 @@ export function plannedReports(
     const task = plan.roles[role]
     if (!task) {
       return `_Not launched: the job is ${plan.risk} risk, and the test reviewer alone judges a low-risk job._`
+    }
+    if (task === 'review' && !readReport(`reviews/${plan.pass}.${role}.blind.md`)) {
+      throw new Refusal(
+        `The ${role} reviewed pass ${plan.pass} without a blind pass: reviews/${plan.pass}.${role}.blind.md is missing or empty.`,
+      )
     }
     if (task === 'carry') {
       const judged = job.reviews.findLast(
@@ -153,6 +159,7 @@ export function plannedReports(
 /** Opens the PR once the gate passed on HEAD and every reviewer the pass's plan names approves. */
 export async function pr(root: string, number: number): Promise<Job> {
   const job = requireJob(root, number)
+  refuseWhileBlocked(job, 'the PR')
   refuseWhileSealed(root, job, 'the PR')
   // What the agents and the orchestrator wrote is in the handoff folder; what the CLI posts is
   // kept with the job's state.

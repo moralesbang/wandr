@@ -9,7 +9,7 @@ import { handoffDir, saveJob, type Job } from '../job.ts'
 import { isAcceptanceTest } from '../paths.ts'
 import { refuseWhileSealed } from '../seal.ts'
 import { git, lines, workingTree } from '../shell.ts'
-import { record, Refusal, requireJob } from './common.ts'
+import { record, Refusal, refuseWhileBlocked, requireJob } from './common.ts'
 
 export const RULING_USAGE = `  ruling <n>                 hash the uncommitted acceptance-test fix and name the file a test reviewer rules in
   atfix <n> --ruling <m> --note <text>
@@ -36,6 +36,7 @@ export type Requested = { ruling: number; diff: string; file: string }
 /** Asks for a ruling on the uncommitted acceptance-test fix: its number, its diff's hash, its file. */
 export async function ruling(root: string, number: number): Promise<Requested> {
   const job = requireJob(root, number)
+  refuseWhileBlocked(job, 'a ruling')
   refuseWhileSealed(root, job, 'a ruling')
   const diff = await acceptanceDiffHash(job.worktree)
   if (!diff) {

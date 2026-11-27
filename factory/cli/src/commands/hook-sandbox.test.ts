@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { readEvents } from '../events.ts'
 import { makeJob } from '../job-fixture.ts'
 import { saveJob } from '../job.ts'
@@ -71,5 +71,79 @@ describe('hook guard: reviewer sandboxes', () => {
     expect(denied(guard('factory-evaluator', 'Edit', join(worktree, 'apps/api/src/app.ts')))).toBe(
       true,
     )
+  })
+})
+
+const bash = (agent: string, command: string) => {
+  const out = hookGuard(
+    root,
+    JSON.stringify({
+      session_id: 'job-session',
+      hook_event_name: 'PreToolUse',
+      agent_id: 'run-1',
+      agent_type: agent,
+      tool_name: 'Bash',
+      cwd: worktree,
+      tool_input: { command },
+    }),
+  )
+  return out === '' ? 'allow' : 'deny'
+}
+
+const read = (agent: string, path: string) => (guard(agent, 'Read', path) === '' ? 'allow' : 'deny')
+
+// One reviewer's mutations are its evidence: the other may neither run nor touch its sandbox, nor
+// reach its database or bucket by name.
+describe("hook guard: the other reviewer's sandbox", () => {
+  test.each([
+    'bun run factory sandbox rm 7 test-reviewer',
+    'bun run factory sandbox 7 test-reviewer',
+    "bun run factory sandbox exec 7 test-reviewer -- sh -c 'rm -rf apps'",
+    'bun run factory sandbox exec 7 Test-Reviewer -- bun test',
+    'cat SANDBOX/apps/api/.env.test',
+    'echo bug >> SANDBOX/apps/web/src/main.ts',
+    'cd SANDBOX && bun test',
+    "psql postgres://postgres:postgres@localhost:5432/wandr_test_7_test_reviewer -c 'drop table walks'",
+    'bun -e "new Bun.S3Client({ bucket: \'wandr-test-7-test-reviewer\' })"',
+  ])('denies the evaluator: %s', (template) => {
+    const command = template.replaceAll('SANDBOX', sandbox('test-reviewer', '').replace(/\/$/, ''))
+    expect(bash('factory-evaluator', command)).toBe('deny')
+  })
+
+  test("denies reading the other's sandbox with Read", () => {
+    expect(read('factory-evaluator', sandbox('test-reviewer', 'apps/api/.env.test'))).toBe('deny')
+    expect(read('factory-test-reviewer', sandbox('evaluator', 'apps/api/.env.test'))).toBe('deny')
+  })
+
+  test.each([
+    'bun run factory sandbox 7 evaluator',
+    'bun run factory sandbox exec 7 evaluator -- bun test',
+    'bun run factory sandbox rm 7 evaluator',
+    'cat SANDBOX/apps/api/.env.test',
+  ])('lets the evaluator use its own: %s', (template) => {
+    const command = template.replaceAll('SANDBOX', sandbox('evaluator', '').replace(/\/$/, ''))
+    expect(bash('factory-evaluator', command)).toBe('allow')
+  })
+
+  test.each(['factory-build', 'factory-test', 'factory-diagnose', 'Explore'])(
+    'denies %s any sandbox',
+    (agent) => {
+      expect(bash(agent, 'bun run factory sandbox 7 evaluator')).toBe('deny')
+    },
+  )
+
+  // The command after `--` runs in the sandbox's checkout: its relative paths start there.
+  test('judges the command a sandbox runs from the sandbox', () => {
+    const notes = join(root, 'factory', '.jobs', '7', 'sealed', 'build-notes.md')
+    const rel = relative(sandbox('evaluator', ''), notes)
+    expect(
+      bash('factory-evaluator', `bun run factory sandbox exec 7 evaluator -- cat ${rel}`),
+    ).toBe('deny')
+    expect(
+      bash(
+        'factory-evaluator',
+        'bun run factory sandbox exec 7 evaluator -- cat apps/api/.env.test',
+      ),
+    ).toBe('allow')
   })
 })

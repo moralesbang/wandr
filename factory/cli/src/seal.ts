@@ -16,15 +16,16 @@ import {
   renameSync,
   rmSync,
   statSync,
-  writeFileSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { record, Refusal, requireJob } from './commands/common.ts'
+import { readEvents, type FactoryEvent } from './events.ts'
 import {
   handoffDir,
   REVIEWER_ROLES,
   reviewPass,
   stateDir,
+  writeAtomic,
   type Job,
   type ReviewerRole,
 } from './job.ts'
@@ -71,6 +72,39 @@ export const blindPassFile = (job: Pick<Job, 'number' | 'worktree'>, pass: numbe
 /** The sealed roles whose blind pass for the sealed pass isn't written yet. */
 export const missingBlindPasses = (job: Pick<Job, 'number' | 'worktree'>, sealed: Seal) =>
   sealed.roles.filter((role) => !existsSync(blindPassFile(job, sealed.pass, role)))
+
+/** Whether the log shows the role's own agent writing its blind pass with Write or Edit. */
+const wroteItself = (events: FactoryEvent[], sealed: Seal, role: ReviewerRole) =>
+  events.some(
+    (event) =>
+      event.kind === 'write' &&
+      event.source === 'hook' &&
+      event.agent?.type === `factory-${role}` &&
+      event.target?.area === 'job' &&
+      event.target.path === `reviews/${sealed.pass}.${role}.blind.md` &&
+      event.t >= sealed.at,
+  )
+
+/**
+ * Why a sealed role's blind pass can't lift the seal, or null when it can: the file is there, holds
+ * a review, and the event log shows that role's own agent wrote it with the Write tool after the
+ * seal. Anything else (an `echo` from another run, an empty file) proves no blind pass was made.
+ */
+function blindPassProblem(
+  job: Pick<Job, 'number' | 'worktree'>,
+  sealed: Seal,
+  role: ReviewerRole,
+  events: FactoryEvent[],
+): string | null {
+  const rel = `reviews/${sealed.pass}.${role}.blind.md`
+  const file = blindPassFile(job, sealed.pass, role)
+  if (!existsSync(file)) return `no blind pass yet from the ${role} (${rel})`
+  if (!readFileSync(file, 'utf8').trim()) return `the ${role}'s blind pass ${rel} is empty`
+  if (!wroteItself(events, sealed, role)) {
+    return `${rel} was not written by a factory-${role} run with the Write tool after the seal; relaunch the ${role} for its blind pass`
+  }
+  return null
+}
 
 /** Every file under a folder, relative to it; empty when it doesn't exist. */
 function filesUnder(dir: string, prefix = ''): string[] {
@@ -143,25 +177,27 @@ export function seal(
     at: new Date().toISOString(),
   }
   mkdirSync(stateDir(root, number), { recursive: true })
-  writeFileSync(sealRecord(root, number), `${JSON.stringify(sealed, null, 2)}\n`)
+  writeAtomic(sealRecord(root, number), `${JSON.stringify(sealed, null, 2)}\n`)
   for (const rel of sealed.files) move(join(handoff, rel), join(sealedStore(root, number), rel))
   record(root, number, 'sealed', { pass: sealed.pass, roles: sealed.roles, files: sealed.files })
   return sealed
 }
 
 /**
- * Puts every sealed file back where it was. Refused until each sealed role wrote its blind pass,
- * and, moving nothing, when a sealed file's place in the job's folder was taken meanwhile.
+ * Puts every sealed file back where it was. Refused until each sealed role's own agent wrote its
+ * blind pass (blindPassProblem), and, moving nothing, when a sealed file's place in the job's
+ * folder was taken meanwhile.
  */
 export function unseal(root: string, number: number): Seal {
   const job = requireJob(root, number)
   const sealed = loadSeal(root, number)
   if (!sealed) throw new Refusal(`Job #${number} is not sealed.`)
-  const missing = missingBlindPasses(job, sealed)
-  if (missing.length) {
-    throw new Refusal(
-      `Job #${number} stays sealed: no blind pass yet from ${missing.join(' and ')} (${missing.map((role) => `reviews/${sealed.pass}.${role}.blind.md`).join(', ')}).`,
-    )
+  const events = readEvents(root, number)
+  const problems = sealed.roles
+    .map((role) => blindPassProblem(job, sealed, role, events))
+    .filter((problem) => problem !== null)
+  if (problems.length) {
+    throw new Refusal(`Job #${number} stays sealed: ${problems.join('; ')}.`)
   }
   const handoff = handoffDir(job)
   const store = sealedStore(root, number)

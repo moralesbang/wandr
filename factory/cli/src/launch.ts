@@ -3,7 +3,7 @@
 // reviewers) get the stronger model; writing runs get the cheaper one. The job's effective risk
 // (risk.ts) sets how hard the reviewers look, and whether the evaluator runs at all.
 
-import { record, Refusal, requireJob } from './commands/common.ts'
+import { record, Refusal, refuseWhileBlocked, requireJob } from './commands/common.ts'
 import type { Risk } from './job.ts'
 import { jobRisk } from './risk.ts'
 
@@ -94,6 +94,7 @@ export async function launch(
   task: string,
 ): Promise<Launch> {
   const job = requireJob(root, number)
+  refuseWhileBlocked(job, 'an agent launch')
   const { risk, raisedBy } = await jobRisk(job)
   const setting = launchSetting(agent, task, risk)
   if (!setting.ok) throw new Refusal(`Job #${number} (${risk} risk): ${setting.reason}`)
