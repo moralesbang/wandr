@@ -85,3 +85,16 @@ export function verifierReads(root: string, job: Job, plan: ReviewPlan): Record<
     ]),
   )
 }
+
+/**
+ * What `factory review` prints: the plan, whether the job is sealed now (not whether this plan
+ * sealed it: run again after the unseal, it says false), and what each verifier reads.
+ */
+export async function reviewReport(root: string, number: number) {
+  const plan = await review(root, number)
+  return {
+    ...plan,
+    sealed: loadSeal(root, number) !== null,
+    reads: verifierReads(root, requireJob(root, number), plan),
+  }
+}

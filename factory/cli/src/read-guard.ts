@@ -27,6 +27,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 import { commandPaths, type NamedPath } from './bash-words.ts'
+import { readEvents } from './events.ts'
 import { jobsDir, REVIEWER_ROLES, reviewPass } from './job.ts'
 import { canonical, isWithin } from './paths.ts'
 import { COPIED_WORDS, sharedPhrase } from './phrases.ts'
@@ -209,12 +210,14 @@ export type Reading = {
   listing?: boolean
   /** The path is the root of a recursive walk, or where a symlink leads. */
   search?: boolean
+  /** The walk skips what .gitignore lists (rg, grep in Claude Code's shell, the Grep tool). */
+  ignoring?: boolean
 }
 
 /** The verdict on one path a subagent reads or names. */
 export function readVerdict(raw: string, context: GuardContext, how: Reading = {}): Verdict {
   if (!context.agent) return allow
-  const { listing = false, search = false } = how
+  const { listing = false, search = false, ignoring = false } = how
   const path = judged(raw)
   if (isToolResult(path)) return allow
   const start = isGlob(path) ? literalPrefix(path) : path
@@ -233,6 +236,14 @@ export function readVerdict(raw: string, context: GuardContext, how: Reading = {
   if (other && isWithin(start, other)) {
     return deny(
       `${start} is the other reviewer's sandbox: its mutations are its evidence, not yours. Work in your own, ${join(context.places.handoffDir, 'sandbox', reviewerRole(context.agent.type) ?? '')}.`,
+    )
+  }
+  // A nested run (an Explore) has no link in the hook input to the reviewer that launched it, so
+  // no run but a reviewer is told apart from a stranger: the sandboxes are a reviewer's alone.
+  const sandboxes = join(context.places.handoffDir, 'sandbox')
+  if (!reviewerRole(context.agent.type) && isWithin(start, sandboxes)) {
+    return deny(
+      `${start} is in a reviewer's sandbox, its evidence: only a reviewer reads there (the hook input names no parent for a nested run, so an Explore can't be told from a stranger). Read the worktree instead.`,
     )
   }
   const pending = pendingVerifier(context)
@@ -256,6 +267,33 @@ export function readVerdict(raw: string, context: GuardContext, how: Reading = {
           : `${name} is sealed while the reviewers write their blind first passes, and no run reads it until \`factory unseal\`. Work from the issue, the diff, the checks and gate.json.`,
     )
   }
+  if (sealed && search) return searchVerdict(start, context, ignoring)
+  return allow
+}
+
+/**
+ * A walk that holds the job's folder while a reviewer may not read it yet: rooted in the folder,
+ * or in an ancestor of it that doesn't skip what .gitignore lists. `rg` and `grep` (and the Grep
+ * tool) from the worktree root skip the gitignored folder, so they pass; `find`, `tar`, `du`,
+ * `tree`, `ls -R` and `cp -r` don't, and a reviewer scopes them to `apps/` or `packages/`.
+ */
+function searchVerdict(start: string, context: GuardContext, ignoring: boolean): Verdict {
+  const handoff = context.places.handoffDir
+  const rel = relative(handoff, start)
+  const inside = isWithin(start, handoff)
+  // The folder itself, or `reviews/`, which holds the sealed reports: a root the walk names
+  // explicitly is searched even when ignored. Deeper inputs are judged name by name.
+  if (inside && (rel === '' || rel === 'reviews' || rel === 'decision-requests')) {
+    return deny(
+      `${start} holds files you may not read yet (the build notes, Decision Requests, earlier reports: they open after your blind first pass is written, or are not your inputs). Search the code, apps/ or packages/, or name the files you were given.`,
+    )
+  }
+  const above = isWithin(handoff, start) && !inside
+  if (above && !ignoring) {
+    return deny(
+      `${start} is above the job's folder, which holds files you may not read yet, and this walk doesn't skip it. Scope find (and tar, du, tree, ls -R) to apps/ or packages/; rg and grep from the worktree root skip the job's folder.`,
+    )
+  }
   return allow
 }
 
@@ -275,6 +313,7 @@ export function bashReadVerdict(command: string, context: GuardContext): Verdict
       readVerdict(item.path, context, {
         listing: LISTERS.has(item.program),
         search: item.search ?? false,
+        ignoring: item.ignoring ?? false,
       }),
     ),
   )
@@ -299,7 +338,7 @@ export const readPolicy: Policy = (context) => {
         : []
       return first(
         [base, ...filtered].map((path, index) =>
-          readVerdict(path, context, { search: index === 0 }),
+          readVerdict(path, context, { search: index === 0, ignoring: true }),
         ),
       )
     }
@@ -308,7 +347,7 @@ export const readPolicy: Policy = (context) => {
       const pattern = str(input.pattern) ?? ''
       return first(
         [base, isAbsolute(pattern) ? pattern : join(base, pattern)].map((path) =>
-          readVerdict(path, context, { listing: true, search: true }),
+          readVerdict(path, context, { listing: true, search: true, ignoring: true }),
         ),
       )
     }
@@ -384,4 +423,27 @@ const promptPolicy =
 
 export const agentPolicy: Policy = promptPolicy('prompt', 'description')
 
-export const messagePolicy: Policy = promptPolicy('message', 'summary')
+/**
+ * While the job is sealed, a message reaches only a run the log shows started after the seal, or
+ * one that isn't a reviewer: a reviewer launched earlier read the build notes in an earlier pass,
+ * and a blind pass it wrote on a message would not be blind. A recipient the log can't place is
+ * denied too; a fresh Agent call makes the reviewer to write the blind pass.
+ */
+const staleRecipient: Policy = (context) => {
+  if (context.agent) return allow
+  const sealed = loadSeal(context.root, context.job.number)
+  if (!sealed) return allow
+  const to = str(context.input.tool_input?.to)
+  const events = readEvents(context.root, context.job.number)
+  const start = events.find((event) => event.kind === 'agent.start' && event.agent?.id === to)
+  const type = start?.agent?.type
+  if (start && type && !reviewerRole(type)) return allow
+  if (start && start.t >= sealed.at) return allow
+  const n = context.job.number
+  return deny(
+    `Job #${n} is sealed for review pass ${sealed.pass}: ${to ?? 'that recipient'} ${start ? 'started before the seal, so it may have read the build notes' : "can't be placed by the log"}, and a blind pass it wrote on a message would not be blind. Launch a fresh reviewer with an Agent call (bun run factory launch ${n} <agent> --task review) instead of messaging one.`,
+  )
+}
+
+export const messagePolicy: Policy = (context) =>
+  first([promptPolicy('message', 'summary')(context), staleRecipient(context)])

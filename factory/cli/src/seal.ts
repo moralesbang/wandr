@@ -20,10 +20,13 @@ import {
 import { dirname, join } from 'node:path'
 import { record, Refusal, requireJob } from './commands/common.ts'
 import { readEvents, type FactoryEvent } from './events.ts'
+import { rolesWith } from './review-plan.ts'
+import { wroteInJob } from './runs.ts'
 import {
   handoffDir,
   REVIEWER_ROLES,
   reviewPass,
+  saveJob,
   stateDir,
   writeAtomic,
   type Job,
@@ -73,17 +76,17 @@ export const blindPassFile = (job: Pick<Job, 'number' | 'worktree'>, pass: numbe
 export const missingBlindPasses = (job: Pick<Job, 'number' | 'worktree'>, sealed: Seal) =>
   sealed.roles.filter((role) => !existsSync(blindPassFile(job, sealed.pass, role)))
 
-/** Whether the log shows the role's own agent writing its blind pass with Write or Edit. */
+/**
+ * Whether the log shows the role's own agent writing its blind pass with Write or Edit, in a run
+ * that began after the seal: an earlier run read the build notes in an earlier pass, so a blind
+ * pass it writes on a message is not blind.
+ */
 const wroteItself = (events: FactoryEvent[], sealed: Seal, role: ReviewerRole) =>
-  events.some(
-    (event) =>
-      event.kind === 'write' &&
-      event.source === 'hook' &&
-      event.agent?.type === `factory-${role}` &&
-      event.target?.area === 'job' &&
-      event.target.path === `reviews/${sealed.pass}.${role}.blind.md` &&
-      event.t >= sealed.at,
-  )
+  wroteInJob(events, {
+    type: `factory-${role}`,
+    rel: `reviews/${sealed.pass}.${role}.blind.md`,
+    since: sealed.at,
+  })
 
 /**
  * Why a sealed role's blind pass can't lift the seal, or null when it can: the file is there, holds
@@ -101,9 +104,30 @@ function blindPassProblem(
   if (!existsSync(file)) return `no blind pass yet from the ${role} (${rel})`
   if (!readFileSync(file, 'utf8').trim()) return `the ${role}'s blind pass ${rel} is empty`
   if (!wroteItself(events, sealed, role)) {
-    return `${rel} was not written by a factory-${role} run with the Write tool after the seal; relaunch the ${role} for its blind pass`
+    return `${rel} was not written with the Write tool by a factory-${role} run launched after the seal; relaunch the ${role} for its blind pass`
   }
   return null
+}
+
+/** The sha256 of a file's bytes, in hex. */
+export const fileHash = (file: string) =>
+  new Bun.CryptoHasher('sha256').update(readFileSync(file)).digest('hex')
+
+/**
+ * The verifiers of the sealed pass whose final report isn't written: they read the previous merged
+ * findings and their own earlier report from the sealed store, which the unseal would move away.
+ */
+function verifiersReading(job: Job, sealed: Seal): string[] {
+  const plan = job.reviews.find((planned) => planned.pass === sealed.pass)
+  return (plan ? rolesWith(plan, 'verify') : [])
+    .filter((role) => {
+      const report = join(handoffDir(job), 'reviews', `${sealed.pass}.${role}.md`)
+      return !existsSync(report) || !readFileSync(report, 'utf8').trim()
+    })
+    .map(
+      (role) =>
+        `the ${role} verifies in this pass and has not written its final report (reviews/${sealed.pass}.${role}.md): it reads the previous findings from the sealed store, which the unseal would move from under it`,
+    )
 }
 
 /** Every file under a folder, relative to it; empty when it doesn't exist. */
@@ -193,9 +217,10 @@ export function unseal(root: string, number: number): Seal {
   const sealed = loadSeal(root, number)
   if (!sealed) throw new Refusal(`Job #${number} is not sealed.`)
   const events = readEvents(root, number)
-  const problems = sealed.roles
-    .map((role) => blindPassProblem(job, sealed, role, events))
-    .filter((problem) => problem !== null)
+  const problems = [
+    ...sealed.roles.map((role) => blindPassProblem(job, sealed, role, events)),
+    ...verifiersReading(job, sealed),
+  ].filter((problem) => problem !== null)
   if (problems.length) {
     throw new Refusal(`Job #${number} stays sealed: ${problems.join('; ')}.`)
   }
@@ -220,6 +245,14 @@ export function unseal(root: string, number: number): Seal {
     )
   }
   rmSync(store, { recursive: true, force: true })
+  // The blind passes stand as they are now: no one writes them again, and `factory pr` checks.
+  const frozen = Object.fromEntries(
+    sealed.roles.map((role) => {
+      const rel = `reviews/${sealed.pass}.${role}.blind.md`
+      return [rel, fileHash(join(handoff, rel))]
+    }),
+  )
+  saveJob(root, { ...job, blindPasses: { ...job.blindPasses, ...frozen } })
   rmSync(sealRecord(root, number))
   record(root, number, 'unsealed', { pass: sealed.pass, roles: sealed.roles, files: sealed.files })
   return sealed

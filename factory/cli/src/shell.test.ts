@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { git, uncommitted, workingTree } from './shell.ts'
+import { commitAll, git, uncommitted, workingTree } from './shell.ts'
 
 let dir = ''
 beforeEach(async () => {
@@ -45,5 +45,19 @@ describe('uncommitted', () => {
   test('lists a modified tracked file by its full path', async () => {
     writeFileSync(join(dir, 'a.txt'), 'two\n')
     expect(await uncommitted(dir)).toEqual(['a.txt'])
+  })
+})
+
+// G7: a hook file an agent wrote into the checkout would run with the user's account when the CLI
+// commits or pushes.
+describe('the CLI’s own git runs no hooks', () => {
+  test('a pre-commit hook does not run when the CLI commits', async () => {
+    const marker = join(dir, 'hook-ran')
+    const hook = join(dir, '.git', 'hooks', 'pre-commit')
+    writeFileSync(hook, `#!/bin/sh\ntouch ${marker}\n`)
+    chmodSync(hook, 0o755)
+    writeFileSync(join(dir, 'a.txt'), 'two\n')
+    await commitAll(dir, 'second')
+    expect(existsSync(marker)).toBe(false)
   })
 })

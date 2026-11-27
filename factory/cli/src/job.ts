@@ -123,6 +123,12 @@ export const Job = z.object({
       }),
     )
     .default([]),
+  /**
+   * The sha256 of each blind pass as `factory unseal` found it, by its path relative to the job's
+   * folder. After that nobody writes the file, and `factory pr` checks the hashes: a blind pass
+   * rewritten once the build notes were out would no longer be blind.
+   */
+  blindPasses: z.record(z.string(), z.string()).default({}),
   /** One plan per review pass, written by `factory review`. */
   reviews: z.array(ReviewPlan).default([]),
   pr: z.string().nullable(),
@@ -200,6 +206,28 @@ export function saveJob(root: string, job: Job): void {
   const dir = stateDir(root, job.number)
   mkdirSync(dir, { recursive: true })
   writeAtomic(join(dir, 'job.json'), `${JSON.stringify(Job.parse(job), null, 2)}\n`)
+  recordSession(root, job.session, job.number)
+}
+
+/**
+ * Which job each session runs, written by the CLI next to the jobs' state: the guard asks it when a
+ * job's job.json no longer parses, which would otherwise take that job's guard down with it.
+ */
+const sessionIndex = (root: string) => join(jobsDir(root), 'sessions.json')
+
+function readSessionIndex(root: string): Record<string, number> {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(sessionIndex(root), 'utf8'))
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, number>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function recordSession(root: string, session: string, number: number): void {
+  const index = readSessionIndex(root)
+  if (index[session] === number) return
+  writeAtomic(sessionIndex(root), `${JSON.stringify({ ...index, [session]: number }, null, 2)}\n`)
 }
 
 /** Where the hooks log what went wrong, in the main checkout's state folder. */
@@ -233,6 +261,49 @@ export function listJobs(root: string): Job[] {
 
 export const findJobBySession = (root: string, session: string) =>
   listJobs(root).find((job) => job.session === session) ?? null
+
+/** The numbers of the jobs whose job.json is there but doesn't read. */
+function unreadableJobs(root: string): number[] {
+  const dir = jobsDir(root)
+  if (!existsSync(dir)) return []
+  return readdirSync(dir)
+    .filter((name) => /^\d+$/.test(name))
+    .map(Number)
+    .filter((number) => {
+      try {
+        loadJob(root, number)
+        return false
+      } catch {
+        return true
+      }
+    })
+}
+
+/**
+ * The job a session runs: its job, or, when that job's job.json doesn't read, the job's number, by
+ * the session index or by the session's id in job.json's raw text. A call from such a session is
+ * denied, never let through as if it belonged to no job.
+ */
+export function locateSession(
+  root: string,
+  session: string,
+): { job: Job } | { unreadable: number } | null {
+  const job = findJobBySession(root, session)
+  if (job) return { job }
+  const broken = unreadableJobs(root)
+  if (broken.length === 0) return null
+  const indexed = readSessionIndex(root)[session]
+  if (indexed !== undefined && broken.includes(indexed)) return { unreadable: indexed }
+  const quoted = JSON.stringify(session)
+  const owner = broken.find((number) => {
+    try {
+      return readFileSync(join(stateDir(root, number), 'job.json'), 'utf8').includes(quoted)
+    } catch {
+      return false
+    }
+  })
+  return owner === undefined ? null : { unreadable: owner }
+}
 
 export type Allowed = { ok: true } | { ok: false; reason: string }
 

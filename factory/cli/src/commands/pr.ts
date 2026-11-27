@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { readEvents, type FactoryEvent } from '../events.ts'
+import { wroteInJob } from '../runs.ts'
 import type { RunUsage } from '../usage.ts'
 import {
   handoffDir,
@@ -11,7 +12,7 @@ import {
   type ReviewerRole,
   type ReviewPlan,
 } from '../job.ts'
-import { refuseWhileSealed } from '../seal.ts'
+import { fileHash, refuseWhileSealed } from '../seal.ts'
 import { gh, git } from '../shell.ts'
 import { LABELS, record, Refusal, refuseWhileBlocked, requireJob } from './common.ts'
 import { moveLabel } from './start.ts'
@@ -156,6 +157,50 @@ export function plannedReports(
   return { evaluator: say('evaluator'), 'test-reviewer': say('test-reviewer') }
 }
 
+/**
+ * Refuses a final report its own role's run didn't write: the log must hold a Write of
+ * `reviews/<pass>.<role>.md` by that role's agent. A file with no such write was put there by
+ * someone else, the orchestrator's Bash included.
+ */
+export function requireOwnWrites(events: FactoryEvent[], plan: ReviewPlan): void {
+  for (const role of ['evaluator', 'test-reviewer'] as const) {
+    const task = plan.roles[role]
+    if (task !== 'review' && task !== 'verify') continue
+    const rel = `reviews/${plan.pass}.${role}.md`
+    if (!wroteInJob(events, { type: `factory-${role}`, rel })) {
+      throw new Refusal(
+        `${rel} was not written by a factory-${role} run with the Write tool: the log shows no such write. Launch the ${role} to write its report.`,
+      )
+    }
+  }
+}
+
+/**
+ * Refuses a blind pass `factory unseal` never froze, or one that changed since: its hash is in the
+ * job from the unseal on, and the guard denies every write to the file after that.
+ */
+export function requireFrozenBlindPasses(
+  job: Pick<Job, 'blindPasses' | 'number'>,
+  plan: ReviewPlan,
+  dir: string,
+): void {
+  for (const role of ['evaluator', 'test-reviewer'] as const) {
+    if (plan.roles[role] !== 'review') continue
+    const rel = `reviews/${plan.pass}.${role}.blind.md`
+    const frozen = job.blindPasses[rel]
+    if (frozen === undefined) {
+      throw new Refusal(
+        `${rel} was never frozen: \`factory unseal ${job.number}\` records each blind pass, and none did for this one.`,
+      )
+    }
+    if (!existsSync(join(dir, rel)) || fileHash(join(dir, rel)) !== frozen) {
+      throw new Refusal(
+        `${rel} changed since \`factory unseal\` froze it: a blind pass is final once the build notes are out.`,
+      )
+    }
+  }
+}
+
 /** Opens the PR once the gate passed on HEAD and every reviewer the pass's plan names approves. */
 export async function pr(root: string, number: number): Promise<Job> {
   const job = requireJob(root, number)
@@ -182,6 +227,9 @@ export async function pr(root: string, number: number): Promise<Job> {
     )
   }
   const reports = plannedReports(job, plan, (rel) => read(join(dir, rel)))
+  const events = readEvents(root, number)
+  requireOwnWrites(events, plan)
+  requireFrozenBlindPasses(job, plan, dir)
   const summary = read(join(dir, 'summary.md'))
   const acceptance = read(join(dir, 'acceptance.md'))
   if (!summary) throw new Refusal(`Write the PR summary in ${dir}/summary.md first.`)
@@ -210,7 +258,7 @@ export async function pr(root: string, number: number): Promise<Job> {
       pass,
       evaluator: reports.evaluator,
       testReviewer: reports['test-reviewer'],
-      usage: usageTable(readEvents(root, number)),
+      usage: usageTable(events),
     }),
   )
   await gh('pr', 'comment', url, '--body-file', commentFile)

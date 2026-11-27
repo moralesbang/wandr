@@ -173,7 +173,7 @@ describe('factory unseal', () => {
     expect(
       readEvents(root, 7)
         .map((event) => event.kind)
-        .filter((kind) => kind !== 'write'),
+        .filter((kind) => kind !== 'write' && kind !== 'agent.start'),
     ).toEqual(['sealed', 'unsealed'])
   })
 

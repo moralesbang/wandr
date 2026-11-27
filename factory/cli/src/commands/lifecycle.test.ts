@@ -10,7 +10,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { installFakeGh, makeJob } from '../job-fixture.ts'
+import { installFakeGh, makeJob, writeRuling } from '../job-fixture.ts'
 import { loadJob, saveJob, stateDir } from '../job.ts'
 import { git } from '../shell.ts'
 import { record, Refusal } from './common.ts'
@@ -113,7 +113,7 @@ describe('factory rewrite', () => {
 /** Asks for a ruling on the fix in the worktree and writes a same-guarantee one. */
 const sameGuarantee = async () => {
   const asked = await ruling(root, 7)
-  writeFileSync(asked.file, `Verdict: same-guarantee\nDiff: ${asked.diff}\n`)
+  writeRuling(root, 7, asked.ruling, `Verdict: same-guarantee\nDiff: ${asked.diff}\n`)
   return asked.ruling
 }
 
@@ -197,7 +197,7 @@ describe('factory clean --abandon', () => {
     worktree = join(main, '.claude', 'worktrees', '7-add-a-thing')
     await git(main, 'worktree', 'add', '--quiet', '-b', BRANCH, worktree)
     await git(worktree, 'push', '--quiet', 'origin', BRANCH)
-    saveJob(main, makeJob({ worktree, branch: BRANCH, state: 'blocked' }))
+    saveJob(main, makeJob({ worktree, branch: BRANCH }))
     record(main, 7, 'job.started')
 
     const bin = join(base, 'bin')

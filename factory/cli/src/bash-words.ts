@@ -161,6 +161,8 @@ export type NamedPath = {
   write?: boolean
   /** The root of a recursive walk (find, rg, grep -r…), or where a symlink leads. */
   search?: boolean
+  /** The walk honors .gitignore (rg, and grep in Claude Code's shell), so it skips ignored folders. */
+  ignoring?: boolean
 }
 
 type Reader = {
@@ -245,6 +247,10 @@ const RECURSIVE_FLAGS: Record<string, RegExp> = {
   scp: /^-[a-zA-Z]*r[a-zA-Z]*$/,
 }
 
+/** Searchers that skip what .gitignore lists, unless told not to. */
+const IGNORING = new Set(['rg', 'grep', 'egrep', 'fgrep', 'ugrep'])
+const NO_IGNORE = /^(?:--no-ignore.*|-u+|--unrestricted|--hidden)$/
+
 /** Value flags of the other programs this reads: `ln -t <dir>`. */
 const OTHER_VALUES: Record<string, Record<string, number>> = { ln: { '-t': 1, '-S': 1 } }
 
@@ -260,6 +266,17 @@ const PREFIXES = new Set([
   'time',
   'sudo',
   'xargs',
+  'nice',
+  'caffeinate',
+  'arch',
+  'script',
+  'timeout',
+  'setsid',
+  'stdbuf',
+  'ionice',
+  'unbuffer',
+  'taskpolicy',
+  'doas',
   'exec',
   'do',
   'then',
@@ -271,6 +288,8 @@ const SHELLS = new Set(['bash', 'sh', 'zsh'])
 /** Programs that change the folder the next commands run in. */
 const CD = new Set(['cd', 'pushd'])
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
+/** A number, a duration or the null device: what a launcher takes besides flags. */
+const LAUNCHER_ARG = /^(?:\d+(?:\.\d+)?[smhd]?|\/dev\/null)$/
 /** `>`, `>>` and `<` name files; `<<EOF` and `<<<` are a heredoc and a here-string, not files. */
 const REDIRECT = /^\d*(>>?|<<<|<<-?|<)(.*)$/
 
@@ -291,6 +310,8 @@ export type Invocation = {
   prefixes: string[]
   /** The folder it runs in, following the `cd`s before it. */
   cwd: string
+  /** Run by `factory sandbox exec`: in the reviewer's sandbox, with its port, database and bucket. */
+  sandboxed?: boolean
   /** For `cd` and `pushd`: the folder it moves to; absent when that can't be known (`cd -`). */
   cd?: string
 }
@@ -349,7 +370,8 @@ export function invocations(command: string, at: Where): Invocation[] {
       }
       if (!PREFIXES.has(all[i] ?? '')) break
       prefixes.push(all[i++]!)
-      while (i < all.length && all[i]!.startsWith('-')) i++
+      // The launcher's own flags and their values: `nice -n 5`, `timeout 60`, `script -q /dev/null`.
+      while (i < all.length && (all[i]!.startsWith('-') || LAUNCHER_ARG.test(all[i]!))) i++
     }
     const words = all.slice(i)
     const name = basename(words[0] ?? '')
@@ -369,7 +391,12 @@ export function invocations(command: string, at: Where): Invocation[] {
     const sandbox = factoryCall(invocation)?.sandbox
     if (sandbox?.action === 'exec' && sandbox.role && at.handoff) {
       const inside = join(at.handoff, 'sandbox', sandbox.role)
-      found.push(...invocations(sandbox.argv.join(' '), { ...at, cwd: inside }))
+      found.push(
+        ...invocations(sandbox.argv.join(' '), { ...at, cwd: inside }).map((call) => ({
+          ...call,
+          sandboxed: true,
+        })),
+      )
     }
   }
   return found
@@ -379,34 +406,93 @@ export function invocations(command: string, at: Where): Invocation[] {
 const pieces = (word: string) => word.split(/[=:,]/).filter(Boolean)
 const pathy = (piece: string) => /[/~.]/.test(piece) || piece.startsWith('$')
 
-/** git's subcommand and the folder it works in (`git -C <dir>`), past its global flags. */
-export function gitCommand(
-  invocation: Invocation,
-): { sub: string; at: number; cwd: string } | null {
-  const { words } = invocation
-  if (basename(words[0] ?? '') !== 'git') return null
-  let cwd = invocation.cwd
-  for (let i = 1; i < words.length; i++) {
-    const word = words[i]!
-    if (word === '-C') {
-      cwd = resolve(cwd, words[++i] ?? '.')
-      continue
-    }
-    if (word === '-c' || word === '--git-dir' || word === '--work-tree' || word === '--namespace') {
-      i++
-      continue
-    }
-    if (word.startsWith('-')) continue
-    return { sub: word, at: i, cwd }
-  }
-  return null
+/** One `git` in a command: its subcommand, the arguments after it and the folder it works in. */
+export type GitCommand = {
+  sub: string
+  /** The subcommand's index in the invocation's words. */
+  at: number
+  cwd: string
+  /** The arguments after the subcommand. */
+  args: string[]
+  /** The `-c <key>=<value>` settings before the subcommand, and `--config-env`'s. */
+  configs: string[]
 }
+
+/** git's own flags that take the next word as their value. */
+const GIT_VALUE_FLAGS = new Set([
+  '-C',
+  '-c',
+  '--git-dir',
+  '--work-tree',
+  '--namespace',
+  '--exec-path',
+])
+
+/**
+ * Every `git` the invocation runs, at any word position: behind a launcher (`nice git push`) or in
+ * `find -exec git push`. Each with its subcommand, past git's global flags, and the folder it works
+ * in (`git -C <dir>`).
+ */
+export function gitCommands(invocation: Invocation): GitCommand[] {
+  const { words } = invocation
+  const found: GitCommand[] = []
+  for (let start = 0; start < words.length; start++) {
+    if (basename(words[start]!) !== 'git') continue
+    let cwd = invocation.cwd
+    const configs: string[] = []
+    for (let i = start + 1; i < words.length; i++) {
+      const word = words[i]!
+      if (word === '-C') {
+        cwd = resolve(cwd, words[++i] ?? '.')
+        continue
+      }
+      if (word === '-c') {
+        configs.push(words[++i] ?? '')
+        continue
+      }
+      if (word.startsWith('--config-env=')) {
+        configs.push(word.slice('--config-env='.length))
+        continue
+      }
+      if (GIT_VALUE_FLAGS.has(word)) {
+        i++
+        continue
+      }
+      if (word.startsWith('-')) continue
+      found.push({ sub: word, at: i, cwd, args: words.slice(i + 1), configs })
+      break
+    }
+  }
+  return found
+}
+
+/** The first `git` the invocation runs; see gitCommands. */
+export const gitCommand = (invocation: Invocation): GitCommand | null =>
+  gitCommands(invocation)[0] ?? null
+
+/** Programs git ships that send a branch to a remote, run by their own names. */
+const PUSH_PROGRAMS = /^git-(?:push|send-pack|receive-pack|http-push)$/
+
+/** Whether a git command, or a program of git's, sends commits to a remote. */
+export const isPush = (git: GitCommand) =>
+  ['push', 'send-pack', 'receive-pack', 'http-push'].includes(git.sub) ||
+  (git.sub === 'subtree' && git.args.includes('push'))
+
+/** A word that names one of git's push programs, however it is reached: `…/git-core/git-push`. */
+export const isPushProgram = (word: string) => PUSH_PROGRAMS.test(basename(word))
+
+/** `git-subtree push …`, run by its own name. */
+export const isSubtreePush = (words: string[]) =>
+  words.some((word) => basename(word) === 'git-subtree') && words.includes('push')
 
 /** The paths `git checkout` and `git restore` overwrite in the worktree. */
 function gitWrites(invocation: Invocation): NamedPath[] {
-  const git = gitCommand(invocation)
-  if (!git || (git.sub !== 'checkout' && git.sub !== 'restore')) return []
-  const args = invocation.words.slice(git.at + 1)
+  return gitCommands(invocation).flatMap((git) => gitCommandWrites(git))
+}
+
+function gitCommandWrites(git: GitCommand): NamedPath[] {
+  if (git.sub !== 'checkout' && git.sub !== 'restore') return []
+  const { args } = git
   const dash = args.indexOf('--')
   const operands =
     dash === -1
@@ -461,8 +547,12 @@ export function invocationPaths(invocation: Invocation): NamedPath[] {
     )
   const operands: string[] = []
   let target: string | undefined
+  // `find`'s roots come before its expression: what follows (`-name x`, `( … )`) is no path.
+  let expression = false
   for (let j = 1; j < words.length; j++) {
     const word = words[j]!
+    if (name === 'find' && (word.startsWith('-') || word === '(' || word === '!')) expression = true
+    if (name === 'find' && expression && !word.startsWith('-')) continue
     // An empty word (`sed -i ''`) is no path.
     if (word === '') continue
     const redirect = REDIRECT.exec(word)
@@ -477,6 +567,18 @@ export function invocationPaths(invocation: Invocation): NamedPath[] {
     if (name === 'dd' && /^(?:of|if)=/.test(word)) {
       named(word.slice(3), { read: word.startsWith('if='), write: word.startsWith('of=') })
       continue
+    }
+    if (name === 'sort') {
+      // `sort -o <file>` writes its output there, even over an input.
+      const output =
+        word === '-o'
+          ? words[j + 1]
+          : word.startsWith('--output=')
+            ? word.slice('--output='.length)
+            : /^-o./.test(word)
+              ? word.slice(2)
+              : undefined
+      if (output) named(output, { read: false, write: true })
     }
     if (word.startsWith('-') && word !== '-') {
       if (INTO_TARGET.has(name) && (word === '-t' || word.startsWith('--target-directory='))) {
@@ -493,8 +595,17 @@ export function invocationPaths(invocation: Invocation): NamedPath[] {
     operands.push(word)
   }
   if (name === 'ln') return [...found, ...linkPaths(operands, target, cwd, words)]
-  if (INTERPRETERS.has(name.replace(/\d+(?:\.\d+)*$/, ''))) {
-    return [...found, ...inlinePaths(words, cwd, name)]
+  const ignoring = IGNORING.has(name) && !words.some((word) => NO_IGNORE.test(word))
+  // A walk with no root named starts where it runs: `find -name x`, `rg icon`, `ls -R`.
+  const rootless =
+    search &&
+    (name === 'find'
+      ? words[1] === undefined || /^[-(!]/.test(words[1])
+      : operands.length === 0 && !words.some((word) => REDIRECT.test(word)))
+  if (rootless) found.push({ path: cwd, program: name, read: false, search: true, ignoring })
+  const family = name.replace(/\d+(?:\.\d+)*$/, '')
+  if (INTERPRETERS.has(family)) {
+    return [...found, ...inlinePaths(words, cwd, name), ...operandPaths(family, words, cwd, name)]
   }
   // cp, mv and install write their last operand, or the folder -t names.
   const copies = ['cp', 'mv', 'install'].includes(name)
@@ -505,15 +616,15 @@ export function invocationPaths(invocation: Invocation): NamedPath[] {
   operands.forEach((word, index) => {
     const isDestination = copies && !target && index === operands.length - 1 && destination
     if (isDestination) named(word, { read: false, write: true })
-    else if (writer) named(word, { read: false, write: true, search })
+    else if (writer) named(word, { read: false, write: true, search, ignoring })
     else if (inPlace) named(word, { read: true, write: true })
-    else named(word, { read: reader !== undefined, search })
+    else named(word, { read: reader !== undefined || search, search, ignoring })
   })
   return [...found, ...gitWrites(invocation)]
 }
 
 /** Interpreters that run code given on the command line. */
-const INTERPRETERS = new Set(['python', 'node', 'bun', 'perl', 'ruby', 'deno'])
+const INTERPRETERS = new Set(['python', 'node', 'bun', 'perl', 'ruby', 'deno', 'php'])
 /** A path written as a string literal in code: `open('/x/y')`, `readFileSync("../z")`. */
 const PATH_LITERAL = /(['"`])((?:\/|~\/|\.{1,2}\/)[^'"`\s]*)\1/g
 
@@ -566,14 +677,169 @@ const SCRIPT_WRITES = [
   /(?:writeFileSync|appendFileSync|writeFile|appendFile|createWriteStream|Bun\.write|rmSync|unlinkSync|truncateSync|mkdirSync)\(\s*(['"`])([^'"`]+)\1/g,
   /(?:copyFileSync|renameSync|cpSync|copyFile|rename)\(\s*['"`][^'"`]+['"`]\s*,\s*(['"`])([^'"`]+)\1/g,
 ]
-const RUNS_INLINE =
-  /(?:^|[\s;&|(])(?:python3?|node|bun|perl|ruby|deno)\s+(?:[^;&|]*\s)?-(?:c|e|-eval|p|-print)\b/
+/** What an interpreter's command line holds: its inline code, its script and its operands. */
+export type InterpreterArgs = {
+  code: string[]
+  /** The script file, when no code is given inline. */
+  script: string | undefined
+  operands: string[]
+  /** perl's and ruby's `-i`: the operands are edited in place. */
+  inPlace: boolean
+}
 
-function scriptWrites(command: string, at: Where): NamedPath[] {
-  if (!RUNS_INLINE.test(command)) return []
+/** Bun's and Deno's own subcommands: their operands are scripts' names and filters, not files. */
+const RUNTIME_SUBCOMMANDS = new Set([
+  'run',
+  'test',
+  'install',
+  'i',
+  'add',
+  'remove',
+  'rm',
+  'update',
+  'x',
+  'create',
+  'init',
+  'build',
+  'pm',
+  'link',
+  'unlink',
+  'outdated',
+  'publish',
+  'upgrade',
+  'repl',
+  'exec',
+  'eval',
+  'fmt',
+  'lint',
+  'check',
+  'task',
+  'compile',
+  'bench',
+  'doc',
+  'info',
+  'cache',
+  'help',
+])
+
+/** Flags that take the next word as a value, per interpreter, besides the ones that give code. */
+const VALUE_FLAGS: Record<string, readonly string[]> = {
+  python: ['-W', '-X', '-Q'],
+  node: ['-r', '--require', '--import', '--loader', '--env-file', '--conditions', '-C'],
+  bun: ['-r', '--preload', '--cwd', '--config', '--env-file', '--port', '--define', '-d'],
+  deno: ['--config', '--import-map', '--lock', '--allow-read', '--allow-write'],
+  php: ['-d', '-c', '-n'],
+  perl: [],
+  ruby: [],
+}
+const CODE_FLAGS: Record<string, readonly string[]> = {
+  python: ['-c'],
+  node: ['-e', '--eval', '-p', '--print', '-pe', '-ep'],
+  bun: ['-e', '--eval', '-p', '--print'],
+  deno: [],
+  php: ['-r'],
+  perl: [],
+  ruby: [],
+}
+
+/**
+ * Reads an interpreter's command line: the inline code after `-e`/`-c`, the script file when there
+ * is none, every operand after it, and perl's and ruby's in-place flag (`-i`, `-pi`, `-i.bak`).
+ */
+export function interpreterArgs(family: string, words: string[]): InterpreterArgs {
+  const found: InterpreterArgs = { code: [], script: undefined, operands: [], inPlace: false }
+  const codeFlags = CODE_FLAGS[family] ?? []
+  const valueFlags = VALUE_FLAGS[family] ?? []
+  const clustered = family === 'perl' || family === 'ruby'
+  let rest = false
+  let first = true
+  for (let j = 1; j < words.length; j++) {
+    const word = words[j]!
+    if (!rest && word === '--') {
+      rest = true
+      continue
+    }
+    if (rest || !word.startsWith('-') || word === '-') {
+      if (first && (family === 'bun' || family === 'deno') && RUNTIME_SUBCOMMANDS.has(word)) {
+        if (found.code.length === 0) return found
+      }
+      first = false
+      if (found.code.length === 0 && found.script === undefined) found.script = word
+      else found.operands.push(word)
+      continue
+    }
+    if (codeFlags.includes(word)) {
+      if (j + 1 < words.length) found.code.push(words[++j]!)
+      continue
+    }
+    if (valueFlags.includes(word)) {
+      j++
+      continue
+    }
+    if (family === 'python' && word === '-m') {
+      // `-m module`: the module is the script, what follows are its operands.
+      if (found.script === undefined) found.script = words[++j]
+      first = false
+      continue
+    }
+    if (clustered && !word.startsWith('--')) {
+      for (let c = 1; c < word.length; c++) {
+        const letter = word[c]!
+        if (letter === 'i') {
+          found.inPlace = true
+          break
+        }
+        if (letter === 'e' || letter === 'E') {
+          if (word.length > c + 1) found.code.push(word.slice(c + 1))
+          else if (j + 1 < words.length) found.code.push(words[++j]!)
+          break
+        }
+        if ('IMrFCDdVxm'.includes(letter)) {
+          if ('Ir'.includes(letter) && word.length === c + 1) j++
+          break
+        }
+      }
+    }
+  }
+  return found
+}
+
+/**
+ * The files an interpreter is handed: its script, and every operand after the code or the script,
+ * each read; perl's and ruby's `-i` also writes the operands. A runtime's own subcommand
+ * (`bun test`, `bun run build`) hands it no files.
+ */
+function operandPaths(family: string, words: string[], cwd: string, name: string): NamedPath[] {
+  const { script, operands, inPlace } = interpreterArgs(family, words)
+  const paths = script === undefined ? operands : [script, ...operands]
+  return paths.flatMap((word) => {
+    const path = toPath(word, cwd)
+    return path
+      ? [
+          {
+            path,
+            program: name,
+            read: true,
+            ...(inPlace && word !== script ? { write: true } : {}),
+          },
+        ]
+      : []
+  })
+}
+
+/**
+ * Paths an interpreter's inline code opens for writing, as written in the code: Python's
+ * `open(…, 'w')` and `Path(…).write_text`, Node's and Bun's write calls. Relative to the folder
+ * the interpreter runs in, a `cd` before it counted. A path the script builds is out of sight.
+ */
+function scriptWrites(invocation: Invocation, home: string): NamedPath[] {
+  const { words, cwd } = invocation
+  const family = basename(words[0] ?? '').replace(/\d+(?:\.\d+)*$/, '')
+  if (!INTERPRETERS.has(family)) return []
+  const text = interpreterArgs(family, words).code.join('\n')
   return SCRIPT_WRITES.flatMap((pattern) =>
-    [...command.matchAll(pattern)].flatMap((match) => {
-      const path = toPath(expand(match[2] ?? '', at.home, at.cwd), at.cwd)
+    [...text.matchAll(pattern)].flatMap((match) => {
+      const path = toPath(expand(match[2] ?? '', home, cwd), cwd)
       return path ? [{ path, program: 'script', read: false, write: true }] : []
     }),
   )
@@ -585,7 +851,11 @@ function scriptWrites(command: string, at: Where): NamedPath[] {
  * look like paths; a word a shell would expand from another variable is skipped.
  */
 export function commandPaths(command: string, at: Where): NamedPath[] {
-  return [...invocations(command, at).flatMap(invocationPaths), ...scriptWrites(command, at)]
+  const calls = invocations(command, at)
+  return [
+    ...calls.flatMap(invocationPaths),
+    ...calls.flatMap((call) => scriptWrites(call, at.home)),
+  ]
 }
 
 /** What `factory sandbox` does, on which job and role, and the command it runs. */
@@ -607,7 +877,8 @@ export type FactoryCall = {
   sandbox?: SandboxCall
 }
 
-const RUNTIMES = new Set(['bun', 'node'])
+/** What runs the CLI's script: Bun and Node, and the package runners that start either. */
+const RUNTIMES = new Set(['bun', 'node', 'npm', 'npx', 'bunx', 'pnpm', 'yarn'])
 /** The runtime's own flags that take a value: `bun --cwd factory/cli run …`. */
 const RUNTIME_VALUES = new Set(['--cwd', '-r', '--preload', '--config', '--env-file', '--require'])
 /** main.ts's flags that take a value (its parseArgs options of type string). */
@@ -661,8 +932,27 @@ export function runtimeFlags(
   return { script: i + 1, evaluates }
 }
 
-/** The factory CLI call a program makes, or null when it runs anything else. */
+/**
+ * Each runtime word of the invocation, at any position (behind `nice`, `timeout`, `script`, in
+ * `find -exec`), with the words from it on as an invocation of its own.
+ */
+export function runtimeCalls(invocation: Invocation): Invocation[] {
+  return invocation.words.flatMap((word, i) =>
+    RUNTIMES.has(basename(word)) ? [{ ...invocation, words: invocation.words.slice(i) }] : [],
+  )
+}
+
+/** The factory CLI call a command makes behind any launcher, or null when it runs anything else. */
 export function factoryCall(invocation: Invocation): FactoryCall | null {
+  for (const call of runtimeCalls(invocation)) {
+    const found = factoryCallAt(call)
+    if (found) return found
+  }
+  return null
+}
+
+/** The factory CLI call a runtime word starts, or null. */
+function factoryCallAt(invocation: Invocation): FactoryCall | null {
   const runtime = runtimeFlags(invocation)
   if (!runtime || runtime.evaluates) return null
   const script = invocation.words[runtime.script]

@@ -12,6 +12,7 @@ import {
   stateDir,
   type Job,
 } from '../job.ts'
+import { readEvents } from '../events.ts'
 import { isAcceptanceTest } from '../paths.ts'
 import { COPIED_WORDS, sharedPhrase } from '../phrases.ts'
 import { removeSandboxes } from '../sandbox.ts'
@@ -140,7 +141,10 @@ export async function atfix(
   const ruled =
     options.ruling === undefined
       ? null
-      : { ruling: options.ruling, diff: await requireSameGuarantee(job, options.ruling) }
+      : {
+          ruling: options.ruling,
+          diff: await requireSameGuarantee(job, options.ruling, readEvents(root, number)),
+        }
   const subject = `test(#${number}): fix an acceptance test`
   const message = commitMessage(subject, note, number, cited)
   const { sha, files } = await commitAcceptanceChange(
@@ -298,6 +302,8 @@ const exitsZero = async (command: ReturnType<typeof $>) =>
  */
 export async function abandon(root: string, number: number): Promise<string[]> {
   const job = requireJob(root, number)
+  // Only the user runs clean (the guard denies it from any tool call), so a blocked job is theirs
+  // to discard without answering first.
   const prs = JSON.parse(
     await gh('pr', 'list', '--head', job.branch, '--state', 'all', '--json', 'url,state'),
   ) as { url: string; state: string }[]

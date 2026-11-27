@@ -29,8 +29,25 @@ export function bodyBeyondTrailers(message: string): string {
 }
 
 /**
+ * Empties the reflogs of HEAD and the job's branch: a commit message body amended away after the
+ * gate rejected it stays readable there (`git reflog`, `git log -g`), past the seal. Only these two
+ * refs, so the other jobs' branches and the reviewers' sandboxes (linked worktrees with their own
+ * HEAD) keep their reflogs. The amended-away commit's object stays until git collects it, but no
+ * ref names it any more.
+ */
+async function forgetReflogs(cwd: string, branch: string): Promise<void> {
+  for (const ref of ['HEAD', `refs/heads/${branch}`]) {
+    try {
+      await git(cwd, 'reflog', 'expire', '--expire=now', '--expire-unreachable=now', ref)
+    } catch {
+      // A reflog that can't be expired is no reason to reject the gate; the next run tries again.
+    }
+  }
+}
+
+/**
  * The independent gate before review: the last checks were green on exactly HEAD, nothing is left
- * uncommitted, and no commit the CLI didn't make touches a protected path or has a message body. Commits already on main
+ * uncommitted, and no commit the CLI didn't make is a merge, touches a protected path or has a message body. Commits already on main
  * aren't the job's: a job that merges main doesn't answer for them.
  */
 export async function gate(
@@ -65,13 +82,25 @@ export async function gate(
     (sha) => !job.cliCommits.includes(sha),
   )
   for (const sha of agentCommits) {
+    const parents = lines(await git(cwd, 'rev-list', '--parents', '-n', '1', sha)).flatMap((line) =>
+      line.split(' ').slice(1),
+    )
+    if (parents.length > 1) {
+      problems.push(
+        `${sha.slice(0, 7)} is a merge commit. An agent's merge hides its changes from the gate (a merge's own diff is empty): rebase onto main (\`git rebase main\`) and keep the history linear.`,
+      )
+      continue
+    }
     if (bodyBeyondTrailers(await git(cwd, 'log', '-1', '--format=%B', sha))) {
       problems.push(
         `${sha.slice(0, 7)} has a commit message body. A build commit is a subject line and its trailers only: the reasons go in build-notes.md. Reword it: \`git commit --amend\` for the last commit, or \`git reset --soft\` to before it and commit again.`,
       )
     }
+    // Against its first parent: what the commit itself changed.
     const files = lines(
-      await git(cwd, 'diff-tree', '--no-commit-id', '--name-only', '-r', '--root', sha),
+      parents.length
+        ? await git(cwd, 'diff', '--name-only', '--no-renames', `${sha}^1`, sha)
+        : await git(cwd, 'diff-tree', '--no-commit-id', '--name-only', '-r', '--root', sha),
     )
     for (const file of files) {
       const protection = protectedFromBuild(file)
@@ -79,6 +108,14 @@ export async function gate(
         problems.push(`${sha.slice(0, 7)} changes ${file} (${protection}), a protected path.`)
     }
   }
+
+  const notes = lines(await git(cwd, 'for-each-ref', '--format=%(refname)', 'refs/notes/'))
+  if (notes.length) {
+    problems.push(
+      `${notes.join(', ')} holds git notes: a note rides along with \`git log --show-notes\` past the seal, and an agent keeps its reasoning in build-notes.md. Delete it: \`git update-ref -d ${notes[0]}\`.`,
+    )
+  }
+  await forgetReflogs(cwd, job.branch)
 
   const tests = testChanges(
     await git(cwd, 'diff', '--name-status', `${main}...HEAD`),

@@ -5,8 +5,10 @@
 
 import { mkdirSync, readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
+import type { FactoryEvent } from '../events.ts'
 import { handoffDir, saveJob, type Job } from '../job.ts'
 import { isAcceptanceTest } from '../paths.ts'
+import { wroteInJob } from '../runs.ts'
 import { refuseWhileSealed } from '../seal.ts'
 import { git, lines, workingTree } from '../shell.ts'
 import { record, Refusal, refuseWhileBlocked, requireJob } from './common.ts'
@@ -71,10 +73,14 @@ export function parseRuling(text: string): Ruling {
 }
 
 /**
- * Refuses unless ruling `m` was asked for, is written, says same-guarantee and rules on the
+ * Refuses unless ruling `m` was asked for, is written by a fresh test reviewer's run, says same-guarantee and rules on the
  * acceptance-test diff in the worktree now. Returns the hash it ruled on.
  */
-export async function requireSameGuarantee(job: Job, m: number): Promise<string> {
+export async function requireSameGuarantee(
+  job: Job,
+  m: number,
+  events: FactoryEvent[],
+): Promise<string> {
   const file = rulingFile(job, m)
   const asked = job.rulings.find((item) => item.ruling === m)
   if (!asked) {
@@ -85,6 +91,15 @@ export async function requireSameGuarantee(job: Job, m: number): Promise<string>
   if (!existsSync(file)) {
     throw new Refusal(
       `No ruling yet in ${file}. Launch a fresh factory-test-reviewer (task ruling) to write it.`,
+    )
+  }
+  // Only a test reviewer's own run, started after the ruling was asked for, rules: the file alone
+  // proves nothing, since anyone with a shell can write it.
+  if (
+    !wroteInJob(events, { type: 'factory-test-reviewer', rel: `rulings/${m}.md`, since: asked.at })
+  ) {
+    throw new Refusal(
+      `rulings/${m}.md was not written by a fresh factory-test-reviewer run with the Write tool (the log shows none that started after \`factory ruling\` asked for it). Launch a fresh factory-test-reviewer (task ruling) on the file.`,
     )
   }
   const { verdict, diff } = parseRuling(readFileSync(file, 'utf8'))

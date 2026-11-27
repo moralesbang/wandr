@@ -194,6 +194,7 @@ function preToolEvents(
     }
     case 'Edit':
     case 'Write':
+    case 'MultiEdit':
     case 'NotebookEdit':
       // Logged after the fact, in PostToolUse: only a write that happened counts.
       return []
@@ -250,7 +251,7 @@ function postToolEvents(
 ): FactoryEvent[] {
   const response = (input.tool_response ?? {}) as Record<string, unknown>
   const path = str(toolInput.file_path) ?? str(toolInput.notebook_path)
-  if (['Edit', 'Write', 'NotebookEdit'].includes(input.tool_name ?? '') && path) {
+  if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(input.tool_name ?? '') && path) {
     return [{ ...base, kind: 'write', target: locate(path, places) }]
   }
   if ((input.tool_name === 'Agent' || input.tool_name === 'Task') && str(response.agentId)) {

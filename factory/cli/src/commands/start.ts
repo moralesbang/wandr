@@ -129,6 +129,7 @@ export async function start(root: string, number: number, session: string): Prom
     decisionRequests: [],
     answers: [],
     reviews: [],
+    blindPasses: {},
     pr: null,
     startedAt: new Date().toISOString(),
   }

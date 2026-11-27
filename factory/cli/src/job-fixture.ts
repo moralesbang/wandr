@@ -3,7 +3,8 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { appendEvent, eventsFromHook } from './events.ts'
-import { handoffDir, loadJob, type Job } from './job.ts'
+import { handoffDir, loadJob, saveJob, type Job } from './job.ts'
+import { fileHash } from './seal.ts'
 
 export const makeJob = (overrides: Partial<Job> = {}): Job => ({
   number: 7,
@@ -28,6 +29,7 @@ export const makeJob = (overrides: Partial<Job> = {}): Job => ({
   decisionRequests: [],
   answers: [],
   reviews: [],
+  blindPasses: {},
   pr: null,
   startedAt: '2026-01-01T00:00:00Z',
   ...overrides,
@@ -53,37 +55,79 @@ export function installFakeGh(dir: string) {
   }
 }
 
+let runs = 0
+
 /**
- * A reviewer's blind pass as a real run leaves it: the file in the job's folder, and the write the
- * log hook records when the role's own agent writes it with the Write tool (`factory unseal`
- * checks both).
+ * A file in the job's folder as a real run leaves it: the file itself, and the events the log hook
+ * records when that run starts and writes it with the Write tool. `factory unseal`, `atfix` and
+ * `pr` check the log for both. Each call is a new run.
  */
-export function writeBlindPass(
+export function writeAsRun(
   root: string,
   number: number,
-  pass: number,
-  role: string,
-  text = 'blind\n',
+  agentType: string,
+  rel: string,
+  text: string,
+  options: { id?: string; started?: boolean } = {},
 ): string {
   const job = loadJob(root, number)
   if (!job) throw new Error(`No job ${number} in ${root}`)
-  const file = join(handoffDir(job), 'reviews', `${pass}.${role}.blind.md`)
+  const file = join(handoffDir(job), rel)
   mkdirSync(dirname(file), { recursive: true })
   writeFileSync(file, text)
-  const input = {
-    session_id: job.session,
-    hook_event_name: 'PostToolUse',
-    agent_id: `${role}-run`,
-    agent_type: `factory-${role}`,
-    tool_name: 'Write',
-    tool_input: { file_path: file, content: text },
-  }
+  const id = options.id ?? `${agentType.replace('factory-', '')}-run-${++runs}`
   const context = {
     job,
     handoffDir: handoffDir(job),
     now: new Date().toISOString(),
     readText: () => null,
   }
-  for (const event of eventsFromHook(input, context)) appendEvent(root, event)
+  const hook = (event: string, extra: object = {}) => ({
+    session_id: job.session,
+    hook_event_name: event,
+    agent_id: id,
+    agent_type: agentType,
+    ...extra,
+  })
+  if (options.started !== false) {
+    for (const event of eventsFromHook(hook('SubagentStart'), context)) appendEvent(root, event)
+  }
+  const write = hook('PostToolUse', {
+    tool_name: 'Write',
+    tool_input: { file_path: file, content: text },
+  })
+  for (const event of eventsFromHook(write, context)) appendEvent(root, event)
   return file
+}
+
+/** A reviewer's blind pass as a real run leaves it: see writeAsRun. */
+export const writeBlindPass = (
+  root: string,
+  number: number,
+  pass: number,
+  role: string,
+  text = 'blind\n',
+) => writeAsRun(root, number, `factory-${role}`, `reviews/${pass}.${role}.blind.md`, text)
+
+/** A reviewer's final report for a pass, written by its own run. */
+export const writeReport = (
+  root: string,
+  number: number,
+  pass: number,
+  role: string,
+  text = 'Verdict: approve\n',
+) => writeAsRun(root, number, `factory-${role}`, `reviews/${pass}.${role}.md`, text)
+
+/** A test reviewer's ruling file, written by a run that started after the ruling was asked for. */
+export const writeRuling = (root: string, number: number, m: number, text: string) =>
+  writeAsRun(root, number, 'factory-test-reviewer', `rulings/${m}.md`, text)
+
+/** What `factory unseal` does to a blind pass that stands: records its hash in the job. */
+export function freezeBlindPass(root: string, number: number, rel: string): void {
+  const job = loadJob(root, number)
+  if (!job) throw new Error(`No job ${number} in ${root}`)
+  saveJob(root, {
+    ...job,
+    blindPasses: { ...job.blindPasses, [rel]: fileHash(join(handoffDir(job), rel)) },
+  })
 }

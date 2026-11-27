@@ -3,12 +3,12 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { readEvents } from '../events.ts'
-import { makeJob, writeBlindPass } from '../job-fixture.ts'
-import { loadJob, saveJob, type Job } from '../job.ts'
+import { makeJob, writeBlindPass, writeReport } from '../job-fixture.ts'
+import { loadJob, saveJob, stateDir, type Job } from '../job.ts'
 import { loadSeal } from '../seal.ts'
 import { git } from '../shell.ts'
 import { Refusal } from './common.ts'
-import { review } from './review.ts'
+import { review, reviewReport } from './review.ts'
 
 let root = ''
 let tree = ''
@@ -147,5 +147,62 @@ describe('factory review, a later pass', () => {
     await commit('apps/web/e2e/icons.spec.ts')
     const plan = await review(root, 7)
     expect(plan.roles).toEqual({ evaluator: 'carry', 'test-reviewer': 'verify' })
+  })
+})
+
+describe('what `factory review` prints', () => {
+  test('says sealed while the seal stands, and not sealed when it is run again after the unseal', async () => {
+    save()
+    expect((await reviewReport(root, 7)).sealed).toBe(true)
+    writeBlindPass(root, 7, 1, 'evaluator')
+    writeBlindPass(root, 7, 1, 'test-reviewer')
+    const { unseal } = await import('../seal.ts')
+    unseal(root, 7)
+    const again = await reviewReport(root, 7)
+    expect(again.sealed).toBe(false)
+    expect(again.roles).toEqual({ evaluator: 'review', 'test-reviewer': 'review' })
+  })
+})
+
+const setup = async () => {
+  await afterFirstPass({ evaluator: 'changes', 'test-reviewer': 'changes' })
+  await commit('apps/web/src/icon.ts', 'apps/web/e2e/icons.spec.ts')
+  const plan = await review(root, 7)
+  // Pass 2 plans a blind evaluator and a verifying test reviewer: edit the plan to that.
+  const job = loadJob(root, 7)!
+  saveJob(root, {
+    ...job,
+    reviews: job.reviews.map((item) =>
+      item.pass === 2
+        ? { ...item, roles: { evaluator: 'review', 'test-reviewer': 'verify' } }
+        : item,
+    ),
+  })
+  return plan
+}
+
+// A verifier reads the previous findings from the sealed store while another reviewer's blind pass
+// keeps the job sealed: the unseal would move them from under it.
+describe('factory unseal, while a verifier is still reading', () => {
+  test('is refused until the verifier’s final report is written', async () => {
+    const { unseal } = await import('../seal.ts')
+    await setup()
+    // Only the evaluator reviews blind in this pass, so only it is sealed.
+    const record = join(stateDir(root, 7), 'seal.json')
+    writeFileSync(record, JSON.stringify({ ...loadSeal(root, 7), roles: ['evaluator'] }))
+    writeBlindPass(root, 7, 2, 'evaluator')
+    expect(loadSeal(root, 7)?.pass).toBe(2)
+    let message = ''
+    try {
+      unseal(root, 7)
+    } catch (error) {
+      message = (error as Error).message
+    }
+    expect(message).toContain('test-reviewer')
+    expect(message).toContain('verif')
+    expect(loadSeal(root, 7)).not.toBeNull()
+    writeReport(root, 7, 2, 'test-reviewer')
+    unseal(root, 7)
+    expect(loadSeal(root, 7)).toBeNull()
   })
 })

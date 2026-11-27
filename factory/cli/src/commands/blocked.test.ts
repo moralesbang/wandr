@@ -15,6 +15,7 @@ import { answer } from './answer.ts'
 import { Refusal } from './common.ts'
 import { gate } from './gate.ts'
 import { atfix, attempt, block, rewrite, round } from './lifecycle.ts'
+import { check } from './check.ts'
 import { pr } from './pr.ts'
 import { red } from './red.ts'
 import { review } from './review.ts'
@@ -76,6 +77,7 @@ describe('a blocked job', () => {
     ['red', () => red(root, 7)],
     ['launch', () => launch(root, 7, 'factory-build', 'build')],
     ['block', () => raise()],
+    ['check', () => check(root, 7)],
   ])('refuses factory %s until the user answers', async (_command, run) => {
     await raise()
     const before = loadJob(root, 7)

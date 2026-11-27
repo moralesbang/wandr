@@ -202,9 +202,13 @@ describe('hook guard: tools without a policy of their own', () => {
     expect(call(tool, {}, 'factory-build')).toBeNull()
   })
 
-  test('the orchestrator keeps the tools it has', () => {
-    expect(call('WebSearch', { query: 'x' })).toBeNull()
-    expect(call('mcp__claude_ai_Claude_Docs__guide', { items: [] })).toBeNull()
+  // G3: the orchestrator has its own list, and no MCP tool: a browser signed in as the user
+  // reaches GitHub past every rule here.
+  test('the orchestrator has no MCP tool, and only the tools of its list', () => {
+    expect(call('mcp__claude_ai_Claude_Docs__guide', { items: [] })).toContain('MCP')
+    expect(call('WebSearch', { query: 'x' })).toContain('not a tool the orchestrator')
+    expect(call('EnterWorktree', { path: '/x' })).toBeNull()
+    expect(call('Skill', { skill: 'x' })).toBeNull()
   })
 })
 

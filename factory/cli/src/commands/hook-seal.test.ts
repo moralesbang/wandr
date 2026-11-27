@@ -300,12 +300,16 @@ describe('gh and the seal commands', () => {
     expect(decision?.permissionDecisionReason).toContain('orchestrator')
   })
 
-  test.each(['bun run factory check 7', 'bun run factory status'])(
-    'lets a subagent run %s',
-    (command) => {
-      expect(bash(EVALUATOR, command)).toBeNull()
-    },
-  )
+  // A reviewer runs its checks in its own sandbox: `factory check` takes the checks lock.
+  test('denies a reviewer `factory check`, and names the sandbox', () => {
+    expect(bash(EVALUATOR, 'bun run factory check 7')?.permissionDecisionReason).toContain(
+      'sandbox exec',
+    )
+  })
+
+  test.each(['bun run factory status'])('lets a subagent run %s', (command) => {
+    expect(bash(EVALUATOR, command)).toBeNull()
+  })
 
   test.each(['gh issue view 7 --comments', 'bun run factory unseal 7'])(
     'lets the orchestrator run %s',

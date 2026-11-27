@@ -220,13 +220,25 @@ describe('factory commands, read as main.ts reads its arguments', () => {
     'bun run factory --note x unseal 13',
     'bun run factory --pass 2 unseal 13',
     'bun run factory --note x pr 13',
-    'bun run factory watch --port 4999',
     'bun run factory review 13',
     'bun run factory launch 13 factory-build --task build',
     'bun run factory sandbox 13 evaluator',
   ])('denies an agent a command that moves the job: %s', (command) => {
     expect(decide(command, 'factory-build')?.permissionDecision).toBe('deny')
     expect(decide(command, undefined)).toBeNull()
+  })
+
+  // `watch` and `clean` are the user's, from their own prompt: the guard denies them to everyone.
+  test.each([
+    'bun run factory watch --port 4999',
+    'bun run factory clean 13',
+    'bun run factory clean 13 --abandon',
+  ])('denies everyone %s: only the user runs it', (command) => {
+    for (const agent of [undefined, 'factory-build']) {
+      const decision = decide(command, agent)
+      expect(decision?.permissionDecision).toBe('deny')
+      expect(decision?.permissionDecisionReason).toContain('the user')
+    }
   })
 
   // The skill has the orchestrator run the red; a build agent's red would commit its own product

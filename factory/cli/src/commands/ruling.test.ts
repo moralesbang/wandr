@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { makeJob } from '../job-fixture.ts'
+import { appendEvent } from '../events.ts'
+import { makeJob, writeAsRun, writeRuling } from '../job-fixture.ts'
 import { loadJob, saveJob } from '../job.ts'
 import { git } from '../shell.ts'
 import { Refusal } from './common.ts'
@@ -37,13 +38,11 @@ afterEach(() => {
 })
 
 const refusal = (run: () => Promise<unknown>) => run().catch((caught: unknown) => caught)
-const rule = (m: number, verdict: string, diff: string) => {
-  mkdirSync(join(handoff, 'rulings'), { recursive: true })
-  writeFileSync(
-    join(handoff, 'rulings', `${m}.md`),
-    `Verdict: ${verdict}\nDiff: ${diff}\n\nThe selector changed; the check is the same.\n`,
-  )
-}
+const ruled = (verdict: string, diff: string) =>
+  `Verdict: ${verdict}\nDiff: ${diff}\n\nThe selector changed; the check is the same.\n`
+// What a real run leaves: the file and the log's record of the test reviewer writing it.
+const rule = (m: number, verdict: string, diff: string) =>
+  writeRuling(root, 7, m, ruled(verdict, diff))
 
 describe('parseRuling', () => {
   test.each([
@@ -88,6 +87,11 @@ describe('factory ruling', () => {
   })
 })
 
+const fix = async () => {
+  writeFileSync(join(tree, 'x.acceptance.test.ts'), 'two\n')
+  return (await ruling(root, 7)).diff
+}
+
 describe('factory atfix --ruling', () => {
   test('commits the fix the ruling judged same-guarantee, and records the ruling', async () => {
     writeFileSync(join(tree, 'x.acceptance.test.ts'), 'two\n')
@@ -123,6 +127,41 @@ describe('factory atfix --ruling', () => {
     writeFileSync(join(tree, 'x.acceptance.test.ts'), 'two\n')
     await ruling(root, 7)
     expect(await refusal(() => atfix(root, 7, 'fix', { ruling: 1 }))).toBeInstanceOf(Refusal)
+  })
+
+  describe('a ruling only the test reviewer wrote', () => {
+    test('is refused when the orchestrator wrote the file itself', async () => {
+      const diff = await fix()
+      mkdirSync(join(handoff, 'rulings'), { recursive: true })
+      writeFileSync(join(handoff, 'rulings', '1.md'), ruled('same-guarantee', diff))
+      const error = await refusal(() => atfix(root, 7, 'fix', { ruling: 1 }))
+      expect((error as Refusal).message).toContain('factory-test-reviewer')
+      expect(loadJob(root, 7)?.atfixes).toEqual([])
+    })
+
+    test('is refused when another agent wrote it', async () => {
+      const diff = await fix()
+      writeAsRun(root, 7, 'factory-evaluator', 'rulings/1.md', ruled('same-guarantee', diff))
+      expect(await refusal(() => atfix(root, 7, 'fix', { ruling: 1 }))).toBeInstanceOf(Refusal)
+    })
+
+    test('is refused when the test reviewer started before the ruling was asked for', async () => {
+      appendEvent(root, {
+        t: new Date(Date.now() - 60_000).toISOString(),
+        job: 7,
+        source: 'hook',
+        agent: { id: 'old-run', type: 'factory-test-reviewer' },
+        kind: 'agent.start',
+      })
+      const diff = await fix()
+      writeAsRun(root, 7, 'factory-test-reviewer', 'rulings/1.md', ruled('same-guarantee', diff), {
+        id: 'old-run',
+        started: false,
+      })
+      const error = await refusal(() => atfix(root, 7, 'fix', { ruling: 1 }))
+      expect((error as Refusal).message).toContain('fresh')
+      expect(loadJob(root, 7)?.atfixes).toEqual([])
+    })
   })
 
   test('a changed-guarantee ruling is refused and sent to a Decision Request', async () => {

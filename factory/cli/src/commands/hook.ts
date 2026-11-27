@@ -12,7 +12,7 @@ import {
   type Places,
 } from '../events.ts'
 import {
-  findJobBySession,
+  locateSession,
   handoffDir,
   hookErrorsLog,
   logHookError,
@@ -22,7 +22,7 @@ import {
 import { canonical } from '../paths.ts'
 import { changedBetween, workingTree } from '../shell.ts'
 import { bashPolicy } from '../bash-policy.ts'
-import type { Policy } from '../policy.ts'
+import type { Policy, Verdict } from '../policy.ts'
 import { agentPolicy, messagePolicy, readPolicy } from '../read-guard.ts'
 import { writePolicy } from '../write-guard.ts'
 
@@ -34,11 +34,16 @@ const readText = (path: string) => {
   }
 }
 
-/** The hook input and the job its session runs, or null outside a factory job. */
-function find(root: string, stdin: string): { input: HookInput; job: Job } | null {
+/**
+ * The hook input and the job its session runs, or null outside a factory job. A job whose job.json
+ * doesn't read is still the session's job: `unreadable` carries its number.
+ */
+type Found = { input: HookInput; job: Job } | { input: HookInput; unreadable: number }
+
+function find(root: string, stdin: string): Found | null {
   const input = HookInput.parse(JSON.parse(stdin))
-  const job = findJobBySession(root, input.session_id)
-  return job ? { input, job } : null
+  const located = locateSession(root, input.session_id)
+  return located ? { input, ...located } : null
 }
 
 const logError = (root: string, hook: string, error: unknown) => {
@@ -75,7 +80,7 @@ async function withRunChanges(events: FactoryEvent[], input: HookInput, job: Job
 export async function hookLog(root: string, stdin: string): Promise<void> {
   try {
     const found = find(root, stdin)
-    if (!found) return
+    if (!found || !('job' in found)) return
     const { input, job } = found
     if (input.agent_id !== undefined && !AGENT_ID.test(input.agent_id)) {
       logError(root, 'log', `ignored an event with the agent id ${JSON.stringify(input.agent_id)}`)
@@ -101,6 +106,7 @@ const BASH: Entry = { policy: bashPolicy, kind: 'bash.denied' }
 const POLICIES: Record<string, Entry> = {
   Edit: { policy: writePolicy, kind: 'write.denied' },
   Write: { policy: writePolicy, kind: 'write.denied' },
+  MultiEdit: { policy: writePolicy, kind: 'write.denied' },
   NotebookEdit: { policy: writePolicy, kind: 'write.denied' },
   Read: { policy: readPolicy, kind: 'read.denied' },
   Grep: { policy: readPolicy, kind: 'read.denied' },
@@ -119,6 +125,27 @@ const POLICIES: Record<string, Entry> = {
  * tool, an MCP server's included, reads or reaches what the guard can't judge.
  */
 const SUBAGENT_TOOLS = new Set([...Object.keys(POLICIES), 'TodoWrite', 'ToolSearch', 'TaskStop'])
+
+/**
+ * What the orchestrator calls besides the above: the tools that move it between worktrees, ask the
+ * user, wake it, notify, or run a skill. An MCP server's tool reaches what the guard can't judge
+ * (a browser logged in to GitHub as the user), and an unknown tool is unjudged too.
+ */
+const ORCHESTRATOR_TOOLS = new Set([
+  ...SUBAGENT_TOOLS,
+  'EnterWorktree',
+  'ExitWorktree',
+  'TaskOutput',
+  'TaskStop',
+  'ListAgents',
+  'AskUserQuestion',
+  'Skill',
+  'ToolSearch',
+  'ScheduleWakeup',
+  'ReadNotifications',
+  'SendUserFile',
+  'PushNotification',
+])
 
 /** The policy for a tool: its own, or Bash's for any tool that takes a shell command. */
 const entryFor = (input: HookInput): Entry | null =>
@@ -155,7 +182,7 @@ const denial = (reason: string) =>
  * through. Inside one it fails closed: a call it can't judge, for any error, is denied.
  */
 export function hookGuard(mainRoot: string, stdin: string): string {
-  let found: ReturnType<typeof find>
+  let found: Found | null
   try {
     found = find(mainRoot, stdin)
   } catch (error) {
@@ -163,6 +190,11 @@ export function hookGuard(mainRoot: string, stdin: string): string {
     return ''
   }
   if (!found) return ''
+  if ('unreadable' in found) {
+    return denial(
+      `The factory guard can't read job #${found.unreadable}'s state (its job.json doesn't parse; the error is in ${hookErrorsLog(mainRoot)}), and during a job a call it can't judge is denied. Tell the user in your reply; they fix or restore factory/.jobs/${found.unreadable}/job.json.`,
+    )
+  }
   try {
     return judge(mainRoot, found.input, found.job)
   } catch (error) {
@@ -171,6 +203,33 @@ export function hookGuard(mainRoot: string, stdin: string): string {
       `The factory guard failed on this call (the error is in ${hookErrorsLog(mainRoot)}), and during a job a call it can't judge is denied. Try it another way, or report the failure in your reply.`,
     )
   }
+}
+
+/**
+ * A denial for a tool the guard has no policy to judge: any tool but the allowed ones, an MCP
+ * server's included. Null when the tool is allowed, to be judged by its own policy if it has one.
+ */
+function unjudged(tool: string, entry: Entry | null, agent: unknown): Verdict | null {
+  if (agent) {
+    return SUBAGENT_TOOLS.has(tool)
+      ? null
+      : {
+          ok: false,
+          reason: `${tool} is not a tool an agent of a factory job uses: the guard can't judge what it reads or reaches. Use Read, Grep, Glob, Bash, Edit or Write.`,
+        }
+  }
+  if (tool.startsWith('mcp__')) {
+    return {
+      ok: false,
+      reason: `${tool} is an MCP tool: during a job the orchestrator has none, since it reaches what the guard can't judge (a browser signed in to GitHub as the user, a mailbox). Use the CLI, Read, Write, Edit, Bash, Agent or SendMessage.`,
+    }
+  }
+  return ORCHESTRATOR_TOOLS.has(tool) || entry
+    ? null
+    : {
+        ok: false,
+        reason: `${tool} is not a tool the orchestrator of a factory job uses: the guard can't judge what it reaches. Its tools: ${[...ORCHESTRATOR_TOOLS].join(', ')}.`,
+      }
 }
 
 /** The verdict on one call of a job's session; every path judged where its symlinks lead. */
@@ -184,14 +243,8 @@ function judge(mainRoot: string, input: HookInput, found: Job): string {
   const tool = input.tool_name ?? ''
   const entry = entryFor(input)
   const verdict =
-    agent && !SUBAGENT_TOOLS.has(tool)
-      ? {
-          ok: false as const,
-          reason: `${tool} is not a tool an agent of a factory job uses: the guard can't judge what it reads or reaches. Use Read, Grep, Glob, Bash, Edit or Write.`,
-        }
-      : entry
-        ? entry.policy({ root, job, input, places, ...(agent ? { agent } : {}) })
-        : null
+    unjudged(tool, entry, agent) ??
+    (entry ? entry.policy({ root, job, input, places, ...(agent ? { agent } : {}) }) : null)
   if (!verdict || verdict.ok) return ''
   const denied = deniedTarget(input, places)
   appendEvent(root, {

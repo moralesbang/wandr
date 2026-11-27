@@ -3,7 +3,7 @@
 import { parseArgs } from 'node:util'
 import { handoffDir, mainRoot } from './job.ts'
 import { check } from './commands/check.ts'
-import { Refusal, requireJob } from './commands/common.ts'
+import { Refusal } from './commands/common.ts'
 import { gate } from './commands/gate.ts'
 import { hookGuard, hookLog } from './commands/hook.ts'
 import {
@@ -18,7 +18,7 @@ import {
 } from './commands/lifecycle.ts'
 import { pr } from './commands/pr.ts'
 import { red } from './commands/red.ts'
-import { REVIEW_USAGE, review, verifierReads } from './commands/review.ts'
+import { REVIEW_USAGE, reviewReport } from './commands/review.ts'
 import { RULING_USAGE, ruling } from './commands/ruling.ts'
 import { LAUNCH_USAGE, launch } from './launch.ts'
 import { answer } from './commands/answer.ts'
@@ -132,13 +132,7 @@ async function main(argv: string[]): Promise<number> {
       return 0
     }
     case 'review': {
-      const number = issueNumber(arg)
-      const plan = await review(root, number)
-      print({
-        ...plan,
-        sealed: Object.values(plan.roles).includes('review'),
-        reads: verifierReads(root, requireJob(root, number), plan),
-      })
+      print(await reviewReport(root, issueNumber(arg)))
       return 0
     }
     case 'ruling':
