@@ -12,3 +12,4 @@ A standard binds every line you write or review in the paths it applies to. Read
 | [`api.md`](standards/api.md) | `apps/api/**`, `packages/contract/**` |
 | [`testing.md`](standards/testing.md) | Every test file, and every change to code a test covers |
 | [`lint-rules.md`](standards/lint-rules.md) | Code that breaks a convention, yours or another agent's; `packages/oxlint-plugin-wandr/**`, `.oxlintrc.json` |
+| [`factory-invariants.md`](standards/factory-invariants.md) | `factory/**`, `.claude/agents/**`, `.claude/skills/factory/**`, `.claude/settings.json` |
