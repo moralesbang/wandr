@@ -6,6 +6,7 @@
 // checkout and its copy of the job's folder included).
 
 import { isAcceptanceTest, protectedFromBuild, ruleProtecting } from './paths.ts'
+import { reviewerRole, verifierMayRead } from './review-plan.ts'
 
 export type Area = 'repo' | 'job' | 'outside'
 export type Target = { area: Area; path: string }
@@ -170,17 +171,26 @@ const matches = (glob: string, target: Target) => {
 
 export type ReadVerdict = { ok: true; input: string } | { ok: false; reason: string }
 
+export type ReadState = {
+  blindPassWritten: boolean
+  /**
+   * The reader is a reviewer planned to verify in this pass: it has no blind pass, and reads the
+   * previous merged findings and its own previous final report (review-plan.ts verifierMayRead).
+   */
+  verifying?: boolean
+}
+
 /**
  * The breach rule: a read is fine only if the target is one of the agent's inputs and that input
  * is visible at this moment.
  */
-export function classifyRead(
-  agent: AgentType,
-  target: Target,
-  state: { blindPassWritten: boolean },
-): ReadVerdict {
+export function classifyRead(agent: AgentType, target: Target, state: ReadState): ReadVerdict {
   if (target.area === 'outside') {
     return { ok: false, reason: `Read outside the job's worktree and folder: ${target.path}` }
+  }
+  const role = reviewerRole(agent)
+  if (state.verifying && role && target.area === 'job' && verifierMayRead(role, target.path)) {
+    return { ok: true, input: 'Previous findings and its own report (verify pass)' }
   }
   const input = INPUTS[agent].find((candidate) =>
     candidate.paths.some((glob) => matches(glob, target)),

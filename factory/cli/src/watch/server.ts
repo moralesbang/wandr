@@ -5,9 +5,10 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { Annotator } from '../annotate.ts'
 import type { FactoryEvent } from '../events.ts'
-import { jobsDir, loadJob } from '../job.ts'
+import { jobsDir } from '../job.ts'
+import { jobFrame } from './extras.ts'
 
-type Tail = { offset: number; annotator: Annotator; jobMtime: number }
+type Tail = { offset: number; annotator: Annotator; job: string }
 
 const encoder = new TextEncoder()
 const frame = (type: string, data: unknown) =>
@@ -38,19 +39,21 @@ function poll(
     const dir = join(jobsDir(root), String(number))
     let tail = tails.get(number)
     if (!tail) {
-      tail = { offset: 0, annotator: new Annotator(), jobMtime: 0 }
+      tail = { offset: 0, annotator: new Annotator(), job: '' }
       tails.set(number, tail)
     }
-    const jobFile = join(dir, 'job.json')
-    if (existsSync(jobFile)) {
-      const mtime = statSync(jobFile).mtimeMs
-      if (mtime !== tail.jobMtime) {
-        try {
-          send(frame('job', loadJob(root, number)))
-          tail.jobMtime = mtime
-        } catch {
-          // job.json is halfway through a write: try again on the next poll.
+    // job.json and the files its extras read change without the log moving, so the frame is
+    // rebuilt each poll and sent when it differs from the last one.
+    if (existsSync(join(dir, 'job.json'))) {
+      try {
+        const next = jobFrame(root, number)
+        const body = JSON.stringify(next)
+        if (body !== tail.job) {
+          send(frame('job', next))
+          tail.job = body
         }
+      } catch {
+        // job.json is halfway through a write: try again on the next poll.
       }
     }
     const log = join(dir, 'events.jsonl')

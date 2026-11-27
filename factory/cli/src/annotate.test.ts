@@ -242,3 +242,78 @@ describe("replay: job #13's reviewers", () => {
     for (const event of notes) expect(event.breach).toBeUndefined()
   })
 })
+
+// A verifier has no blind pass: the plan for the pass says `verify`, and it reads the previous
+// merged findings and its own previous final report. The build notes stay closed to it.
+const planned = (roles: Record<string, string>) => ({
+  t: String(tick++),
+  job: 7,
+  source: 'cli' as const,
+  kind: 'review.planned',
+  detail: { pass: 2, roles },
+})
+
+describe('a verifier in the pass', () => {
+  const second = [cli('round')]
+
+  test.each(['reviews/1.findings.md', 'reviews/1.evaluator.md'])(
+    'its read of %s is not a breach',
+    (path) => {
+      const events = annotate([
+        ...second,
+        planned({ evaluator: 'verify', 'test-reviewer': 'review' }),
+        read(evaluator, path),
+      ])
+      expect(events.at(-1)?.breach).toBeUndefined()
+      expect(events.at(-1)?.input).toContain('verify')
+    },
+  )
+
+  test('its read of the build notes still is', () => {
+    const events = annotate([
+      ...second,
+      planned({ evaluator: 'verify', 'test-reviewer': 'review' }),
+      read(evaluator, 'build-notes.md'),
+    ])
+    expect(events.at(-1)?.breach).toContain('blind first pass')
+  })
+
+  test("it may not read the other reviewer's report", () => {
+    const events = annotate([
+      ...second,
+      planned({ evaluator: 'verify', 'test-reviewer': 'review' }),
+      read(evaluator, 'reviews/1.test-reviewer.md'),
+    ])
+    expect(events.at(-1)?.breach).toBeDefined()
+  })
+
+  test('a reviewer planned to review is still flagged for the same read', () => {
+    const events = annotate([
+      ...second,
+      planned({ evaluator: 'review', 'test-reviewer': 'review' }),
+      read(evaluator, 'reviews/1.findings.md'),
+    ])
+    expect(events.at(-1)?.breach).toBeDefined()
+  })
+
+  test("the plan is the pass's: a verify in pass 2 does not excuse pass 3", () => {
+    const events = annotate([
+      ...second,
+      planned({ evaluator: 'verify', 'test-reviewer': 'review' }),
+      cli('round'),
+      read(evaluator, 'reviews/2.findings.md'),
+    ])
+    expect(events.at(-1)?.breach).toBeDefined()
+  })
+
+  test("a read in the sealed store of the job's state is its own input too", () => {
+    const events = annotate([
+      ...second,
+      planned({ evaluator: 'verify', 'test-reviewer': 'review' }),
+      read(evaluator, '/repo/factory/.jobs/7/sealed/reviews/1.findings.md', 'outside'),
+      read(evaluator, '/repo/factory/.jobs/7/sealed/build-notes.md', 'outside'),
+    ])
+    expect(events.at(-2)?.breach).toBeUndefined()
+    expect(events.at(-1)?.breach).toBeDefined()
+  })
+})

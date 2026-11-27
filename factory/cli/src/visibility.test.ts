@@ -229,3 +229,40 @@ describe('rulings', () => {
     expect(classifyWrite(agent, job(path)).ok).toBe(false)
   })
 })
+
+describe('classifyRead: a verifier', () => {
+  const before = { blindPassWritten: false, verifying: true }
+
+  test.each([
+    ['factory-evaluator', 'reviews/1.findings.md'],
+    ['factory-evaluator', 'reviews/1.evaluator.md'],
+    ['factory-test-reviewer', 'reviews/1.test-reviewer.md'],
+  ] as const)('%s reads %s without a blind pass', (agent, path) => {
+    expect(classifyRead(agent, job(path), before).ok).toBe(true)
+  })
+
+  test.each([
+    ['factory-evaluator', 'build-notes.md'],
+    ['factory-evaluator', 'reviews/1.test-reviewer.md'],
+    ['factory-test-reviewer', 'decision-requests/1.md'],
+  ] as const)('%s still may not read %s', (agent, path) => {
+    expect(classifyRead(agent, job(path), before).ok).toBe(false)
+  })
+
+  test('the same read is a breach when the reviewer is not verifying', () => {
+    expect(
+      classifyRead('factory-evaluator', job('reviews/1.findings.md'), { blindPassWritten: false })
+        .ok,
+    ).toBe(false)
+  })
+
+  test('verifying excuses nothing outside the job folder', () => {
+    expect(
+      classifyRead(
+        'factory-evaluator',
+        { area: 'outside', path: '/x/reviews/1.findings.md' },
+        before,
+      ).ok,
+    ).toBe(false)
+  })
+})

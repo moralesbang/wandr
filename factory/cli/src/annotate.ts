@@ -12,6 +12,7 @@ import { commandPaths } from './bash-words.ts'
 import { locate, type FactoryEvent, type Places } from './events.ts'
 import { jobFolder } from './paths.ts'
 import { classifyRead, isFactoryAgent, type AgentType, type Target } from './visibility.ts'
+import { reviewerRole } from './review-plan.ts'
 
 /** A denial the guard logged: the call never ran, but the agent reached for what it may not read. */
 const DENIED_READS = new Set(['read.denied', 'bash.denied', 'agent.denied'])
@@ -43,6 +44,8 @@ export class Annotator {
   private parentOf = new Map<string, string>()
   private rounds = 0
   private blindPasses = new Set<string>()
+  /** What each reviewer does per review pass, from the `review.planned` events. */
+  private plans = new Map<number, Record<string, unknown>>()
   private writerOf = new Map<string, string>()
   /** Agent calls whose run hasn't started yet: who called, and for which agent type. */
   private pending: {
@@ -91,6 +94,12 @@ export class Annotator {
       if (started?.caller) this.parentOf.set(event.agent.id, started.caller)
     }
     if (event.source === 'cli' && event.kind === 'round') this.rounds += 1
+    if (event.source === 'cli' && event.kind === 'review.planned') {
+      const { pass, roles } = event.detail ?? {}
+      if (typeof pass === 'number' && roles && typeof roles === 'object') {
+        this.plans.set(pass, roles as Record<string, unknown>)
+      }
+    }
     if (event.source === 'cli' && event.kind === 'job.started' && !this.places) {
       const worktree = event.detail?.worktree
       if (typeof worktree === 'string') {
@@ -159,8 +168,12 @@ export class Annotator {
     target: Target,
   ): { input?: string; breach?: string } | undefined {
     if (role) {
-      const verdict = classifyRead(role, target, {
+      const verifying = this.verifies(role)
+      // A verifier reads the sealed store while another reviewer's blind pass keeps the job sealed.
+      const placed = verifying ? this.fromSealedStore(event.job, target) : target
+      const verdict = classifyRead(role, placed, {
         blindPassWritten: this.blindPasses.has(`${role}:${this.rounds + 1}`),
+        verifying,
       })
       return verdict.ok ? { input: verdict.input } : { breach: verdict.reason }
     }
@@ -169,6 +182,20 @@ export class Annotator {
       return { breach: `${event.agent.type} is not a factory agent and has no declared inputs` }
     }
     return undefined
+  }
+
+  /** Whether the review plan of the current pass has this reviewer verify instead of review. */
+  private verifies(role: AgentType): boolean {
+    const reviewer = reviewerRole(role)
+    return reviewer !== null && this.plans.get(this.rounds + 1)?.[reviewer] === 'verify'
+  }
+
+  /** A path in the job's sealed store, in the main checkout, as the job-folder path it mirrors. */
+  private fromSealedStore(job: number, target: Target): Target {
+    if (target.area !== 'outside') return target
+    const marker = `/${jobFolder(job)}/sealed/`
+    const at = target.path.indexOf(marker)
+    return at === -1 ? target : { area: 'job', path: target.path.slice(at + marker.length) }
   }
 
   /** The absolute path of a target, back from its area. */
