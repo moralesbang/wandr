@@ -18,6 +18,7 @@ Wandr is a portfolio project: a web map journal for walks, built to practice sen
 ## Docs
 
 - Commit and push docs-only changes straight to `main`, no branch, until the user says otherwise.
+- Each fact lives in one place. Reference that code or a command's usage (`--help`) already holds is linked, never copied; a doc keeps only what the code can't say, the reason behind a rule and its gotcha.
 - Each doc holds the current definition only. When a decision changes, rewrite the doc as if the previous version never existed, with no version labels or "what changed" sections; git keeps the history. Exception: `factory/versions/` holds one dated record per factory version, history by design. Every factory change (the CLI, the `factory watch` page and its events, the skill, the agents, the hooks) goes in the record of the version it ships in, in the same PR.
 - Read before acting:
   - [`docs/01-product-brief.md`](docs/01-product-brief.md) before proposing product changes.
