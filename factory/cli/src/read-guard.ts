@@ -10,6 +10,10 @@
 //   job's folder, a second layer should a sealed file be written back there;
 // - while the job is sealed: an orchestrator's prompt that names or quotes sealed material.
 //
+// A reviewer planned to verify in the sealed pass (review-plan.ts) has no blind pass: it reads the
+// previous merged findings and its own earlier final reports, in the sealed store or by their names,
+// and the orchestrator may name them to it. The rest of the sealed material stays closed to it.
+//
 // A nested run (an agent's Explore) has its own agent type, so these rules hold for any subagent,
 // not only the four factory agents. The orchestrator (no agent) reads anything.
 
@@ -20,7 +24,15 @@ import { commandPaths, type NamedPath } from './bash-words.ts'
 import { jobsDir } from './job.ts'
 import { isWithin } from './paths.ts'
 import { allow, deny, type GuardContext, type Policy, type Verdict } from './policy.ts'
-import { blindPassFile, isSealedName, loadSeal, sealedStore, type Seal } from './seal.ts'
+import { plannedTask, reviewerRole, verifierMayRead } from './review-plan.ts'
+import {
+  blindPassFile,
+  isSealedName,
+  loadSeal,
+  sealedStore,
+  type ReviewerRole,
+  type Seal,
+} from './seal.ts'
 
 const str = (value: unknown) => (typeof value === 'string' ? value : undefined)
 
@@ -101,9 +113,15 @@ function sealedCandidates(sealed: Seal): string[] {
 function blindSeal(context: GuardContext): Seal | null {
   const sealed = loadSeal(context.root, context.job.number)
   if (!sealed || !context.agent) return null
-  const role = /^factory-(evaluator|test-reviewer)$/.exec(context.agent.type)?.[1]
+  const role = reviewerRole(context.agent.type)
   // Any other run (an Explore, the build agent) has no blind pass of its own to unlock it.
   return role && existsSync(blindPassFile(context.job, sealed.pass, role)) ? null : sealed
+}
+
+/** The verifier's role when the caller is a reviewer planned to verify in the sealed pass. */
+const verifierIn = (job: GuardContext['job'], sealed: Seal, agentType: string | undefined) => {
+  const role = agentType ? reviewerRole(agentType) : null
+  return role && plannedTask(job, sealed.pass, role) === 'verify' ? role : null
 }
 
 /** A sealed file's name without its pass number: `findings.md`, `evaluator.md`. */
@@ -142,15 +160,23 @@ export function readVerdict(path: string, context: GuardContext, listing = false
   if (!isGlob(path) && ['/tmp', '/private/tmp'].includes(path)) return transcriptsDenied
   const start = isGlob(path) ? literalPrefix(path) : path
   const { root, job } = context
-  if (reaches(start, root) && !isWithin(start, job.worktree)) return mainDenied(context, start)
   const sealed = blindSeal(context)
+  const verifier = sealed && verifierIn(job, sealed, context.agent.type)
+  const store = sealedStore(root, job.number)
+  if (verifier && !isGlob(path) && isWithin(path, store)) {
+    if (verifierMayRead(verifier, relative(store, path))) return allow
+  }
+  if (reaches(start, root) && !isWithin(start, job.worktree)) return mainDenied(context, start)
   const name = sealed && namesSealed(path, sealed, context.places.handoffDir, listing)
   if (sealed && name) {
-    const role = /^factory-(evaluator|test-reviewer)$/.exec(context.agent.type)?.[1]
+    if (verifier && verifierMayRead(verifier, name)) return allow
+    const role = reviewerRole(context.agent.type)
     return deny(
-      role
-        ? `${name} is sealed until your blind first pass is written. Write ${context.places.handoffDir}/reviews/${sealed.pass}.${role}.blind.md from the issue, the diff, the checks and gate.json alone; the orchestrator sends you the build notes after it.`
-        : `${name} is sealed while the reviewers write their blind first passes, and no run reads it until \`factory unseal\`. Work from the issue, the diff, the checks and gate.json.`,
+      verifier
+        ? `${name} stays sealed while another reviewer writes its blind pass. A verify pass reads the previous merged findings and your own earlier final report (in ${store}/reviews/) and the diff since the last reviewed HEAD, nothing else.`
+        : role
+          ? `${name} is sealed until your blind first pass is written. Write ${context.places.handoffDir}/reviews/${sealed.pass}.${role}.blind.md from the issue, the diff, the checks and gate.json alone; the orchestrator sends you the build notes after it.`
+          : `${name} is sealed while the reviewers write their blind first passes, and no run reads it until \`factory unseal\`. Work from the issue, the diff, the checks and gate.json.`,
     )
   }
   return allow
@@ -210,14 +236,24 @@ export const readPolicy: Policy = (context) => {
 
 /** Names of sealed material as a prompt would write them. */
 const SEALED_WORDS =
-  /build-notes|decision-requests|diagnosis\.md|summary\.md|findings\.md|reviews\/\d+\.(?:evaluator|test-reviewer)\.md|\/sealed\//i
+  /build-notes|decision-requests|diagnosis\.md|summary\.md|findings\.md|reviews\/\d+\.(?:evaluator|test-reviewer)\.md|\/sealed\//gi
 
-/** Lines long enough that finding one in a prompt means it was pasted, not written anew. */
-function sealedLines(dir: string): string[] {
+/** What a verifier may be told: where its inputs are, and their names. */
+const verifierMayHear = (role: string, word: string) =>
+  /^(?:findings\.md|\/sealed\/)$/i.test(word) ||
+  new RegExp(`^reviews/\\d+\\.${role}\\.md$`, 'i').test(word)
+
+/**
+ * Lines long enough that finding one in a prompt means it was pasted, not written anew; `skip`
+ * leaves out the files, by their path relative to the store, the prompt's reader may read.
+ */
+function sealedLines(dir: string, skip: (rel: string) => boolean, prefix = ''): string[] {
   if (!existsSync(dir)) return []
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name)
-    if (statSync(path).isDirectory()) return sealedLines(path)
+    const rel = prefix ? `${prefix}/${name}` : name
+    if (statSync(path).isDirectory()) return sealedLines(path, skip, rel)
+    if (skip(rel)) return []
     return readFileSync(path, 'utf8')
       .split('\n')
       .map((line) => line.trim())
@@ -225,11 +261,22 @@ function sealedLines(dir: string): string[] {
   })
 }
 
-/** What sealed material a prompt names or quotes, or null when it holds none. */
-function sealedInPrompt(text: string, root: string, number: number): string | null {
-  const named = SEALED_WORDS.exec(text)?.[0]
+/**
+ * What sealed material a prompt names or quotes, or null when it holds none. A prompt to a
+ * verifier may name and quote the verifier's own inputs.
+ */
+function sealedInPrompt(
+  text: string,
+  root: string,
+  number: number,
+  verifier: ReviewerRole | null,
+): string | null {
+  const named = [...text.matchAll(SEALED_WORDS)]
+    .map((match) => match[0])
+    .find((word) => !verifier || !verifierMayHear(verifier, word))
   if (named) return `names ${named}`
-  const quoted = sealedLines(sealedStore(root, number)).find((line) => text.includes(line))
+  const skip = (rel: string) => verifier !== null && verifierMayRead(verifier, rel)
+  const quoted = sealedLines(sealedStore(root, number), skip).find((line) => text.includes(line))
   return quoted ? `quotes "${quoted.slice(0, 60)}…"` : null
 }
 
@@ -241,7 +288,9 @@ const promptPolicy =
     const sealed = loadSeal(context.root, context.job.number)
     if (!sealed) return allow
     const text = fields.map((field) => str(context.input.tool_input?.[field]) ?? '').join('\n')
-    const found = sealedInPrompt(text, context.root, context.job.number)
+    const recipient = str(context.input.tool_input?.subagent_type)
+    const verifier = verifierIn(context.job, sealed, recipient)
+    const found = sealedInPrompt(text, context.root, context.job.number, verifier)
     if (!found) return allow
     const n = context.job.number
     return deny(

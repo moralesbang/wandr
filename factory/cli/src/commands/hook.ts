@@ -11,12 +11,13 @@ import {
   type FactoryEvent,
   type Places,
 } from '../events.ts'
-import { findJobBySession, handoffDir, jobsDir, stateDir, type Job } from '../job.ts'
+import { findJobBySession, handoffDir, jobsDir, reviewPass, stateDir, type Job } from '../job.ts'
 import { isWithin } from '../paths.ts'
 import { changedBetween, workingTree } from '../shell.ts'
 import { bashPolicy } from '../bash-policy.ts'
 import { allow, deny, type Policy } from '../policy.ts'
 import { agentPolicy, messagePolicy, readPolicy } from '../read-guard.ts'
+import { plannedTask, reviewerRole } from '../review-plan.ts'
 import { isSealedName, loadSeal } from '../seal.ts'
 import { classifyWrite } from '../visibility.ts'
 
@@ -83,7 +84,9 @@ export async function hookLog(root: string, stdin: string): Promise<void> {
 /**
  * Edit and Write by an agent stay inside its write column. Nobody, the orchestrator included, writes
  * the job's state in the main checkout (only the CLI and the hooks do) or, while the job is sealed,
- * a sealed name in the job's folder: `factory unseal` would refuse to overwrite it.
+ * a sealed name in the job's folder: `factory unseal` would refuse to overwrite it. Two exceptions
+ * follow the pass's review plan: a reviewer planned to verify writes its own final report while
+ * another's blind pass keeps the job sealed, and a reviewer whose approval carries writes no report.
  */
 const writePolicy: Policy = ({ root, job, input, places, agent }) => {
   const path = input.tool_input?.file_path ?? input.tool_input?.notebook_path
@@ -96,9 +99,27 @@ const writePolicy: Policy = ({ root, job, input, places, agent }) => {
   }
   const sealed = loadSeal(root, job.number)
   const rel = relative(places.handoffDir, absolute)
-  if (sealed && isWithin(absolute, places.handoffDir) && isSealedName(rel)) {
+  const inHandoff = isWithin(absolute, places.handoffDir)
+  const role = agent ? reviewerRole(agent.type) : null
+  const verifiersReport =
+    sealed &&
+    role &&
+    plannedTask(job, sealed.pass, role) === 'verify' &&
+    rel === `reviews/${sealed.pass}.${role}.md`
+  if (sealed && inHandoff && isSealedName(rel) && !verifiersReport) {
     return deny(
       `Job #${job.number} is sealed for review pass ${sealed.pass}: ${rel} is sealed material, and \`bun run factory unseal ${job.number}\` would refuse to overwrite it. Write it after the unseal.`,
+    )
+  }
+  const pass = reviewPass(job)
+  if (
+    role &&
+    inHandoff &&
+    plannedTask(job, pass, role) === 'carry' &&
+    new RegExp(`^reviews/${pass}\\.${role}(?:\\.blind)?\\.md$`).test(rel)
+  ) {
+    return deny(
+      `In review pass ${pass} the ${role}'s approval from the previous pass carries: only tests changed since. It writes no report for this pass.`,
     )
   }
   if (!agent) return allow

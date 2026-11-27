@@ -15,6 +15,7 @@ export const AGENTS = [
   'factory-build',
   'factory-evaluator',
   'factory-test-reviewer',
+  'factory-diagnose',
 ] as const
 export type AgentType = (typeof AGENTS)[number]
 
@@ -147,7 +148,19 @@ export const INPUTS: Record<AgentType, readonly Input[]> = {
     },
   ],
   'factory-evaluator': reviewer('evaluator'),
-  'factory-test-reviewer': reviewer('test-reviewer'),
+  'factory-test-reviewer': [
+    ...reviewer('test-reviewer'),
+    // A ruling on an acceptance-test fix: the uncommitted diff is in the repo.
+    { label: 'Its own rulings', paths: ['job:rulings/**'], from: 'start' },
+  ],
+  // Diagnoses a second failed build: sees what the evaluator sees after its blind pass, from the
+  // start, since it has no blind pass of its own.
+  'factory-diagnose': [
+    ISSUE,
+    INSTRUCTIONS,
+    { label: 'The repo at the branch', paths: ['repo:**'], from: 'start' },
+    { label: "The job's folder", paths: ['job:**'], from: 'start' },
+  ],
 }
 
 const matches = (glob: string, target: Target) => {
@@ -223,14 +236,20 @@ export function classifyWrite(agent: string, target: Target): WriteVerdict {
           )
         : { ok: true }
     }
+    case 'factory-diagnose':
+      return target.area === 'job' && target.path === 'diagnosis.md'
+        ? { ok: true }
+        : deny('The diagnosis agent writes only diagnosis.md in the job folder.')
     case 'factory-evaluator':
     case 'factory-test-reviewer': {
       const role = agent.replace('factory-', '')
       const own = [`reviews/*.${role}*.md`, sandboxGlob(role)]
-      return target.area === 'job' && own.some((glob) => new Bun.Glob(glob).match(target.path))
+      const ruling = role === 'test-reviewer' && /^rulings\/\d+\.md$/.test(target.path)
+      return target.area === 'job' &&
+        (ruling || own.some((glob) => new Bun.Glob(glob).match(target.path)))
         ? { ok: true }
         : deny(
-            `A reviewer writes only its own reports, reviews/<pass>.${role}[.blind].md in the job folder, and anything in its own sandbox, sandbox/${role}/ (factory sandbox <n> ${role}). Report the problem as a finding instead.`,
+            `A reviewer writes only its own reports, reviews/<pass>.${role}[.blind].md in the job folder, ${role === 'test-reviewer' ? 'the ruling factory ruling names (rulings/<m>.md), ' : ''}and anything in its own sandbox, sandbox/${role}/ (factory sandbox <n> ${role}). Report the problem as a finding instead.`,
           )
     }
     default:

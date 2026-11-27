@@ -1,0 +1,31 @@
+{
+  "source": "Job #13 (PR #19): factory/.jobs/13/job.json, its events.jsonl (gate.passed, round, atfix) and git diff --name-only between the heads each review pass judged. Structure only.",
+  "base": "73000b5e02182a8fbd18f1b9c07ab1e88c91c6b3",
+  "declaredRisk": null,
+  "passes": [
+    {
+      "pass": 1,
+      "head": "0886c720be4fe4e8c150bed272eedc787615f2d5",
+      "changedSinceBase": [
+        "apps/web/e2e/icons.spec.ts",
+        "apps/web/index.html",
+        "apps/web/public/apple-touch-icon.png",
+        "apps/web/public/favicon-32.png",
+        "apps/web/public/favicon.svg",
+        "apps/web/public/icons/icon-192.png",
+        "apps/web/public/icons/icon-512-maskable.png",
+        "apps/web/public/icons/icon-512.png",
+        "apps/web/public/icons/mark-bleed.svg",
+        "apps/web/public/manifest.webmanifest",
+        "apps/web/scripts/build-icons.sh"
+      ],
+      "verdicts": { "evaluator": "approve", "test-reviewer": "changes" }
+    },
+    {
+      "pass": 2,
+      "head": "251335fe496b990c1032163b01c64d3ae869f3a9",
+      "changedSincePrevious": ["apps/web/e2e/icons.spec.ts"],
+      "ranAs": { "evaluator": "review", "test-reviewer": "review" }
+    }
+  ]
+}

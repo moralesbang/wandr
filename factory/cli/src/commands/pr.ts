@@ -2,7 +2,15 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { readEvents, type FactoryEvent } from '../events.ts'
 import type { RunUsage } from '../usage.ts'
-import { handoffDir, reviewPass, saveJob, stateDir, type Job } from '../job.ts'
+import {
+  handoffDir,
+  reviewPass,
+  saveJob,
+  stateDir,
+  type Job,
+  type ReviewerRole,
+  type ReviewPlan,
+} from '../job.ts'
 import { refuseWhileSealed } from '../seal.ts'
 import { gh, git } from '../shell.ts'
 import { LABELS, record, Refusal, requireJob } from './common.ts'
@@ -111,7 +119,38 @@ export function prComment(parts: {
   )
 }
 
-/** Opens the PR once the gate passed on HEAD and both final reports approve. */
+/**
+ * What each reviewer says for the pass, by its plan: the final report of a role that reviewed or
+ * verified, which must approve; the approval a role carries; or that the risk didn't need it.
+ * Refuses when a planned report is missing or doesn't approve.
+ */
+export function plannedReports(
+  job: Pick<Job, 'reviews'>,
+  plan: ReviewPlan,
+  readReport: (rel: string) => string | null,
+): Record<ReviewerRole, string> {
+  const say = (role: ReviewerRole): string => {
+    const task = plan.roles[role]
+    if (!task) {
+      return `_Not launched: the job is ${plan.risk} risk, and the test reviewer alone judges a low-risk job._`
+    }
+    if (task === 'carry') {
+      const judged = job.reviews.findLast(
+        (earlier) => earlier.pass < plan.pass && earlier.roles[role] !== 'carry',
+      )
+      return `_Its approval from review pass ${judged?.pass ?? '?'} carries: only tests changed since._`
+    }
+    const report = readReport(`reviews/${plan.pass}.${role}.md`)
+    if (!report) throw new Refusal(`No final report from the ${role} for review pass ${plan.pass}.`)
+    if (!approves(report)) {
+      throw new Refusal(`The ${role}'s final report for pass ${plan.pass} doesn't approve.`)
+    }
+    return report
+  }
+  return { evaluator: say('evaluator'), 'test-reviewer': say('test-reviewer') }
+}
+
+/** Opens the PR once the gate passed on HEAD and every reviewer the pass's plan names approves. */
 export async function pr(root: string, number: number): Promise<Job> {
   const job = requireJob(root, number)
   refuseWhileSealed(root, job, 'the PR')
@@ -124,15 +163,18 @@ export async function pr(root: string, number: number): Promise<Job> {
     throw new Refusal('The gate has not passed on HEAD. Run factory gate.')
   }
   const pass = reviewPass(job)
-  const reports = {
-    evaluator: read(join(dir, 'reviews', `${pass}.evaluator.md`)),
-    testReviewer: read(join(dir, 'reviews', `${pass}.test-reviewer.md`)),
+  const plan = job.reviews.find((planned) => planned.pass === pass)
+  if (!plan) {
+    throw new Refusal(
+      `Review pass ${pass} has no plan. Run: bun run factory review ${number}, then the reviewers it names.`,
+    )
   }
-  for (const [who, report] of Object.entries(reports)) {
-    if (!report) throw new Refusal(`No final report from the ${who} for review pass ${pass}.`)
-    if (!approves(report))
-      throw new Refusal(`The ${who}'s final report for pass ${pass} doesn't approve.`)
+  if (plan.head !== head) {
+    throw new Refusal(
+      `Review pass ${pass} reviewed ${plan.head.slice(0, 7)}, and HEAD is ${head.slice(0, 7)}: what changed since was never reviewed.`,
+    )
   }
+  const reports = plannedReports(job, plan, (rel) => read(join(dir, rel)))
   const summary = read(join(dir, 'summary.md'))
   const acceptance = read(join(dir, 'acceptance.md'))
   if (!summary) throw new Refusal(`Write the PR summary in ${dir}/summary.md first.`)
@@ -159,9 +201,8 @@ export async function pr(root: string, number: number): Promise<Job> {
     prComment({
       buildNotes: read(join(dir, 'build-notes.md')),
       pass,
-      // Both reports were checked above.
-      evaluator: reports.evaluator!,
-      testReviewer: reports.testReviewer!,
+      evaluator: reports.evaluator,
+      testReviewer: reports['test-reviewer'],
       usage: usageTable(readEvents(root, number)),
     }),
   )

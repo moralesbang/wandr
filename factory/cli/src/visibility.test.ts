@@ -187,3 +187,45 @@ describe('classifyRead: what a reviewer sees only after its blind pass', () => {
     expect(classifyRead(agent, job(path), before).ok).toBe(true)
   })
 })
+
+describe('the diagnosis agent', () => {
+  const before = { blindPassWritten: false }
+
+  test.each([
+    repo('apps/web/src/main.ts'),
+    job('build-notes.md'),
+    job('checks/1.log'),
+    job('reviews/1.findings.md'),
+    job('reviews/1.evaluator.md'),
+    job('decision-requests/1.md'),
+    job('issue.md'),
+  ])('reads %j from its start', (target) => {
+    expect(classifyRead('factory-diagnose', target, before).ok).toBe(true)
+  })
+
+  test('writes diagnosis.md', () => {
+    expect(classifyWrite('factory-diagnose', job('diagnosis.md'))).toEqual(allowed)
+  })
+
+  test.each([job('build-notes.md'), job('reviews/1.findings.md'), repo('apps/web/src/main.ts')])(
+    'writes nothing else: %j',
+    (target) => {
+      expect(classifyWrite('factory-diagnose', target).ok).toBe(false)
+    },
+  )
+})
+
+describe('rulings', () => {
+  test('the test reviewer writes a ruling', () => {
+    expect(classifyWrite('factory-test-reviewer', job('rulings/2.md'))).toEqual(allowed)
+  })
+
+  test.each([
+    ['factory-evaluator', 'rulings/2.md'],
+    ['factory-build', 'rulings/2.md'],
+    ['factory-test', 'rulings/2.md'],
+    ['factory-test-reviewer', 'rulings/notes.md'],
+  ])('%s may not write %s', (agent, path) => {
+    expect(classifyWrite(agent, job(path)).ok).toBe(false)
+  })
+})

@@ -20,10 +20,16 @@ import {
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { record, Refusal, requireJob } from './commands/common.ts'
-import { handoffDir, reviewPass, stateDir, type Job } from './job.ts'
+import {
+  handoffDir,
+  REVIEWER_ROLES,
+  reviewPass,
+  stateDir,
+  type Job,
+  type ReviewerRole,
+} from './job.ts'
 
-export const REVIEWER_ROLES = ['evaluator', 'test-reviewer'] as const
-export type ReviewerRole = (typeof REVIEWER_ROLES)[number]
+export { REVIEWER_ROLES, type ReviewerRole }
 
 export type Seal = {
   pass: number
