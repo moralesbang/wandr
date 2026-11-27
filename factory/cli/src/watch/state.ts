@@ -7,7 +7,7 @@ import type { RunUsage } from '../usage.ts'
 
 // ---- The flow: stations and edges, as in factory/README.md ---------------------------------------
 
-export type StationKind = 'user' | 'orch' | 'cli' | 'agent' | 'wait'
+type StationKind = 'user' | 'orch' | 'cli' | 'agent' | 'wait'
 
 export const STATIONS = {
   ready: { label: 'Issue ready', kind: 'user', x: 24, y: 34 },
@@ -57,7 +57,7 @@ export const EDGE_IDS = [
   'e19',
   'e20',
 ] as const
-export type EdgeId = (typeof EDGE_IDS)[number]
+type EdgeId = (typeof EDGE_IDS)[number]
 
 const ROLE_STATION: Record<string, StationId> = {
   'factory-test': 'test',
@@ -69,8 +69,8 @@ const ROLE_STATION: Record<string, StationId> = {
 const stationOfActor = (actor: string | undefined): StationId | undefined =>
   actor ? ROLE_STATION[actor] : undefined
 
-export type StationState = 'idle' | 'active' | 'done' | 'fail'
-export type Phase = 'building' | 'blocked' | 'pr_open'
+type StationState = 'idle' | 'active' | 'done' | 'fail'
+type Phase = 'building' | 'blocked' | 'pr_open'
 
 // ---- Where the orchestrator is -----------------------------------------------------------------
 
@@ -85,7 +85,7 @@ export type OrchestratorMode =
   /** Waiting on the user. */
   | 'wait'
 
-export type Reticle = { at: StationId[]; what: string; mode: OrchestratorMode }
+type Reticle = { at: StationId[]; what: string; mode: OrchestratorMode }
 
 /** Everything `orchestratorAt` needs; the reducer keeps it up to date. */
 export type OrchestratorInput = {
@@ -187,7 +187,7 @@ export function reticleBox(at: StationId[]) {
 
 // ---- A job's state ------------------------------------------------------------------------------
 
-export type RiskLevel = 'low' | 'normal' | 'high'
+type RiskLevel = 'low' | 'normal' | 'high'
 export type RoleTask = 'review' | 'verify' | 'carry'
 
 /** What the server adds to job.json for the page: files the job's events do not carry. */
@@ -202,7 +202,7 @@ export type JobExtras = {
   seal: { pass: number; roles: string[]; at: string } | null
 }
 
-export type PlanInfo = {
+type PlanInfo = {
   pass: number
   head?: string
   changed: string[] | number
@@ -230,10 +230,10 @@ export type JobInfo = {
 export const ORCHESTRATOR_PLAN = { model: 'sonnet', effort: 'medium' } as const
 
 /** A run's reads: the Read tool's, and the paths a Bash command, a Grep or a Glob read. */
-export type ReadEntry = Annotated & { via: string }
+type ReadEntry = Annotated & { via: string }
 
 /** What `factory launch` planned for one agent run. */
-export type PlannedRun = {
+type PlannedRun = {
   agent: string
   task: string
   model: string
@@ -271,7 +271,7 @@ export type Run = {
 }
 
 /** One seal: the review pass it covers, who must write a blind pass, and when it opened and shut. */
-export type SealRecord = {
+type SealRecord = {
   pass: number
   roles: string[]
   sealedAt: number
@@ -280,7 +280,7 @@ export type SealRecord = {
   blind: string[]
 }
 
-export type SandboxRecord = {
+type SandboxRecord = {
   role: string
   path: string
   port: unknown
@@ -290,15 +290,15 @@ export type SandboxRecord = {
 }
 
 /** The calls the guard denies; each is logged as an event of its own kind. */
-export const DENIAL_KINDS = new Set(['write.denied', 'read.denied', 'bash.denied', 'agent.denied'])
+const DENIAL_KINDS = new Set(['write.denied', 'read.denied', 'bash.denied', 'agent.denied'])
 
 /** What the job's runs cost together; `unpriced` models have tokens but no price. */
 export type Cost = { usd: number; unpriced: string[] }
 
-export type Segment = { mode: OrchestratorMode; from: number; to: number | null }
+type Segment = { mode: OrchestratorMode; from: number; to: number | null }
 export type Mark = { t: number; kind: string; fail: boolean; request?: number }
 
-export type JobView = {
+type JobView = {
   number: number
   info: JobInfo | null
   runs: Map<string, Run>
@@ -352,7 +352,7 @@ export type JobView = {
   rev: number
 }
 
-export const FEED_CAP = 300
+const FEED_CAP = 300
 
 export function createJobView(number: number): JobView {
   return {
@@ -410,12 +410,12 @@ export function createJobView(number: number): JobView {
 }
 
 /** What an event asks the page to animate, besides the state it changed. */
-export type Effects = { comet?: { from: StationId; to: StationId } }
+type Effects = { comet?: { from: StationId; to: StationId } }
 
 const FAIL_KINDS = new Set(['checks.failed', 'gate.rejected', 'red.rejected'])
 const AGENT_STATIONS = new Set<StationId>(['test', 'build', 'eval', 'tqr', 'diag'])
 
-export const runningStations = (view: JobView): StationId[] => {
+const runningStations = (view: JobView): StationId[] => {
   const found = new Set<StationId>()
   for (const run of view.runs.values()) {
     if (run.started && run.end === null && !run.parent && run.station) found.add(run.station)
@@ -843,7 +843,7 @@ export function applyEvent(view: JobView, ev: Annotated): Effects {
 
 // ---- What the page reads back ------------------------------------------------------------------
 
-export type EdgeState = 'idle' | 'trail' | 'on'
+type EdgeState = 'idle' | 'trail' | 'on'
 
 /** `window` is how long the latest move stays lit, in the same time as `now`. */
 export function edgeState(view: JobView, id: EdgeId, now: number, window: number): EdgeState {
@@ -902,7 +902,7 @@ export function decisionOf(view: JobView): Decision {
   }
 }
 
-export type RiskView = {
+type RiskView = {
   declared: RiskLevel | null
   effective: RiskLevel | null
   raised: boolean
@@ -924,7 +924,7 @@ export function riskOf(view: JobView): RiskView {
 export const reviewPlansOf = (view: JobView): PlanInfo[] =>
   view.reviewPlans.length ? view.reviewPlans : (view.info?.reviews ?? [])
 
-export type SealView = {
+type SealView = {
   /** The seal in force, with a tick per role whose blind pass is written. */
   sealed: SealRecord | null
   /** The seals already lifted, with the moment of each unseal. */
@@ -936,7 +936,7 @@ export function sealOf(view: JobView): SealView {
   return { sealed, lifted: view.seals.filter((item) => item.unsealedAt !== null) }
 }
 
-export type RulingRow = {
+type RulingRow = {
   ruling: number
   diff: string
   verdict: string | null
@@ -963,7 +963,7 @@ export function rulingsOf(view: JobView): RulingRow[] {
     })
 }
 
-export type SandboxStrip = {
+type SandboxStrip = {
   source: 'events' | 'folders' | 'none'
   rows: { role: string; detail: string }[]
 }
@@ -987,7 +987,7 @@ export function sandboxesOf(view: JobView): SandboxStrip {
     : { source: 'none', rows: [] }
 }
 
-export type ModelCheck = {
+type ModelCheck = {
   status: 'unplanned' | 'pending' | 'ok' | 'mismatch'
   planned: { model: string; effort: string } | null
   actual: { models: string[]; efforts: string[] } | null

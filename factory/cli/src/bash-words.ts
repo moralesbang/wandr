@@ -12,7 +12,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { canonical } from './paths.ts'
 
 /** The word a command substitution, `$(…)`, `…` or `<(…)`, leaves in the command around it. */
-export const SUBSTITUTION = '$SUBST'
+const SUBSTITUTION = '$SUBST'
 
 /** A heredoc's opening: `<<EOF`, `<<-'EOF'`; not a here-string, `<<<`. */
 const HEREDOC = /(?<!<)<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/
@@ -152,7 +152,7 @@ function lex(command: string): string[][] {
 }
 
 /** The command split into simple commands, each a list of words, with quoting and escapes undone. */
-export function simpleCommands(command: string): string[][] {
+function simpleCommands(command: string): string[][] {
   return lex(withoutHeredocs(command))
 }
 
@@ -397,7 +397,7 @@ function requote(word: string): string {
  * not a shell. A flag cluster with a `c` (`-lc`, `-ec`, `-e -c`, `--norc -c`) makes the next word
  * the code; `busybox sh` is `sh`.
  */
-export function shellForm(
+function shellForm(
   words: string[],
 ): { kind: 'code'; code: string[] } | { kind: 'stdin' } | { kind: 'script' } | null {
   const at = basename(words[0] ?? '') === 'busybox' ? 1 : 0
@@ -581,10 +581,6 @@ export function gitCommands(invocation: Invocation): GitCommand[] {
   }
   return found
 }
-
-/** The first `git` the invocation runs; see gitCommands. */
-export const gitCommand = (invocation: Invocation): GitCommand | null =>
-  gitCommands(invocation)[0] ?? null
 
 /** Programs git ships that send a branch to a remote, run by their own names. */
 const PUSH_PROGRAMS = /^git-(?:push|send-pack|receive-pack|http-push)$/
@@ -904,7 +900,7 @@ const AWKS = new Set(['awk', 'gawk', 'mawk', 'nawk'])
 const AWK_REDIRECT = /\b(?:print|printf)\b[^;}\n]*?>>?\s*(['"])([^'"]+)\1/g
 
 /** What an interpreter's command line holds: its inline code, its script and its operands. */
-export type InterpreterArgs = {
+type InterpreterArgs = {
   code: string[]
   /** The script file, when no code is given inline. */
   script: string | undefined
@@ -976,7 +972,7 @@ const CODE_FLAGS: Record<string, readonly string[]> = {
  * Reads an interpreter's command line: the inline code after `-e`/`-c`, the script file when there
  * is none, every operand after it, and perl's and ruby's in-place flag (`-i`, `-pi`, `-i.bak`).
  */
-export function interpreterArgs(family: string, words: string[]): InterpreterArgs {
+function interpreterArgs(family: string, words: string[]): InterpreterArgs {
   const found: InterpreterArgs = {
     code: [],
     script: undefined,
@@ -1112,7 +1108,7 @@ export function commandPaths(command: string, at: Where): NamedPath[] {
 }
 
 /** What `factory sandbox` does, on which job and role, and the command it runs. */
-export type SandboxCall = {
+type SandboxCall = {
   action: 'create' | 'exec' | 'rm'
   number: string | undefined
   role: string | undefined
@@ -1120,7 +1116,7 @@ export type SandboxCall = {
 }
 
 /** A factory CLI invocation, read as main.ts's own parser would. */
-export type FactoryCall = {
+type FactoryCall = {
   /** The command: the first positional. A `$`-word means the shell supplies it. */
   command: string | undefined
   positionals: string[]
@@ -1154,7 +1150,7 @@ const FACTORY_VALUES = new Set([
   '--ruling',
 ])
 /** Flags that make the runtime run code from the command line. */
-export const EVAL_FLAGS = new Set(['-e', '--eval', '-p', '--print'])
+const EVAL_FLAGS = new Set(['-e', '--eval', '-p', '--print'])
 
 /**
  * Whether the runtime's script is the factory CLI: the `factory` script, or main(.ts) in

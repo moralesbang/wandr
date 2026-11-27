@@ -5,7 +5,7 @@ import type { Job, Risk } from './job.ts'
 import { isPrivacyBoundary, isTamperProne } from './paths.ts'
 import { git, lines } from './shell.ts'
 
-export type EffectiveRisk = {
+type EffectiveRisk = {
   risk: Risk
   /** The changed paths that raised the declared risk; empty when it stands as declared. */
   raisedBy: string[]
@@ -22,7 +22,7 @@ export function effectiveRisk(declared: Risk, changedPaths: readonly string[]): 
 }
 
 /** The files the job's branch changed, base..HEAD of its worktree. */
-export const branchChanges = async (job: Pick<Job, 'worktree' | 'base'>) =>
+const branchChanges = async (job: Pick<Job, 'worktree' | 'base'>) =>
   lines(await git(job.worktree, 'diff', '--name-only', '--no-renames', job.base, 'HEAD'))
 
 /** The job's effective risk now, from its branch's diff. */

@@ -10,7 +10,7 @@ import { canonical } from './paths.ts'
 import { usageOf } from './usage.ts'
 import type { Area, Target } from './visibility.ts'
 
-export type AgentRef = { id: string; type: string }
+type AgentRef = { id: string; type: string }
 
 export type FactoryEvent = {
   t: string
@@ -99,12 +99,12 @@ const str = (value: unknown) => (typeof value === 'string' ? value : undefined)
 const num = (value: unknown) => (typeof value === 'number' ? value : undefined)
 
 /** Roughly 4 characters per token, over the lines a Read returns (2000 by default). */
-export function approximateTokens(content: string, offset = 1, limit = 2000): number {
+function approximateTokens(content: string, offset = 1, limit = 2000): number {
   const lines = content.split('\n').slice(Math.max(offset - 1, 0), Math.max(offset - 1, 0) + limit)
   return Math.ceil(lines.join('\n').length / 4)
 }
 
-export type HookContext = {
+type HookContext = {
   job: Job
   /** The job's handoff folder, in its worktree. */
   handoffDir: string

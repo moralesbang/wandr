@@ -20,10 +20,10 @@ import { z } from 'zod'
 import { JOBS_FOLDER, jobFolder } from './paths.ts'
 import { RoutingPlan } from './routing.ts'
 
-export const MAX_JOBS = 3
-export const MAX_BUILD_ATTEMPTS = 3
-export const MAX_ROUNDS = 3
-export const MAX_RED_REJECTIONS = 3
+const MAX_JOBS = 3
+const MAX_BUILD_ATTEMPTS = 3
+const MAX_ROUNDS = 3
+const MAX_RED_REJECTIONS = 3
 
 export const RISKS = ['low', 'normal', 'high'] as const
 export const Risk = z.enum(RISKS)
@@ -167,7 +167,7 @@ export const handoffDir = (job: Pick<Job, 'number' | 'worktree'>) =>
   join(job.worktree, jobFolder(job.number))
 
 /** The files and folders agents and the orchestrator hand each other, in the handoff folder. */
-export const HANDOFF_FILES = [
+const HANDOFF_FILES = [
   'issue.md',
   'research.md',
   'routing-proposal.json',
@@ -319,9 +319,9 @@ export function locateSession(
   return owner === undefined ? null : { unreadable: owner }
 }
 
-export type Allowed = { ok: true } | { ok: false; reason: string }
+type Allowed = { ok: true } | { ok: false; reason: string }
 
-export type Counted = { ok: true; job: Job } | { ok: false; reason: string }
+type Counted = { ok: true; job: Job } | { ok: false; reason: string }
 
 /** Starts a new build attempt, or refuses the one past the limit. */
 export function countAttempt(job: Job): Counted {

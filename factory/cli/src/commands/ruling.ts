@@ -21,7 +21,7 @@ export const RULING_USAGE = `  ruling <n>                 hash the uncommitted a
  * The sha256 of the uncommitted acceptance-test diff against HEAD, new files included; null when no
  * acceptance test changed. Built from a throwaway index, so the real one is untouched.
  */
-export async function acceptanceDiffHash(worktree: string): Promise<string | null> {
+async function acceptanceDiffHash(worktree: string): Promise<string | null> {
   const now = await workingTree(worktree)
   const changed = lines(await git(worktree, 'diff', '--name-only', '--no-renames', 'HEAD', now))
   const tests = changed.filter(isAcceptanceTest)
@@ -33,7 +33,7 @@ export async function acceptanceDiffHash(worktree: string): Promise<string | nul
 export const rulingFile = (job: Pick<Job, 'number' | 'worktree'>, m: number) =>
   join(handoffDir(job), 'rulings', `${m}.md`)
 
-export type Requested = { ruling: number; diff: string; file: string }
+type Requested = { ruling: number; diff: string; file: string }
 
 /** Asks for a ruling on the uncommitted acceptance-test fix: its number, its diff's hash, its file. */
 export async function ruling(root: string, number: number): Promise<Requested> {

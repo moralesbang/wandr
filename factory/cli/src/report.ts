@@ -4,7 +4,7 @@
 
 import { z } from 'zod'
 
-export const runnerSchema = z.enum(['bun', 'vitest', 'playwright'])
+const runnerSchema = z.enum(['bun', 'vitest', 'playwright'])
 export type Runner = z.infer<typeof runnerSchema>
 
 const failureSchema = z.object({
@@ -15,7 +15,7 @@ const failureSchema = z.object({
   message: z.string(),
 })
 
-export const reportSchema = z.object({
+const reportSchema = z.object({
   runner: runnerSchema,
   /** The files the runner loaded, or tried to; paths are relative to the runner's test root. */
   files: z.array(z.object({ path: z.string(), loadError: z.string().optional() })),
