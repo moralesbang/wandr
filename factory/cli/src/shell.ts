@@ -66,6 +66,17 @@ export async function uncommitted(cwd: string): Promise<string[]> {
   return lines(output).map((line) => line.slice(3))
 }
 
+/**
+ * The commit's patch id (`git patch-id --stable`): a hash of what the commit changes, equal after a
+ * rebase moved it onto another base. Empty when the commit changes nothing.
+ */
+export async function patchId(cwd: string, sha: string): Promise<string> {
+  const out = (
+    await $`git -C ${cwd} ${NO_HOOKS} show ${sha} | git patch-id --stable`.quiet().text()
+  ).trim()
+  return out.split(/\s+/)[0] ?? ''
+}
+
 export async function commitAll(cwd: string, message: string): Promise<string> {
   await git(cwd, 'add', '-A')
   await git(cwd, 'commit', '--quiet', '-m', message)

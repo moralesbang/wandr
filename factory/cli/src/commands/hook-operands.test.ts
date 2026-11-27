@@ -8,6 +8,8 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { BUILD, EVAL, EXPLORE, guardJob, SESSION, type GuardJob } from '../guard-fixture.ts'
 
+const exec = (command: string) => `bun run factory sandbox exec 7 evaluator -- ${command}`
+
 let j: GuardJob
 afterEach(() => j.cleanup())
 
@@ -40,11 +42,13 @@ describe('B3: interpreter operands are reads for a sealed reviewer', () => {
     expect(j.bash(EVAL, `perl -pe '' ${homedir()}/.claude/projects/x/y.jsonl`)).not.toBeNull()
   })
 
-  test('lets an interpreter read the repo and its own sandbox', () => {
-    expect(j.bash(EVAL, `perl -pe '' apps/web/src/main.ts`)).toBeNull()
-    expect(j.bash(EVAL, `python3 -c 'print(1)'`)).toBeNull()
-    expect(j.bash(EVAL, `bun run typecheck`)).toBeNull()
-    expect(j.bash(EVAL, `node -e 'console.log(1)'`)).toBeNull()
+  test('lets an interpreter read the repo and its own sandbox, through `sandbox exec`', () => {
+    expect(j.bash(EVAL, exec(`perl -pe '' apps/web/src/main.ts`))).toBeNull()
+    expect(j.bash(EVAL, exec(`python3 -c 'print(1)'`))).toBeNull()
+    expect(j.bash(EVAL, exec('bun run typecheck'))).toBeNull()
+    expect(j.bash(EVAL, exec(`node -e 'console.log(1)'`))).toBeNull()
+    // Outside it a reviewer runs no interpreter: G3's allowlist.
+    expect(j.bash(EVAL, `python3 -c 'print(1)'`)).toContain('sandbox exec')
   })
 })
 

@@ -85,12 +85,13 @@ export function locate(path: string, places: Places): Target {
   const real = canonical(path)
   const inside = (dir: string) => {
     const rel = relative(canonical(dir), real)
-    return rel && !rel.startsWith('..') && !rel.startsWith(sep) ? rel.split(sep).join('/') : null
+    // The folder itself is inside it, with an empty path: `git checkout -- .` writes the worktree.
+    return !rel.startsWith('..') && !rel.startsWith(sep) ? rel.split(sep).join('/') : null
   }
   const asJob = inside(places.handoffDir)
-  if (asJob) return { area: 'job', path: asJob }
+  if (asJob !== null) return { area: 'job', path: asJob }
   const asRepo = inside(places.worktree)
-  if (asRepo) return { area: 'repo', path: asRepo }
+  if (asRepo !== null) return { area: 'repo', path: asRepo }
   return { area: 'outside' as Area, path: real }
 }
 

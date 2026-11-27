@@ -29,7 +29,7 @@ import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 import { commandPaths, type NamedPath } from './bash-words.ts'
 import { readEvents } from './events.ts'
 import { jobsDir, REVIEWER_ROLES, reviewPass } from './job.ts'
-import { canonical, isWithin } from './paths.ts'
+import { canonical, isWithin, JOBS_FOLDER } from './paths.ts'
 import { COPIED_WORDS, sharedPhrase } from './phrases.ts'
 import {
   allow,
@@ -167,6 +167,20 @@ function pendingVerifier(context: GuardContext): ReviewerRole | null {
   return existsSync(join(context.places.handoffDir, 'reviews', `${pass}.${role}.md`)) ? null : role
 }
 
+/**
+ * Whether any reviewer planned to verify in the pass under way hasn't written its final report.
+ * Such a reviewer reads only its own inputs, and so does everyone else: the sealed names stay closed
+ * to a nested run under it, which can't be told apart from a stranger.
+ */
+function anyPendingVerifier(context: GuardContext): boolean {
+  const pass = reviewPass(context.job)
+  return REVIEWER_ROLES.some(
+    (role) =>
+      plannedTask(context.job, pass, role) === 'verify' &&
+      !existsSync(join(context.places.handoffDir, 'reviews', `${pass}.${role}.md`)),
+  )
+}
+
 /** The other reviewer's sandbox, which a reviewer neither reads nor writes. */
 const otherSandbox = (context: GuardContext): string | null => {
   const role = context.agent ? reviewerRole(context.agent.type) : null
@@ -205,7 +219,63 @@ function namesSealed(path: string, sealed: Seal, handoff: string, listing: boole
   )
 }
 
+/**
+ * Whether a glob can match a place, or something under it: its literal folder is the place or above
+ * it, and each segment after that fits the place's own segment, or the pattern runs on past it.
+ */
+function globReaches(glob: string, place: string): boolean {
+  const prefix = literalPrefix(glob)
+  if (!isWithin(place, prefix)) return false
+  const rest = relative(prefix, place).split('/').filter(Boolean)
+  const segments = glob.slice(prefix.length).split('/').filter(Boolean)
+  for (const [index, segment] of segments.entries()) {
+    // A brace may hold a slash; it is read as reaching.
+    if (segment.includes('**') || /[{}]/.test(segment) || index >= rest.length) return true
+    if (!new Bun.Glob(segment).match(rest[index]!)) return false
+  }
+  return segments.length >= rest.length
+}
+
+/**
+ * The verdict on a path, or a glob, that reaches a place the caller must not read: a walk from
+ * above it, a glob over it. The place itself and what is under it are judged by name elsewhere.
+ * `rg`, `grep` and the Grep and Glob tools skip what .gitignore lists, the job's folder among it,
+ * so a root above `factory/.jobs/` stays allowed for them; a root inside it is searched even when
+ * ignored.
+ */
+function reachesPlace(
+  path: string,
+  start: string,
+  how: Reading,
+  place: string,
+  context: GuardContext,
+): boolean {
+  const walk = isGlob(path) ? globReaches(path, place) : how.search && isWithin(place, start)
+  if (!walk) return false
+  const explicit = isWithin(start, join(context.job.worktree, JOBS_FOLDER))
+  const skipped = how.ignoring && (how.tool || !isGlob(path)) && !explicit
+  return !skipped
+}
+
+/** The other reviewer's blind passes this caller may not read yet. */
+function closedBlindPasses(context: GuardContext): string[] {
+  const dir = join(context.places.handoffDir, 'reviews')
+  if (!context.agent || !existsSync(dir)) return []
+  const role = reviewerRole(context.agent.type)
+  const sealed = loadSeal(context.root, context.job.number) !== null
+  return readdirSync(dir).flatMap((name) => {
+    const match = /^(\d+)\.(evaluator|test-reviewer)\.blind\.md$/.exec(name)
+    if (!match || match[2] === role) return []
+    // A reviewer reads the other's blind pass of a pass once its own for that pass is written; any
+    // other run, while the job is sealed.
+    const open = role ? existsSync(blindPassFile(context.job, Number(match[1]), role)) : !sealed
+    return open ? [] : [join(dir, name)]
+  })
+}
+
 export type Reading = {
+  /** The call is the Grep or the Glob tool: its patterns skip what .gitignore lists too. */
+  tool?: boolean
   /** The program shows names, not content (ls, stat). */
   listing?: boolean
   /** The path is the root of a recursive walk, or where a symlink leads. */
@@ -220,6 +290,11 @@ export function readVerdict(raw: string, context: GuardContext, how: Reading = {
   const { listing = false, search = false, ignoring = false } = how
   const path = judged(raw)
   if (isToolResult(path)) return allow
+  if (path === '/proc' || path.startsWith('/proc/')) {
+    return deny(
+      "/proc shows every process's command line and environment, the other reviewer's included: no agent of a factory job reads it.",
+    )
+  }
   const start = isGlob(path) ? literalPrefix(path) : path
   if (search && searchRoots().has(start)) return searchDenied(start)
   if (
@@ -248,7 +323,10 @@ export function readVerdict(raw: string, context: GuardContext, how: Reading = {
   }
   const pending = pendingVerifier(context)
   const sealed =
-    blindSeal(context) ?? (pending ? { pass: reviewPass(job), roles: [], files: [], at: '' } : null)
+    blindSeal(context) ??
+    (pending || anyPendingVerifier(context)
+      ? { pass: reviewPass(job), roles: [], files: [], at: '' }
+      : null)
   const verifier = sealed && (pending ?? verifierIn(job, sealed, context.agent.type))
   const store = sealedStore(root, job.number)
   if (verifier && !isGlob(path) && isWithin(path, store)) {
@@ -267,8 +345,45 @@ export function readVerdict(raw: string, context: GuardContext, how: Reading = {
           : `${name} is sealed while the reviewers write their blind first passes, and no run reads it until \`factory unseal\`. Work from the issue, the diff, the checks and gate.json.`,
     )
   }
-  if (sealed && search) return searchVerdict(start, context, ignoring)
+  if (sealed && search) {
+    const searched = searchVerdict(start, context, ignoring)
+    if (!searched.ok) return searched
+  }
+  const walked = sandboxWalkVerdict(path, start, how, context)
+  if (walked) return walked
+  const closed = listing
+    ? undefined
+    : closedBlindPasses(context).find((file) =>
+        isGlob(path)
+          ? globReaches(path, file)
+          : file === path || reachesPlace(path, start, how, file, context),
+      )
+  if (closed) {
+    return deny(
+      `${relative(context.places.handoffDir, closed)} is the other reviewer's blind first pass: it stays closed until your own blind pass for that pass is written, so the two stay independent. Write yours from the issue, the diff, the checks and gate.json alone.`,
+    )
+  }
   return allow
+}
+
+/**
+ * A reviewer's walk, or glob, that reaches the other reviewer's sandbox, and any other run's that
+ * reaches the sandboxes folder: each sandbox is its reviewer's evidence. Null when it reaches none.
+ */
+function sandboxWalkVerdict(
+  path: string,
+  start: string,
+  how: Reading,
+  context: GuardContext,
+): Verdict | null {
+  const role = context.agent ? reviewerRole(context.agent.type) : null
+  const sandboxes = join(context.places.handoffDir, 'sandbox')
+  // A worker's walk from above the sandboxes only matters once a reviewer made one.
+  const place = role ? otherSandbox(context) : existsSync(sandboxes) ? sandboxes : null
+  if (!place || !reachesPlace(path, start, how, place, context)) return null
+  return deny(
+    `${start} reaches ${role ? "the other reviewer's sandbox" : "the reviewers' sandboxes"}, its evidence: a walk (find, ls -R, tar, du, rg or grep rooted in factory/.jobs/, a glob over sandbox/*) is not yours to make from there. Search the code, scoped to apps/ or packages/ (rg and grep from the worktree root skip factory/.jobs/)${role ? `, or your own sandbox, ${join(context.places.handoffDir, 'sandbox', role)}` : ''}.`,
+  )
 }
 
 /**
@@ -338,7 +453,7 @@ export const readPolicy: Policy = (context) => {
         : []
       return first(
         [base, ...filtered].map((path, index) =>
-          readVerdict(path, context, { search: index === 0, ignoring: true }),
+          readVerdict(path, context, { search: index === 0, ignoring: true, tool: true }),
         ),
       )
     }
@@ -347,7 +462,7 @@ export const readPolicy: Policy = (context) => {
       const pattern = str(input.pattern) ?? ''
       return first(
         [base, isAbsolute(pattern) ? pattern : join(base, pattern)].map((path) =>
-          readVerdict(path, context, { listing: true, search: true, ignoring: true }),
+          readVerdict(path, context, { listing: true, search: true, ignoring: true, tool: true }),
         ),
       )
     }

@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { handoffDir, saveJob, type Job } from '../job.ts'
 import { protectedFromBuild } from '../paths.ts'
-import { git, lines, uncommitted } from '../shell.ts'
+import { git, lines, patchId, uncommitted } from '../shell.ts'
 import { testChanges, type TestChanges } from '../test-changes.ts'
 import { record, refuseWhileBlocked, requireJob } from './common.ts'
 
@@ -45,6 +45,56 @@ async function forgetReflogs(cwd: string, branch: string): Promise<void> {
   }
 }
 
+/** Every commit the CLI made for the job, the red commit included. */
+const expectedCommits = (job: Job) =>
+  new Set([...job.cliCommits, ...(job.redCommit ? [job.redCommit] : [])])
+
+/**
+ * The patch id of each CLI commit: the one recorded when the CLI made it, else read from the commit
+ * object, which a rebase leaves in the repository.
+ */
+async function cliPatchIds(cwd: string, job: Job): Promise<Map<string, string>> {
+  const ids = new Map<string, string>()
+  for (const sha of expectedCommits(job)) {
+    const id = job.cliPatches[sha] ?? (await patchId(cwd, sha).catch(() => ''))
+    if (id) ids.set(sha, id)
+  }
+  return ids
+}
+
+/** What a CLI commit of the job was, for the message that says it is gone. */
+function cliCommitKind(job: Job, sha: string): string {
+  if (job.atfixes.some((fix) => fix.sha === sha)) return 'an acceptance-test fix'
+  if (job.rewrites.some((rewrite) => rewrite.commit === sha)) return 'an authorized rewrite'
+  return 'the red commit'
+}
+
+/**
+ * Every commit the CLI made, the red commit included, must still be in the branch: an ancestor of
+ * HEAD, or present as a commit with the same patch. The gate doesn't judge them, so a branch that
+ * lost one (a `git reset --hard <base>` by an agent) would pass with its acceptance tests gone.
+ */
+async function lostCliCommits(
+  cwd: string,
+  job: Job,
+  cliPatches: Map<string, string>,
+  patches: Set<string>,
+): Promise<string[]> {
+  const lost: string[] = []
+  for (const sha of expectedCommits(job)) {
+    const ancestor = await git(cwd, 'merge-base', '--is-ancestor', sha, 'HEAD').then(
+      () => true,
+      () => false,
+    )
+    const id = cliPatches.get(sha)
+    if (ancestor || (id && patches.has(id))) continue
+    lost.push(
+      `Branch history: the CLI's commit ${sha.slice(0, 7)} (${cliCommitKind(job, sha)}) is no longer in the branch: something reset or rewrote the branch past it, and its changes are gone or were rebuilt by an agent. Restore it with \`git cherry-pick ${sha}\`; never reset to an earlier commit.`,
+    )
+  }
+  return lost
+}
+
 /**
  * The independent gate before review: the last checks were green on exactly HEAD, nothing is left
  * uncommitted, and no commit the CLI didn't make is a merge, touches a protected path or has a message body. Commits already on main
@@ -78,9 +128,18 @@ export async function gate(
     problems.push('The last green checks ran on other code than HEAD. Run factory check again.')
   }
 
-  const agentCommits = lines(await git(cwd, 'rev-list', 'HEAD', `^${job.base}`, `^${main}`)).filter(
-    (sha) => !job.cliCommits.includes(sha),
-  )
+  const inRange = lines(await git(cwd, 'rev-list', 'HEAD', `^${job.base}`, `^${main}`))
+  // A rebase onto main gives the CLI's commits new shas and leaves their patches: a commit of the
+  // range whose patch id the CLI recorded is the CLI's own, and nothing else is.
+  const rangePatches = new Map<string, string>()
+  for (const sha of inRange) rangePatches.set(sha, await patchId(cwd, sha))
+  const cliPatches = await cliPatchIds(cwd, job)
+  const cliPatchSet = new Set(cliPatches.values())
+  const agentCommits = inRange.filter((sha) => {
+    const id = rangePatches.get(sha)
+    return !job.cliCommits.includes(sha) && !(id && cliPatchSet.has(id))
+  })
+  problems.push(...(await lostCliCommits(cwd, job, cliPatches, new Set(rangePatches.values()))))
   for (const sha of agentCommits) {
     const parents = lines(await git(cwd, 'rev-list', '--parents', '-n', '1', sha)).flatMap((line) =>
       line.split(' ').slice(1),

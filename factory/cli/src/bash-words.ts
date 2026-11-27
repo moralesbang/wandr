@@ -6,7 +6,7 @@
 // hurried agent types, and the seal keeps the files themselves out of reach. What it can't read,
 // it says: a command substitution leaves the word SUBSTITUTION, and a variable stays `$NAME`.
 
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { tmpdir, userInfo } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { canonical } from './paths.ts'
@@ -30,7 +30,12 @@ function withoutHeredocs(command: string): string {
     }
     kept.push(line)
     const heredoc = HEREDOC.exec(line)
-    if (heredoc && !RUNS_HEREDOC.test(line)) delimiter = heredoc[2] ?? null
+    // `factory sandbox exec … -- psql <<EOF`: the program that reads the body is the one after `--`.
+    const reader =
+      /\bsandbox\s+exec\b/.test(line) && line.includes(' -- ')
+        ? line.slice(line.indexOf(' -- '))
+        : line
+    if (heredoc && !RUNS_HEREDOC.test(reader)) delimiter = heredoc[2] ?? null
   }
   return kept.join('\n')
 }
@@ -163,6 +168,10 @@ export type NamedPath = {
   search?: boolean
   /** The walk honors .gitignore (rg, and grep in Claude Code's shell), so it skips ignored folders. */
   ignoring?: boolean
+  /** The write reaches everything below the path when it is a folder: rm, mv, a copy into it, tar x. */
+  tree?: boolean
+  /** The write is narrowed by a filter (`find -name`), so a folder above a protected one isn't it. */
+  filtered?: boolean
 }
 
 type Reader = {
@@ -232,7 +241,18 @@ const WRITERS: Record<string, Record<string, number>> = {
   mkdir: { '-m': 1 },
   truncate: { '-s': 1, '-r': 1 },
   mv: { '-t': 1, '-S': 1 },
+  // Editors run from a script: `ed -s file <<< w`, `ex -sc 'w' -c q file`, `vi -es file`.
+  ed: { '-p': 1 },
+  ex: { '-c': 1, '-sc': 1, '-S': 1, '-u': 1, '-T': 1, '--cmd': 1 },
+  vi: { '-c': 1, '-S': 1, '-u': 1, '-T': 1, '--cmd': 1 },
+  vim: { '-c': 1, '-S': 1, '-u': 1, '-T': 1, '--cmd': 1 },
+  nvim: { '-c': 1, '-S': 1, '-u': 1, '-T': 1, '--cmd': 1 },
+  patch: { '-i': 1, '--input': 1, '-d': 1, '--directory': 1, '-p': 1, '-r': 1, '-F': 1, '-V': 1 },
 }
+/** Writers whose operands are folders to remove or move as a whole. */
+const TREE_WRITERS = new Set(['rm', 'rmdir', 'mv', 'shred'])
+/** Editors: `+cmd` is a command, not a file. */
+const EDITORS = new Set(['ed', 'ex', 'vi', 'vim', 'nvim'])
 
 /** Programs that walk a tree from each path they are given. */
 const SEARCHERS = new Set(['find', 'fd', 'rg', 'ag', 'ack', 'du', 'tree', 'tar', 'zip', 'rsync'])
@@ -252,7 +272,10 @@ const IGNORING = new Set(['rg', 'grep', 'egrep', 'fgrep', 'ugrep'])
 const NO_IGNORE = /^(?:--no-ignore.*|-u+|--unrestricted|--hidden)$/
 
 /** Value flags of the other programs this reads: `ln -t <dir>`. */
-const OTHER_VALUES: Record<string, Record<string, number>> = { ln: { '-t': 1, '-S': 1 } }
+const OTHER_VALUES: Record<string, Record<string, number>> = {
+  ln: { '-t': 1, '-S': 1 },
+  rsync: { '-e': 1, '--rsh': 1, '--exclude': 1, '--include': 1, '--filter': 1, '-f': 1 },
+}
 
 /** Programs whose `-t <dir>` names the folder they write into. */
 const INTO_TARGET = new Set(['cp', 'mv', 'install', 'ln'])
@@ -284,7 +307,10 @@ const PREFIXES = new Set([
   '!',
   '{',
 ])
-const SHELLS = new Set(['bash', 'sh', 'zsh'])
+/** Shells, which run the code they are given: inline, from a file or from stdin. */
+const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'mksh', 'fish', 'ash', 'csh', 'tcsh'])
+/** Shell flags that take a value: `bash -o pipefail`, `bash --rcfile x`. */
+const SHELL_VALUE_FLAGS = new Set(['--rcfile', '--init-file', '-o', '+o', '-O', '+O'])
 /** Programs that change the folder the next commands run in. */
 const CD = new Set(['cd', 'pushd'])
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
@@ -312,6 +338,12 @@ export type Invocation = {
   cwd: string
   /** Run by `factory sandbox exec`: in the reviewer's sandbox, with its port, database and bucket. */
   sandboxed?: boolean
+  /**
+   * The program is a shell (or `eval`): `code` runs the inline code it was given, which the guard
+   * reads as a command of its own; `stdin` is a shell fed its code on stdin (a pipe, a heredoc, a
+   * here-string, `-s`), which the guard can't read; `script` runs a file.
+   */
+  shell?: 'code' | 'stdin' | 'script'
   /** For `cd` and `pushd`: the folder it moves to; absent when that can't be known (`cd -`). */
   cd?: string
 }
@@ -351,6 +383,67 @@ function cdTarget(args: string[], home: string, cwd: string): string | null {
 }
 
 /**
+ * A word written back as the shell would read it as one word, so a command rebuilt from words
+ * (`sandbox exec … -- perl -pe '' file`) lexes into the words it had: an empty or spaced word keeps
+ * its quotes, and a redirection operator stays one.
+ */
+function requote(word: string): string {
+  if (REDIRECT.test(word) || /^[A-Za-z0-9_@%+=:,./~$-]+$/.test(word)) return word
+  return `'${word.replaceAll("'", "'\\''")}'`
+}
+
+/**
+ * How a shell invocation gets its code, and the words of the inline code. Null when the program is
+ * not a shell. A flag cluster with a `c` (`-lc`, `-ec`, `-e -c`, `--norc -c`) makes the next word
+ * the code; `busybox sh` is `sh`.
+ */
+export function shellForm(
+  words: string[],
+): { kind: 'code'; code: string[] } | { kind: 'stdin' } | { kind: 'script' } | null {
+  const at = basename(words[0] ?? '') === 'busybox' ? 1 : 0
+  if (!SHELLS.has(basename(words[at] ?? ''))) return null
+  let fromStdin = false
+  let fed = false
+  let file = false
+  let script: string | undefined
+  for (let j = at + 1; j < words.length; j++) {
+    const word = words[j]!
+    const redirect = REDIRECT.exec(word)
+    if (redirect) {
+      if (!redirect[2]) j++
+      if (redirect[1] === '<') file = true
+      else if (redirect[1]?.startsWith('<<')) fed = true
+      continue
+    }
+    if (word === '--') {
+      script = words[j + 1]
+      break
+    }
+    if (word === '-') {
+      fromStdin = true
+      continue
+    }
+    if (!/^[-+]/.test(word)) {
+      script = word
+      break
+    }
+    if (word.startsWith('--')) {
+      if (SHELL_VALUE_FLAGS.has(word)) j++
+      continue
+    }
+    const letters = word.slice(1)
+    const values = [...letters].filter((letter) => 'oO'.includes(letter)).length
+    if (word.startsWith('-') && letters.includes('c')) {
+      return { kind: 'code', code: words.slice(j + 1 + values) }
+    }
+    if (word.startsWith('-') && letters.includes('s')) fromStdin = true
+    j += values
+  }
+  if (fed || fromStdin) return { kind: 'stdin' }
+  return script !== undefined || file ? { kind: 'script' } : { kind: 'stdin' }
+}
+
+/**
  * Every program a command runs, in order, each with the folder it runs in. `sh -c` and
  * `factory sandbox exec … -- <cmd>` run another command: theirs are read too, the sandbox's from
  * its own folder.
@@ -362,6 +455,8 @@ export function invocations(command: string, at: Where): Invocation[] {
     const all = raw.map((word) => expand(word, at.home, cwd))
     let i = 0
     const prefixes: string[] = []
+    // `command -v bash` looks a program up; it runs nothing.
+    let lookup = false
     for (;;) {
       while (i < all.length && ASSIGNMENT.test(all[i]!)) {
         // A value with spaces may be a command the program runs: GH_PAGER='sh -c "gh …"'.
@@ -369,30 +464,51 @@ export function invocations(command: string, at: Where): Invocation[] {
         if (/\s/.test(value)) found.push(...invocations(value, { ...at, cwd }))
       }
       if (!PREFIXES.has(all[i] ?? '')) break
-      prefixes.push(all[i++]!)
+      const prefix = all[i++]!
+      prefixes.push(prefix)
       // The launcher's own flags and their values: `nice -n 5`, `timeout 60`, `script -q /dev/null`.
+      const flagsFrom = i
       while (i < all.length && (all[i]!.startsWith('-') || LAUNCHER_ARG.test(all[i]!))) i++
+      if (
+        prefix === 'command' &&
+        all.slice(flagsFrom, i).some((word) => /^-[a-zA-Z]*[vV]/.test(word))
+      ) {
+        lookup = true
+      }
     }
     const words = all.slice(i)
     const name = basename(words[0] ?? '')
     const invocation: Invocation = { words, all, prefixes, cwd }
-    if (SHELLS.has(name) && words[1] === '-c') {
-      found.push({ ...invocation, words: words.slice(0, 1) })
-      found.push(...invocations(words.slice(2).join(' '), { ...at, cwd }))
+    const form = lookup ? null : shellForm(words)
+    if (form?.kind === 'code') {
+      found.push({ ...invocation, words: words.slice(0, 1), shell: 'code' })
+      found.push(...invocations(form.code.join(' '), { ...at, cwd }))
       continue
     }
+    if (!lookup && name === 'eval') {
+      found.push({ ...invocation, words: words.slice(0, 1), shell: 'code' })
+      found.push(...invocations(words.slice(1).join(' '), { ...at, cwd }))
+      continue
+    }
+    if (form) invocation.shell = form.kind
     if (CD.has(name)) {
       const target = cdTarget(words.slice(1), at.home, cwd)
       found.push(target === null ? invocation : { ...invocation, cd: target })
       cwd = target ?? cwd
       continue
     }
-    found.push(invocation)
     const sandbox = factoryCall(invocation)?.sandbox
+    // The call after `--` runs in the sandbox, and is judged there below: the outer call keeps only
+    // the words before it, so its operands aren't read from the folder `exec` was typed in.
+    const judged =
+      sandbox?.action === 'exec' && sandbox.argv.length
+        ? { ...invocation, words: words.slice(0, words.length - sandbox.argv.length - 1) }
+        : invocation
+    found.push(judged)
     if (sandbox?.action === 'exec' && sandbox.role && at.handoff) {
       const inside = join(at.handoff, 'sandbox', sandbox.role)
       found.push(
-        ...invocations(sandbox.argv.join(' '), { ...at, cwd: inside }).map((call) => ({
+        ...invocations(sandbox.argv.map(requote).join(' '), { ...at, cwd: inside }).map((call) => ({
           ...call,
           sandboxed: true,
         })),
@@ -491,6 +607,17 @@ function gitWrites(invocation: Invocation): NamedPath[] {
 }
 
 function gitCommandWrites(git: GitCommand): NamedPath[] {
+  if (git.sub === 'rm' || git.sub === 'mv') {
+    // `git rm`, `git mv`: every operand is removed or moved, folders whole.
+    const dash = git.args.indexOf('--')
+    const operands = (dash === -1 ? git.args : git.args.slice(dash + 1)).filter(
+      (word, i, all) => dash !== -1 || (!word.startsWith('-') && all[i - 1] !== '--'),
+    )
+    return operands.flatMap((word) => {
+      const path = toPath(word, git.cwd)
+      return path ? [{ path, program: 'git', read: false, write: true, tree: true }] : []
+    })
+  }
   if (git.sub !== 'checkout' && git.sub !== 'restore') return []
   const { args } = git
   const dash = args.indexOf('--')
@@ -505,9 +632,15 @@ function gitCommandWrites(git: GitCommand): NamedPath[] {
     git.sub === 'checkout' && dash === -1
       ? operands.filter((word) => existsSync(resolve(git.cwd, word)))
       : operands
+  // From a revision (`checkout <rev> -- <dir>`, `restore --source`), a folder is rewritten whole.
+  const fromRevision =
+    args.some((word) => word === '-s' || word === '--source' || word.startsWith('--source=')) ||
+    (git.sub === 'checkout' &&
+      dash !== -1 &&
+      args.slice(0, dash).some((word) => !word.startsWith('-')))
   return paths.flatMap((word) => {
     const path = toPath(word, git.cwd)
-    return path ? [{ path, program: 'git', read: false, write: true }] : []
+    return path ? [{ path, program: 'git', read: false, write: true, tree: fromRevision }] : []
   })
 }
 
@@ -527,7 +660,14 @@ export function invocationPaths(invocation: Invocation): NamedPath[] {
   const assignments = invocation.all.slice(0, invocation.all.length - words.length)
   for (const word of assignments) if (ASSIGNMENT.test(word)) named(word, { read: false })
   if (program.includes('/')) named(program, { read: false })
-  if (SHELLS.has(name) && words[1] === '-c') return found
+  if (invocation.shell === 'code') return found
+  // `exec 3> file`, `exec > file`: the redirection stands where the program would.
+  const leading = REDIRECT.exec(program)
+  if (leading && !leading[1]?.startsWith('<<')) {
+    const file = leading[2] || words[1]
+    if (file) named(file, { read: leading[1] === '<', write: leading[1] !== '<', tree: false })
+    return found
+  }
   if (CD.has(name)) {
     if (invocation.cd) found.push({ path: invocation.cd, program: 'cd', read: false })
     return found
@@ -555,6 +695,7 @@ export function invocationPaths(invocation: Invocation): NamedPath[] {
     if (name === 'find' && expression && !word.startsWith('-')) continue
     // An empty word (`sed -i ''`) is no path.
     if (word === '') continue
+    if (EDITORS.has(name) && word.startsWith('+')) continue
     const redirect = REDIRECT.exec(word)
     if (redirect) {
       const file = redirect[2] || words[++j]
@@ -595,6 +736,21 @@ export function invocationPaths(invocation: Invocation): NamedPath[] {
     operands.push(word)
   }
   if (name === 'ln') return [...found, ...linkPaths(operands, target, cwd, words)]
+  // `find <root> -delete` and `find <root> -exec rm {} +` remove what is under each root.
+  if (
+    name === 'find' &&
+    words.some(
+      (word, i) =>
+        word === '-delete' ||
+        (/^-exec(?:dir)?$/.test(word) &&
+          /^(?:rm|mv|shred|truncate)$/.test(basename(words[i + 1] ?? ''))),
+    )
+  ) {
+    const filtered = words.some((word) =>
+      /^-(?:i?name|i?path|i?regex|type|newer|[acm]time|size|user|perm|empty)$/.test(word),
+    )
+    for (const root of operands) named(root, { read: false, write: true, tree: true, filtered })
+  }
   const ignoring = IGNORING.has(name) && !words.some((word) => NO_IGNORE.test(word))
   // A walk with no root named starts where it runs: `find -name x`, `rg icon`, `ls -R`.
   const rootless =
@@ -608,19 +764,85 @@ export function invocationPaths(invocation: Invocation): NamedPath[] {
     return [...found, ...inlinePaths(words, cwd, name), ...operandPaths(family, words, cwd, name)]
   }
   // cp, mv and install write their last operand, or the folder -t names.
-  const copies = ['cp', 'mv', 'install'].includes(name)
+  const copies = ['cp', 'mv', 'install', 'rsync', 'ditto'].includes(name)
   const destination = copies
     ? (target ?? (operands.length > 1 ? operands.at(-1) : undefined))
     : undefined
-  if (copies && target) named(target, { read: false, write: true })
+  if (copies && target) named(target, { read: false, write: true, tree: true })
+  // A copy into a folder writes each source's name there: `cp x.acceptance.test.ts apps/api/src`.
+  const into = destination ? resolve(cwd, destination) : null
+  if (copies && into && (destination?.endsWith('/') || isDirectory(into))) {
+    const sources = target ? operands : operands.slice(0, -1)
+    for (const source of sources) named(join(into, basename(source)), { read: false, write: true })
+  }
   operands.forEach((word, index) => {
     const isDestination = copies && !target && index === operands.length - 1 && destination
-    if (isDestination) named(word, { read: false, write: true })
-    else if (writer) named(word, { read: false, write: true, search, ignoring })
-    else if (inPlace) named(word, { read: true, write: true })
+    if (isDestination) named(word, { read: false, write: true, tree: true })
+    else if (writer) {
+      named(word, { read: false, write: true, search, ignoring, tree: TREE_WRITERS.has(name) })
+    } else if (inPlace) named(word, { read: true, write: true })
     else named(word, { read: reader !== undefined || search, search, ignoring })
   })
-  return [...found, ...gitWrites(invocation)]
+  return [...found, ...gitWrites(invocation), ...extractWrites(invocation, name)]
+}
+
+/** Whether a path is a folder that exists. */
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Archives and downloads that write where they are told: `tar x -C <dir>` and `unzip -d <dir>`
+ * (the folder, or the current one), `curl -o`, `wget -O`, and `chmod`, `chown`, `chgrp` on their
+ * operands.
+ */
+function extractWrites(invocation: Invocation, name: string): NamedPath[] {
+  const { words, cwd } = invocation
+  const args = words.slice(1)
+  const write = (word: string | undefined, tree = false): NamedPath[] => {
+    const path = word ? toPath(word, cwd) : null
+    return path ? [{ path, program: name, read: false, write: true, tree }] : []
+  }
+  const after = (...flags: string[]) => {
+    const at = args.findIndex((word) =>
+      flags.some((flag) => word === flag || word.startsWith(`${flag}=`)),
+    )
+    if (at === -1) return undefined
+    const word = args[at]!
+    return word.includes('=') ? word.slice(word.indexOf('=') + 1) : args[at + 1]
+  }
+  switch (name) {
+    case 'tar': {
+      const extracts =
+        args.some(
+          (word) => word === '--extract' || (/^-[a-zA-Z]+$/.test(word) && word.includes('x')),
+        ) || /^[a-zA-Z]*x[a-zA-Z]*$/.test(args[0] ?? '')
+      return extracts ? write(after('-C', '--directory') ?? '.', true) : []
+    }
+    case 'unzip':
+      return write(after('-d') ?? '.', true)
+    case 'curl':
+      return write(after('-o', '--output'))
+    case 'wget':
+      return write(after('-O', '--output-document'))
+    case 'chmod':
+    case 'chown':
+    case 'chgrp': {
+      const operands = args.filter((word) => !word.startsWith('-'))
+      return operands.slice(1).flatMap((word) =>
+        write(
+          word,
+          args.some((a) => /^-[a-zA-Z]*R/.test(a)),
+        ),
+      )
+    }
+    default:
+      return []
+  }
 }
 
 /** Interpreters that run code given on the command line. */
@@ -677,6 +899,10 @@ const SCRIPT_WRITES = [
   /(?:writeFileSync|appendFileSync|writeFile|appendFile|createWriteStream|Bun\.write|rmSync|unlinkSync|truncateSync|mkdirSync)\(\s*(['"`])([^'"`]+)\1/g,
   /(?:copyFileSync|renameSync|cpSync|copyFile|rename)\(\s*['"`][^'"`]+['"`]\s*,\s*(['"`])([^'"`]+)\1/g,
 ]
+/** awk writes a file with `print > "file"`, `print >> "file"` and `printf … > "file"` in its program. */
+const AWKS = new Set(['awk', 'gawk', 'mawk', 'nawk'])
+const AWK_REDIRECT = /\b(?:print|printf)\b[^;}\n]*?>>?\s*(['"])([^'"]+)\1/g
+
 /** What an interpreter's command line holds: its inline code, its script and its operands. */
 export type InterpreterArgs = {
   code: string[]
@@ -685,6 +911,10 @@ export type InterpreterArgs = {
   operands: string[]
   /** perl's and ruby's `-i`: the operands are edited in place. */
   inPlace: boolean
+  /** Bun's or Deno's own subcommand (`bun test`, `bun run`), when the command starts with one. */
+  subcommand?: string
+  /** Where `bun --cwd <dir>` runs. */
+  cwds: string[]
 }
 
 /** Bun's and Deno's own subcommands: their operands are scripts' names and filters, not files. */
@@ -747,7 +977,13 @@ const CODE_FLAGS: Record<string, readonly string[]> = {
  * is none, every operand after it, and perl's and ruby's in-place flag (`-i`, `-pi`, `-i.bak`).
  */
 export function interpreterArgs(family: string, words: string[]): InterpreterArgs {
-  const found: InterpreterArgs = { code: [], script: undefined, operands: [], inPlace: false }
+  const found: InterpreterArgs = {
+    code: [],
+    script: undefined,
+    operands: [],
+    inPlace: false,
+    cwds: [],
+  }
   const codeFlags = CODE_FLAGS[family] ?? []
   const valueFlags = VALUE_FLAGS[family] ?? []
   const clustered = family === 'perl' || family === 'ruby'
@@ -761,7 +997,13 @@ export function interpreterArgs(family: string, words: string[]): InterpreterArg
     }
     if (rest || !word.startsWith('-') || word === '-') {
       if (first && (family === 'bun' || family === 'deno') && RUNTIME_SUBCOMMANDS.has(word)) {
-        if (found.code.length === 0) return found
+        if (found.code.length === 0) {
+          // `bun test <path>` and `bun run <path>` hand the runtime files; the rest hand it none.
+          if (word !== 'test' && word !== 'run') return found
+          found.subcommand = word
+          first = false
+          continue
+        }
       }
       first = false
       if (found.code.length === 0 && found.script === undefined) found.script = word
@@ -773,9 +1015,11 @@ export function interpreterArgs(family: string, words: string[]): InterpreterArg
       continue
     }
     if (valueFlags.includes(word)) {
+      if (word === '--cwd' && words[j + 1]) found.cwds.push(words[j + 1]!)
       j++
       continue
     }
+    if (word.startsWith('--cwd=')) found.cwds.push(word.slice('--cwd='.length))
     if (family === 'python' && word === '-m') {
       // `-m module`: the module is the script, what follows are its operands.
       if (found.script === undefined) found.script = words[++j]
@@ -810,8 +1054,11 @@ export function interpreterArgs(family: string, words: string[]): InterpreterArg
  * (`bun test`, `bun run build`) hands it no files.
  */
 function operandPaths(family: string, words: string[], cwd: string, name: string): NamedPath[] {
-  const { script, operands, inPlace } = interpreterArgs(family, words)
-  const paths = script === undefined ? operands : [script, ...operands]
+  const { script, operands, inPlace, subcommand, cwds } = interpreterArgs(family, words)
+  const given = script === undefined ? operands : [script, ...operands]
+  // After `bun test` or `bun run`, only a word that looks like a path is one: `bun run build` is a
+  // script's name.
+  const paths = [...cwds, ...(subcommand ? given.filter((word) => /[/~]|^\./.test(word)) : given)]
   return paths.flatMap((word) => {
     const path = toPath(word, cwd)
     return path
@@ -835,6 +1082,12 @@ function operandPaths(family: string, words: string[], cwd: string, name: string
 function scriptWrites(invocation: Invocation, home: string): NamedPath[] {
   const { words, cwd } = invocation
   const family = basename(words[0] ?? '').replace(/\d+(?:\.\d+)*$/, '')
+  if (AWKS.has(family)) {
+    return [...words.slice(1).join('\n').matchAll(AWK_REDIRECT)].flatMap((match) => {
+      const path = toPath(expand(match[2] ?? '', home, cwd), cwd)
+      return path ? [{ path, program: 'script', read: false, write: true }] : []
+    })
+  }
   if (!INTERPRETERS.has(family)) return []
   const text = interpreterArgs(family, words).code.join('\n')
   return SCRIPT_WRITES.flatMap((pattern) =>
@@ -880,7 +1133,16 @@ export type FactoryCall = {
 /** What runs the CLI's script: Bun and Node, and the package runners that start either. */
 const RUNTIMES = new Set(['bun', 'node', 'npm', 'npx', 'bunx', 'pnpm', 'yarn'])
 /** The runtime's own flags that take a value: `bun --cwd factory/cli run …`. */
-const RUNTIME_VALUES = new Set(['--cwd', '-r', '--preload', '--config', '--env-file', '--require'])
+const RUNTIME_VALUES = new Set([
+  '--cwd',
+  '-r',
+  '--preload',
+  '--config',
+  '--env-file',
+  '--require',
+  '--filter',
+  '-F',
+])
 /** main.ts's flags that take a value (its parseArgs options of type string). */
 const FACTORY_VALUES = new Set([
   '--note',
@@ -957,7 +1219,10 @@ function factoryCallAt(invocation: Invocation): FactoryCall | null {
   if (!runtime || runtime.evaluates) return null
   const script = invocation.words[runtime.script]
   if (!script || !isFactoryScript(script, invocation.cwd)) return null
-  const args = invocation.words.slice(runtime.script + 1)
+  // Bun drops a `--` right after the script, and `bun run factory` drops one more on the way to
+  // main.ts: `bun run factory -- -- --note x answer 7` reaches main.ts as `--note x answer 7`.
+  let args = invocation.words.slice(runtime.script + 1)
+  for (let drops = 0; drops < 2 && args[0] === '--'; drops++) args = args.slice(1)
   const viaXargs = invocation.prefixes.includes('xargs')
   if (args[0] === 'sandbox') {
     // main.ts hands everything after `sandbox` to the sandbox command, which splits it at `--`.
@@ -979,7 +1244,9 @@ function factoryCallAt(invocation: Invocation): FactoryCall | null {
   for (let i = 0; i < args.length; i++) {
     const word = args[i]!
     if (word === '--') {
-      positionals.push(...args.slice(i + 1))
+      // Everything after a `--` is a positional to main.ts, a second `--` too: the guard skips it,
+      // so no `--` hides the subcommand.
+      positionals.push(...args.slice(i + 1).filter((rest) => rest !== '--'))
       break
     }
     if (word.startsWith('--') && word.includes('=')) {

@@ -82,7 +82,6 @@ describe('G2: a reviewer or a nested run does not move the shared repository', (
       'git reset --soft HEAD~1',
       'git stash',
       'git rebase main',
-      'git merge main',
       'git checkout -b probe',
       'git branch --list',
     ]) {
@@ -143,9 +142,11 @@ describe('G2: a reviewer runs tests and servers only through factory sandbox exe
     expect(j.bash(EVAL, `bun run factory sandbox exec 7 evaluator -- ${command}`)).toBeNull()
   })
 
-  test('lets a reviewer run its type check, lint and format', () => {
-    expect(j.bash(EVAL, 'bunx oxlint apps/web/src')).toBeNull()
-    expect(j.bash(EVAL, 'bun run typecheck')).toBeNull()
+  test('lets a reviewer run its type check, lint and format through the sandbox', () => {
+    for (const command of ['bunx oxlint apps/web/src', 'bun run typecheck']) {
+      expect(j.bash(EVAL, command)).toContain('sandbox exec')
+      expect(j.bash(EVAL, `bun run factory sandbox exec 7 evaluator -- ${command}`)).toBeNull()
+    }
   })
 
   test('the test and build agents still run their tests', () => {
@@ -170,7 +171,12 @@ describe("G2: the services check reads heredocs for the other role's database an
   })
 
   test("lets a reviewer's own names through", () => {
-    expect(j.bash(EVAL, `psql <<'EOF'\n\\c wandr_test_7_evaluator\nEOF`)).toBeNull()
+    expect(
+      j.bash(
+        EVAL,
+        `bun run factory sandbox exec 7 evaluator -- psql <<'EOF'\n\\c wandr_test_7_evaluator\nEOF`,
+      ),
+    ).toBeNull()
   })
 })
 

@@ -103,9 +103,12 @@ describe.each([
   })
 })
 
-describe('B5: once the reviewer may read the job’s folder, it may search it', () => {
-  test('an evaluator whose blind pass is written finds from the root', () => {
+describe('B5: a reviewer scopes its walks, blind pass written or not', () => {
+  // A find from the worktree root walks factory/.jobs/<n>/sandbox/, the other reviewer's evidence:
+  // F4 closes it for good, not only until the blind pass.
+  test('an evaluator whose blind pass is written finds in apps/ and packages/, not from the root', () => {
     j = guardJob({ sealed: false })
-    expect(j.bash(EVAL, 'find . -name "*.ts" -not -path "*/node_modules/*"')).toBeNull()
+    expect(j.bash(EVAL, 'find apps packages -name "*.ts" -not -path "*/node_modules/*"')).toBeNull()
+    expect(j.bash(EVAL, 'find . -name "*.ts" -not -path "*/node_modules/*"')).toContain('apps/')
   })
 })

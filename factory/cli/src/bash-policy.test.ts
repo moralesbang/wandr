@@ -368,7 +368,7 @@ describe("an agent's Bash writes stay in its column", () => {
     ['factory-test', 'mkdir -p apps/web/e2e && touch apps/web/e2e/new.spec.ts'],
     [
       'factory-evaluator',
-      'cd factory/.jobs/13/sandbox/evaluator && bun run build > build.log 2>&1',
+      'bun run factory sandbox exec 13 evaluator -- bun run build > build.log 2>&1',
     ],
     ['factory-evaluator', 'cd factory/.jobs/13/sandbox/evaluator && git commit -qam probe'],
   ])('lets %s write its own column: %s', (agent, command) => {

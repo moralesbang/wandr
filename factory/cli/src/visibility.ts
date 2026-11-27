@@ -253,7 +253,7 @@ export function classifyWrite(agent: string, target: Target): WriteVerdict {
     case 'factory-evaluator':
     case 'factory-test-reviewer': {
       const role = agent.replace('factory-', '')
-      const own = [`reviews/*.${role}*.md`, sandboxGlob(role)]
+      const own = [`reviews/*.${role}*.md`, sandboxGlob(role), `sandbox/${role}`]
       const ruling = role === 'test-reviewer' && /^rulings\/\d+\.md$/.test(target.path)
       return target.area === 'job' &&
         (ruling || own.some((glob) => new Bun.Glob(glob).match(target.path)))

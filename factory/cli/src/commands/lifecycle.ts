@@ -18,7 +18,7 @@ import { COPIED_WORDS, sharedPhrase } from '../phrases.ts'
 import { removeSandboxes } from '../sandbox.ts'
 import { refuseWhileSealed } from '../seal.ts'
 import { commitAll, gh, git, uncommitted } from '../shell.ts'
-import { LABELS, record, Refusal, refuseWhileBlocked, requireJob } from './common.ts'
+import { LABELS, record, Refusal, refuseWhileBlocked, requireJob, withCliCommit } from './common.ts'
 import { parseRuling, requireSameGuarantee, rulingFile } from './ruling.ts'
 import { moveLabel } from './start.ts'
 
@@ -154,7 +154,7 @@ export async function atfix(
   )
   const updated: Job = {
     ...(cited ? markCited(job) : job),
-    cliCommits: [...job.cliCommits, sha],
+    ...(await withCliCommit(job, sha)),
     atfixes: [...job.atfixes, { sha, note, files, ...(ruled ? { ruling: ruled.ruling } : {}) }],
   }
   saveJob(root, updated)
@@ -191,7 +191,7 @@ export async function rewrite(root: string, number: number, note: string): Promi
   )
   const updated: Job = {
     ...markCited(job),
-    cliCommits: [...job.cliCommits, sha],
+    ...(await withCliCommit(job, sha)),
     rewrites: [...job.rewrites, { commit: sha, note, at: new Date().toISOString() }],
   }
   saveJob(root, updated)

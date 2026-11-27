@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { makeJob } from '../job-fixture.ts'
 import { saveJob } from '../job.ts'
-import { git } from '../shell.ts'
+import { git, patchId } from '../shell.ts'
 import { gate } from './gate.ts'
 
 let root = ''
@@ -44,7 +44,10 @@ afterEach(async () => {
 })
 
 /** Saves the job as if its checks had just passed on HEAD, then runs the gate. */
-const runGate = async (cliCommits: string[] = []) => {
+const runGate = async (
+  cliCommits: string[] = [],
+  extra: { redCommit?: string; cliPatches?: Record<string, string> } = {},
+) => {
   saveJob(
     root,
     makeJob({
@@ -52,7 +55,8 @@ const runGate = async (cliCommits: string[] = []) => {
       branch: 'feat/7-add-a-thing',
       cliCommits,
       base,
-      redCommit: base,
+      redCommit: extra.redCommit ?? base,
+      ...(extra.cliPatches ? { cliPatches: extra.cliPatches } : {}),
       lastCheck: {
         tree: await git(tree, 'rev-parse', 'HEAD^{tree}'),
         green: true,
@@ -185,5 +189,114 @@ describe('factory gate: what git keeps besides the commits', () => {
     expect((await runGate()).problems).toEqual([])
     expect(await git(tree, 'reflog', 'show', 'HEAD')).toBe('')
     expect(await git(tree, 'reflog', 'show', 'feat/7-add-a-thing')).toBe('')
+  })
+})
+
+// F3 and F5: the gate judges every commit the CLI didn't make, so a commit of the CLI's that left
+// the branch (a `git reset --hard <base>` by the build agent, then a rebuilt branch) must fail the
+// gate; a rebase onto main, the instructed path, changes the shas but not the patches.
+describe("factory gate: the CLI's commits stay in the branch", () => {
+  const RED_TEST = "test('x', () => { expect(1).toBe(2) })"
+
+  const redCommit = async () => {
+    mkdirSync(join(tree, 'apps/web/e2e'), { recursive: true })
+    writeFileSync(join(tree, 'apps/web/e2e/walk.spec.ts'), RED_TEST)
+    await git(tree, 'add', '-A')
+    await git(tree, 'commit', '--quiet', '-m', 'test(#7): add the acceptance tests')
+    return git(tree, 'rev-parse', 'HEAD')
+  }
+
+  test('rejects a branch whose red commit was reset away, with the red test gone', async () => {
+    const red = await redCommit()
+    // The build agent's `git reset --hard <base>`, then the build.
+    await git(tree, 'reset', '--quiet', '--hard', base)
+    await commit('apps/web/src/b.ts', 'feat(web): the thing')
+
+    const result = await runGate([red], {
+      redCommit: red,
+      cliPatches: { [red]: await patchId(tree, red) },
+    })
+    expect(result.passed).toBe(false)
+    expect(result.problems.join('\n')).toContain(`the CLI's commit ${red.slice(0, 7)}`)
+    expect(result.problems.join('\n')).toContain('is no longer in the branch')
+  })
+
+  test('rejects an atfix that left the branch the same way', async () => {
+    const red = await redCommit()
+    const fix = await commit('apps/web/e2e/walk.spec.ts', 'test(#7): fix an acceptance test')
+    await git(tree, 'reset', '--quiet', '--hard', red)
+    await commit('apps/web/src/b.ts', 'feat(web): the thing')
+
+    const result = await runGate([red, fix], { redCommit: red })
+    expect(result.passed).toBe(false)
+    expect(result.problems.join('\n')).toContain(fix.slice(0, 7))
+  })
+
+  test('rejects a red commit squashed into an agent commit', async () => {
+    const red = await redCommit()
+    await commit('apps/web/src/b.ts', 'feat(web): the thing')
+    await git(tree, 'reset', '--quiet', '--soft', base)
+    await git(tree, 'commit', '--quiet', '-m', 'feat(web): the thing')
+
+    const result = await runGate([red], {
+      redCommit: red,
+      cliPatches: { [red]: await patchId(tree, red) },
+    })
+    expect(result.passed).toBe(false)
+  })
+
+  test('passes after the instructed `git rebase main`: the CLI commits keep their patches', async () => {
+    const red = await redCommit()
+    const patches = { [red]: await patchId(tree, red) }
+    await commit('apps/web/src/b.ts', 'feat(web): the thing')
+    await git(tree, 'checkout', '--quiet', 'main')
+    await commit('apps/api/src/z.ts', 'feat(api): other')
+    await git(tree, 'push', '--quiet', 'origin', 'main')
+    await git(tree, 'checkout', '--quiet', 'feat/7-add-a-thing')
+    await git(tree, 'rebase', '--quiet', 'main')
+    expect(
+      await git(tree, 'merge-base', '--is-ancestor', red, 'HEAD').then(
+        () => 'yes',
+        () => 'no',
+      ),
+    ).toBe('no')
+
+    const result = await runGate([red], { redCommit: red, cliPatches: patches })
+    expect(result.problems).toEqual([])
+    expect(result.passed).toBe(true)
+  })
+
+  test('passes after a rebase for a job that recorded no patch ids: the old commit object still has its patch', async () => {
+    const red = await redCommit()
+    await commit('apps/web/src/b.ts', 'feat(web): the thing')
+    await git(tree, 'checkout', '--quiet', 'main')
+    await commit('apps/api/src/z.ts', 'feat(api): other')
+    await git(tree, 'push', '--quiet', 'origin', 'main')
+    await git(tree, 'checkout', '--quiet', 'feat/7-add-a-thing')
+    await git(tree, 'rebase', '--quiet', 'main')
+
+    expect((await runGate([red], { redCommit: red })).problems).toEqual([])
+  })
+
+  test('still judges an agent commit that changes the red test after the rebase', async () => {
+    const red = await redCommit()
+    const patches = { [red]: await patchId(tree, red) }
+    await commit('apps/web/e2e/walk.spec.ts', "test('x', () => {})")
+    await git(tree, 'checkout', '--quiet', 'main')
+    await commit('apps/api/src/z.ts', 'feat(api): other')
+    await git(tree, 'push', '--quiet', 'origin', 'main')
+    await git(tree, 'checkout', '--quiet', 'feat/7-add-a-thing')
+    await git(tree, 'rebase', '--quiet', 'main')
+
+    const result = await runGate([red], { redCommit: red, cliPatches: patches })
+    expect(result.passed).toBe(false)
+    expect(result.problems.join('\n')).toContain('apps/web/e2e/walk.spec.ts')
+  })
+
+  test('a forged Factory-Job trailer on an agent commit is no CLI commit', async () => {
+    await commit('apps/web/e2e/b.spec.ts', 'test(#7): fix an acceptance test\n\nFactory-Job: #7')
+    const result = await runGate()
+    expect(result.passed).toBe(false)
+    expect(result.problems.join('\n')).toContain('apps/web/e2e/b.spec.ts')
   })
 })

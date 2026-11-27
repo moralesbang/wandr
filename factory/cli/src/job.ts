@@ -77,6 +77,11 @@ export const Job = z.object({
   redCommit: z.string().nullable(),
   /** Commits the CLI made (red commits and acceptance-test fixes): the gate doesn't judge them. */
   cliCommits: z.array(z.string()),
+  /**
+   * The patch id of each commit the CLI made, by sha: after a rebase the shas change and the patches
+   * don't, so the gate still knows the CLI's commits (and refuses a branch that lost one).
+   */
+  cliPatches: z.record(z.string(), z.string()).default({}),
   attempts: z.number().int().nonnegative(),
   rounds: z.number().int().nonnegative(),
   lastCheck: Check.nullable(),

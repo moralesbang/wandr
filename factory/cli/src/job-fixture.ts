@@ -18,6 +18,7 @@ export const makeJob = (overrides: Partial<Job> = {}): Job => ({
   base: 'abc1234',
   redCommit: null,
   cliCommits: [],
+  cliPatches: {},
   attempts: 0,
   rounds: 0,
   lastCheck: null,

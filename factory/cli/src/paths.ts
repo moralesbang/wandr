@@ -69,6 +69,21 @@ export const RULE_PATHS = [
 ] as const
 
 /**
+ * The folders the protected paths live in, for a write to a folder that holds them (`rm -rf`,
+ * `mv`, `tar x`, a copy into one): each has a protected path directly under it. The acceptance
+ * tests beside their code (`*.acceptance.test.ts`) are not listed: only the gate sees those.
+ */
+export const PROTECTED_DIRS = [
+  'apps/web/e2e',
+  '.github/workflows',
+  'packages/tsconfig',
+  'packages/oxlint-plugin-wandr',
+  'knowledge',
+  'factory',
+  '.claude',
+] as const
+
+/**
  * The privacy boundary: the code that decides what a walker's data looks like, who reaches it and
  * what leaves the server. A diff that touches it is never low risk.
  */

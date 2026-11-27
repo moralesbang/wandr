@@ -15,7 +15,7 @@ import {
 } from '../report.ts'
 import { commitAll, runLogged, uncommitted } from '../shell.ts'
 import { styleProblems } from '../style.ts'
-import { record, Refusal, refuseWhileBlocked, requireJob } from './common.ts'
+import { record, Refusal, refuseWhileBlocked, requireJob, withCliCommit } from './common.ts'
 
 const reporter = (runner: 'vitest' | 'playwright') =>
   fileURLToPath(new URL(`../reporters/${runner}.ts`, import.meta.url))
@@ -136,7 +136,7 @@ export async function red(root: string, number: number): Promise<{ job: Job; pro
     job.worktree,
     `test(#${number}): add the acceptance tests for "${job.title}"\n\nFactory-Job: #${number}`,
   )
-  const updated = { ...job, redCommit: sha, cliCommits: [...job.cliCommits, sha] }
+  const updated = { ...job, redCommit: sha, ...(await withCliCommit(job, sha)) }
   saveJob(root, updated)
   record(root, number, 'red.accepted', { sha, files: acceptance })
   return { job: updated, problems }

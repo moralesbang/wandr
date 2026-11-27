@@ -19,6 +19,7 @@
 // - The real fix for that class is OS-level sandboxing of Bash, planned next. This file fixes the
 //   plain cases and doesn't chase the residual.
 
+import { statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import {
@@ -32,10 +33,11 @@ import {
   isSubtreePush,
   runtimeCalls,
   runtimeFlags,
+  type GitCommand,
   type Invocation,
 } from './bash-words.ts'
 import { jobsDir } from './job.ts'
-import { canonical, isWithin } from './paths.ts'
+import { canonical, isWithin, PROTECTED_DIRS } from './paths.ts'
 import {
   allow,
   bashWhere,
@@ -247,6 +249,20 @@ function indirectVerdict(calls: Invocation[]): Verdict {
   return allow
 }
 
+/**
+ * A shell that is fed its code on stdin (`… | bash`, `bash <<<`, `bash <<EOF`, `bash -s`) runs text
+ * the guard never sees. That is plain, not obfuscated, so it is denied; a script file is the
+ * residual the threat model accepts.
+ */
+function shellVerdict(calls: Invocation[]): Verdict {
+  const fed = calls.find((call) => call.shell === 'stdin')
+  return fed
+    ? deny(
+        `\`${fed.words.slice(0, 2).join(' ')}\` is a shell fed its code on stdin (a pipe, a heredoc, a here-string, \`-s\`), so the guard can't read what runs. Write the commands out, or run a script file.`,
+      )
+    : allow
+}
+
 /** A program taken from a variable or a substitution: `$G issue comment`, `$(which gh) …`. */
 function programVerdict(calls: Invocation[]): Verdict {
   const hidden = calls.find((call) => (call.words[0] ?? '').startsWith('$'))
@@ -256,6 +272,10 @@ function programVerdict(calls: Invocation[]): Verdict {
       )
     : allow
 }
+
+const isCredential = (git: GitCommand) =>
+  git.sub === 'credential' || git.sub.startsWith('credential-')
+const isCredentialProgram = (word: string) => basename(word).startsWith('git-credential')
 
 const isGh = (word: string) => /(?:^|\/)gh$/.test(word)
 
@@ -325,6 +345,11 @@ function githubVerdict(calls: Invocation[], context: GuardContext): Verdict {
     const program = basename(call.words[0] ?? '')
     if (HTTP_CLIENTS.has(program) && call.all.some((word) => GITHUB_HOST.test(word))) {
       return githubDenied(`${program} to GitHub`)
+    }
+    if (gitCommands(call).some(isCredential) || call.all.some(isCredentialProgram)) {
+      return deny(
+        "`git credential` (and the `git credential-*` helpers) hand out the stored credentials, the user's GitHub token included. No tool call asks for them; the CLI pushes with its own git.",
+      )
     }
     if (gitCommands(call).some(isPush) || call.all.some(isPushProgram) || isSubtreePush(call.all)) {
       return githubDenied(
@@ -407,25 +432,71 @@ function writesConfig(args: string[]): boolean {
   return operands.length >= 2
 }
 
+/** `git notes` verbs that only read. */
+const READS_NOTES = new Set(['list', 'show'])
+
+const runGit = (argv: string[], stdin?: Uint8Array) =>
+  Bun.spawnSync(argv, { ...(stdin ? { stdin } : {}), stderr: 'ignore' }).stdout
+
+/** Whether HEAD is a commit the CLI made, by its sha or, after a rebase, by its patch id. */
+function headIsCli(job: GuardContext['job'], cwd: string): boolean {
+  const sha = runGit(['git', '-C', cwd, 'rev-parse', 'HEAD']).toString().trim()
+  if (job.cliCommits.includes(sha)) return true
+  const shown = runGit(['git', '-C', cwd, 'show', 'HEAD'])
+  const id = runGit(['git', 'patch-id', '--stable'], shown).toString().split(/\s+/)[0]
+  return Boolean(id) && Object.values(job.cliPatches).includes(id ?? '')
+}
+
+/**
+ * Git moves the build, test and diagnose agents make that could drop the commits the CLI made (the
+ * red commit, an acceptance-test fix): the gate refuses a branch without them, and these say so
+ * before the work is lost. Null when the command is none of them.
+ */
+function dropsCliCommits(git: GitCommand, context: GuardContext): string | null {
+  const { sub, args } = git
+  const flags = args.filter((word) => word.startsWith('-'))
+  if (sub === 'reset' && flags.some((flag) => ['--hard', '--keep', '--merge'].includes(flag))) {
+    const dash = args.indexOf('--')
+    const revisions = (dash === -1 ? args : args.slice(0, dash)).filter(
+      (word) => !word.startsWith('-'),
+    )
+    if (revisions.some((word) => word !== 'HEAD')) {
+      return '`git reset --hard <commit>` can drop the commits the CLI made (the red commit, an acceptance-test fix) and the gate refuses a branch without them. To undo your own work use `git reset --hard HEAD`, `git restore <path>` or `git revert`; to reword your last commit, `git commit --amend`.'
+    }
+  }
+  if (sub === 'rebase' && args.some((word) => word === '--onto' || word.startsWith('--onto='))) {
+    return '`git rebase --onto` can drop the commits the CLI made (the red commit, an acceptance-test fix). Rebase onto main with `git rebase main`.'
+  }
+  if (sub === 'commit' && flags.includes('--amend') && headIsCli(context.job, git.cwd)) {
+    return '`git commit --amend` here would rewrite a commit the CLI made (the red commit or an acceptance-test fix): make your change a commit of its own.'
+  }
+  return null
+}
+
 /**
  * The git an agent runs, judged apart from push and commit. Every agent's `git config` write is
  * denied (a hooks path or an alias runs a command later, with the user's account), and none moves
- * the job's branch. A reviewer or a nested run (an Explore) moves nothing shared: no reset, clean,
- * stash, switch, apply, merge, rebase or cherry-pick outside its own sandbox, and no ref, note,
- * tag or worktree anywhere.
+ * the job's branch, writes a ref, a note or a tag, or merges. A reviewer or a nested run (an
+ * Explore) moves nothing shared either: no reset, clean, stash, switch, apply, merge, rebase or
+ * cherry-pick outside its own sandbox, and no worktree anywhere. The orchestrator writes no note.
  */
 function gitVerdict(calls: Invocation[], context: GuardContext): Verdict {
   const { agent, job, places } = context
   if (!agent) {
     // The orchestrator's own git config is its own, but not a setting that runs a command later.
-    const hidden = calls
-      .flatMap(gitCommands)
-      .find(
-        (git) =>
-          git.sub === 'config' &&
-          writesConfig(git.args) &&
-          RUNS_COMMANDS.test(git.args.find((word) => !word.startsWith('-')) ?? ''),
+    const gits = calls.flatMap(gitCommands)
+    const note = gits.find((git) => git.sub === 'notes' && !READS_NOTES.has(git.args[0] ?? 'list'))
+    if (note) {
+      return deny(
+        '`git notes` writes a note that rides along with `git log --show-notes` past the seal. Nobody writes one during a job; the gate rejects any `refs/notes/*`.',
       )
+    }
+    const hidden = gits.find(
+      (git) =>
+        git.sub === 'config' &&
+        writesConfig(git.args) &&
+        RUNS_COMMANDS.test(git.args.find((word) => !word.startsWith('-')) ?? ''),
+    )
     return hidden
       ? deny(
           '`git config` of an alias, a hooks path or an fsmonitor sets a command git runs later, past the guard. Nobody sets one during a job.',
@@ -456,15 +527,24 @@ function gitVerdict(calls: Invocation[], context: GuardContext): Verdict {
         "`git config` changes a setting (a hooks path, an alias, a pager) that runs a command later with the user's account. No agent writes git settings during a job; read them with `git config --get <key>`.",
       )
     }
-    if (!restricted) continue
-    const sharedWrite =
+    const refWrite =
       sub === 'update-ref' ||
-      sub === 'notes' ||
+      (sub === 'notes' && !READS_NOTES.has(args[0] ?? 'list')) ||
       (sub === 'tag' &&
         !flags.some((flag) => ['-l', '--list'].includes(flag)) &&
         args.length > 0) ||
-      (sub === 'worktree' && WORKTREE_MUTATING.has(args[0] ?? '')) ||
       (sub === 'branch' && flags.some((flag) => BRANCH_MUTATING.test(flag)))
+    if (refWrite || (sub === 'merge' && !restricted)) {
+      return deny(
+        `${agent.type} runs no \`git ${sub}\`${sub === 'merge' ? ' (a merge hides its changes from the gate: keep the history linear with `git rebase main`)' : ' that writes a ref, a note or a tag: it moves the shared repository, and the gate rejects what it leaves behind'}.`,
+      )
+    }
+    if (!restricted) {
+      const drops = dropsCliCommits(git, context)
+      if (drops) return deny(drops)
+      continue
+    }
+    const sharedWrite = sub === 'worktree' && WORKTREE_MUTATING.has(args[0] ?? '')
     const inside = own !== null && isWithin(canonical(git.cwd), own)
     const movesTree =
       MOVES_WORKTREE.has(sub) ||
@@ -499,16 +579,70 @@ function runnerIn(call: Invocation): string | null {
   return null
 }
 
-/** A reviewer starts tests and servers only through `factory sandbox exec`: its port and services. */
+/**
+ * What a reviewer runs outside `factory sandbox exec`: commands that only read, and the few that
+ * write scratch files, which the path rules keep in its own sandbox. Anything else (a test runner,
+ * a server, a build, `curl`, `ps`, `kill`, a script) reaches the shared port, database, processes or
+ * checkout, so it runs through `exec`, where the reviewer's own environment is set.
+ */
+const REVIEWER_PROGRAMS = new Set(
+  `cat ls rg grep egrep fgrep find head tail wc jq diff cmp comm sort uniq cut tr nl tac od xxd
+  strings file stat du tree less more bat column fold paste join sed awk basename dirname realpath
+  readlink which type date git mkdir touch cp mv rm rmdir tee echo printf pwd cd true false test [
+  [[ : sleep wait export unset exit return break continue for while until if elif fi done esac
+  case select in then else do { } ! command`.split(/\s+/),
+)
+/** The git a reviewer runs outside its own sandbox: reads. A mutation there is gitVerdict's. */
+const REVIEWER_GIT = new Set(
+  `diff log show status blame ls-files rev-parse rev-list ls-tree cat-file merge-base describe
+  shortlog grep name-rev for-each-ref show-ref branch tag config worktree notes remote
+  diff-tree`.split(/\s+/),
+)
+/** `find` expressions that run a command or write a file. */
+const FIND_ACTIONS = /^-(?:exec|execdir|ok|okdir|delete|fprint0?|fprintf|fls)$/
+/** An awk program that writes a file or runs a command: `print > "f"`, `system(…)`, `| "cmd"`. */
+const AWK_OUTPUT = /(?:print|printf)\b[^;}\n]*>|system\s*\(|\|\s*["']|\|&/
+
+/** Why a reviewer's command may not run outside `sandbox exec`, or null when it may. */
+function outsideExec(call: Invocation, own: string): string | null {
+  const program = basename(call.words[0] ?? 'env')
+  if (!REVIEWER_PROGRAMS.has(program)) return `\`${program}\``
+  const args = call.words.slice(1)
+  if (program === 'find' && args.some((word) => FIND_ACTIONS.test(word)))
+    return '`find` with an action'
+  if (program === 'awk' && AWK_OUTPUT.test(args.join(' '))) return '`awk` that writes'
+  if (program === 'git') {
+    const hit = gitCommands(call).find(
+      (git) => !REVIEWER_GIT.has(git.sub) && !isWithin(canonical(git.cwd), own),
+    )
+    if (hit) return `\`git ${hit.sub}\` outside your sandbox`
+  }
+  return null
+}
+
+/**
+ * A reviewer starts tests and servers only through `factory sandbox exec`: its port, database and
+ * bucket. Outside it, it runs the read-only commands of REVIEWER_PROGRAMS.
+ */
 function runnersVerdict(calls: Invocation[], context: GuardContext): Verdict {
   const role = context.agent ? reviewerRole(context.agent.type) : null
   if (!role) return allow
+  const own = canonical(join(context.places.handoffDir, 'sandbox', role))
+  const exec = `bun run factory sandbox exec ${context.job.number} ${role} -- <command>`
   for (const call of calls) {
-    if (call.sandboxed || factoryCall(call)) continue
+    if (call.sandboxed || call.shell === 'code' || factoryCall(call)) continue
+    // `env` alone prints the session's environment.
+    if (!call.words[0] && !call.prefixes.includes('env')) continue
     const runner = runnerIn(call)
     if (runner) {
       return deny(
-        `\`${runner}\` outside \`factory sandbox exec\` runs on the shared port 3100 and the shared test database, which the checks and the other reviewer use. Run it through \`bun run factory sandbox exec ${context.job.number} ${role} -- <command>\`.`,
+        `\`${runner}\` outside \`factory sandbox exec\` runs on the shared port 3100 and the shared test database, which the checks and the other reviewer use. Run it through \`${exec}\`.`,
+      )
+    }
+    const refused = outsideExec(call, own)
+    if (refused) {
+      return deny(
+        `${refused} is not one of the commands a reviewer runs outside its sandbox (reading: cat, ls, rg, grep, find, head, tail, wc, jq, diff, sed -n, awk, git diff|log|show|status|blame|ls-files|rev-parse; scratch files in your own sandbox). Run it through \`${exec}\`, which gives it your own port, database and bucket.`,
       )
     }
   }
@@ -646,6 +780,14 @@ function sealedTextVerdict(
     : allow
 }
 
+const isDirectory = (path: string) => {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
 const BLIND_PASS = /\/reviews\/\d+\.[a-z-]+\.blind\.md$/
 
 /**
@@ -662,6 +804,23 @@ function writesVerdict(command: string, context: GuardContext): Verdict {
       sealedTextVerdict(command, written, context),
     ])
   }
+  // A write to a folder (`rm -rf`, `mv`, `tar x`, a copy into it) reaches the protected paths below.
+  const worktree = context.job.worktree
+  const below = written
+    .filter((named) => named.tree)
+    .flatMap((named) => {
+      const target = canonical(named.path)
+      return PROTECTED_DIRS.flatMap((dir) => {
+        const root = canonical(join(worktree, dir))
+        // The folder is inside a protected one, or holds it (unless a filter narrows the write).
+        if (isWithin(target, root))
+          return isDirectory(target) ? [{ ...named, path: join(target, '_') }] : []
+        return isWithin(root, target) && !named.filtered
+          ? [{ ...named, path: join(root, '_') }]
+          : []
+      })
+    })
+  written.push(...below)
   const blind = written.find((named) => BLIND_PASS.test(canonical(named.path)))
   if (blind) {
     return deny(
@@ -679,15 +838,17 @@ export const bashPolicy: Policy = (context) => {
     (function* () {
       yield githubVerdict(calls, context)
       yield factoryVerdict(command, calls, context)
+      yield shellVerdict(calls)
       yield programVerdict(calls)
       yield indirectVerdict(calls)
       yield commitVerdict(calls, context)
       yield servicesVerdict(calls, command, context)
       yield gitVerdict(calls, context)
-      yield runnersVerdict(calls, context)
       yield stateVerdict(calls, command, context)
       yield writesVerdict(command, context)
       yield bashReadVerdict(command, context)
+      // Last: a path a command names has its own, more specific refusal.
+      yield runnersVerdict(calls, context)
     })(),
   )
 }

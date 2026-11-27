@@ -118,6 +118,7 @@ export async function start(root: string, number: number, session: string): Prom
     base,
     redCommit: null,
     cliCommits: [],
+    cliPatches: {},
     attempts: 0,
     rounds: 0,
     lastCheck: null,
