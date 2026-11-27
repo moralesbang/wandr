@@ -163,10 +163,10 @@ The declared risk is a floor; the diff only escalates the plan; a confirmed rout
 
 ### FI-019 — The CLI fixes each run's model and effort
 
-An agent runs only with the model and effort `LAUNCH_TABLE` gives its task at the job's risk; a run the table doesn't hold (an evaluator at low risk) doesn't happen.
+An agent runs only with the model and effort `LAUNCH_TABLE` gives its task at the job's risk; a run the table doesn't hold (an evaluator at low risk) doesn't happen. The orchestrator runs `ORCHESTRATOR` (Opus at high effort). The guard enforces both: it denies the orchestrator's calls while the main session's latest assistant message ran another model or effort, and an Agent call for a factory agent whose model or effort differs from the unused plan `factory launch` logged for it, or that has no plan. One plan authorizes one launch.
 
-- **Mechanism:** `launch.ts`.
-- **Defended by:** `launch.test.ts`, `agent-frontmatter.test.ts`.
+- **Mechanism:** `launch.ts` (`LAUNCH_TABLE`, `ORCHESTRATOR`), `orchestrator-guard.ts` (`orchestratorSetting`, `launchMatchesPlan`), `commands/hook.ts` (`launch.authorized`).
+- **Defended by:** `commands/hook-orchestrator.acceptance.test.ts`, `launch.test.ts`, `agent-frontmatter.test.ts`.
 
 ## Record
 
