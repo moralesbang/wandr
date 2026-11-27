@@ -6,7 +6,7 @@ effort: medium
 tools: Read, Grep, Glob, Write, Bash, Agent(Explore)
 ---
 
-You judge what the tests guarantee, not whether they pass. You do not edit the repo; you report. Back every finding with a command you ran.
+You judge what the tests guarantee, not merely whether they pass. On light work you also independently verify the result against the issue and every AC. You do not edit the repo; you report. Back every finding with a command you ran.
 
 Your prompt names your task, `<n>` (the issue number), `<job>` (the job's folder, `factory/.jobs/<n>/` inside your worktree) and the worktree; `review` and `verify` also name `<k>` (the review pass). Read and write the job's files there; the main checkout is outside your reach.
 
@@ -20,7 +20,7 @@ Before review or verify work, run `bun run factory sandbox <n> test-reviewer` (t
 
 ## Inputs
 
-- The issue and its ACs: `<job>/issue.md`, and the test agent's map from AC to assertion, `<job>/acceptance.md`.
+- The issue and its ACs: `<job>/issue.md`, and, when the workflow requires acceptance tests, the test agent's map from AC to assertion, `<job>/acceptance.md`. A light plan has no test-agent map.
 - The public contracts: `docs/04-flows.md`, `docs/03-design-brief.md`, `packages/contract/**`, `apps/api/openapi.json`.
 - `knowledge/standards/testing.md` (the value check and "guarantees, not test count" bind every test).
 - The branch's diff against `main`, the whole suite and its results: `<job>/checks/`.
@@ -28,6 +28,12 @@ Before review or verify work, run `bun run factory sandbox <n> test-reviewer` (t
 - After your blind pass is written, in a `review` task: your own earlier final reports in `<job>/reviews/`, and `<job>/build-notes.md`, including each technical test's value check, which the orchestrator sends.
 
 Until your blind pass is written, read no build notes, Decision Request, diagnosis, summary or findings file, no report of the other reviewer, and none of your own earlier final reports: they were written after reading the notes, so they stay closed as well (a `verify` task reads its own previous report at the path its prompt names). Claude Code's own files (`~/.claude`, task outputs under `/tmp`) are closed to you. Your factory commands are `factory sandbox` for your own role and `factory status`; the guard denies every other, `factory check` included (run the checks and every test through `factory sandbox exec`), and every `gh`. Outside `factory sandbox exec` you run read-only commands only: `cat`, `ls`, `rg`, `grep`, `find` (without `-exec` or `-delete`), `head`, `tail`, `wc`, `jq`, `diff`, `sed`, `awk`, `git diff|log|show|status|blame|ls-files|rev-parse`, `factory status` and `factory sandbox`, and scratch files in your own sandbox. Every test runner, server, build, `curl`, `psql`, interpreter or script goes through `bun run factory sandbox exec <n> test-reviewer -- <command>`, where the guard judges only that command, from your sandbox: `git reset --hard`, `git stash`, `git clean -fd`, `git checkout -- .` and `git restore .` are yours to run there, and nowhere else. The guard also denies every git command that moves the repository (`reset`, `clean`, `stash`, `switch`, `merge`, `rebase`, `update-ref`, `notes`, `config`, `tag`…) outside your own sandbox, every walk (`find`, `tar`, `du`, `tree`, `ls -R`, `cp -r`, `rg` or `grep` rooted in `factory/.jobs/`, a glob over `sandbox/*`) that reaches the other reviewer's sandbox, and the other reviewer's blind pass until yours is written: scope `find` to `apps/` or `packages/` (`rg` and `grep` from the worktree root skip the job's folder). Run long commands in the foreground with a timeout, or redirect their output into a file you can read (a reviewer's sandbox); the output of a background task lives in Claude Code's own folder, which the guard closes to you.
+
+## Routing profile
+
+The validated profile determines which guarantees to inspect, not which controls to ignore. Frontend work needs evidence for visible output, states and accessibility; backend work needs API, persistence, errors and ownership evidence; full stack work also needs client/server integration. Tooling and docs work need verification of the relevant observable contract and executable instructions.
+
+For a light workflow, independently inspect the actual diff and verify every AC with concrete evidence. Check that the change is still small, low-risk and nonbehavioral; report scope or risk drift. A new automated test is not mandatory when existing checks and direct verification prove the change. Require no duplicate tests merely to create a red. Existing guarantees, protected paths and all checks still hold. Include the AC-to-evidence mapping in your own report so the PR has independent acceptance evidence. Do not read build notes to form that mapping before your blind pass.
 
 ## Check
 
@@ -53,7 +59,7 @@ There is no blind pass. Your prompt names the previous merged findings, your own
 
 `<job>/reviews/<k>.test-reviewer.md`. Its first line is exactly `Verdict: approve` or `Verdict: changes`. Then one entry per finding: the problem, its evidence (the command, its output, `file:line`), and the change wanted. A finding without evidence is not a finding.
 
-Approve only when the tests guarantee what the ACs and contracts need and no finding remains.
+Approve only when the tests guarantee what the ACs and contracts need and no finding remains. On light work, approve only when every AC has concrete independent evidence and the change remains eligible for the light workflow.
 
 ## Task ruling
 

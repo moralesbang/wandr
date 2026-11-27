@@ -1,3 +1,4 @@
+import { requireRouted } from './route.ts'
 import { $ } from 'bun'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { basename, join } from 'node:path'
@@ -25,6 +26,7 @@ import { moveLabel } from './start.ts'
 export function attempt(root: string, number: number): Job {
   const job = requireJob(root, number)
   refuseWhileBlocked(job, 'a build attempt')
+  requireRouted(job, 'a build attempt')
   refuseWhileSealed(root, job, 'a build attempt')
   const counted = countAttempt(job)
   if (!counted.ok) throw new Refusal(counted.reason)
@@ -254,7 +256,7 @@ export function status(root: string): string {
   return jobs
     .map(
       (job) =>
-        `#${job.number}  ${job.state.padEnd(8)}  attempts ${job.attempts}/3  rounds ${job.rounds}/3  ${job.branch}${job.pr ? `  ${job.pr}` : ''}`,
+        `#${job.number}  ${job.state.padEnd(8)}  attempts ${job.attempts}/3  rounds ${job.rounds}/3  ${job.branch}${job.routing ? `  ${job.routing.workflow}/${job.routing.scope} (${job.routing.risk})` : job.routingRequired ? '  awaiting classification' : '  legacy standard'}${job.pr ? `  ${job.pr}` : ''}`,
     )
     .join('\n')
 }

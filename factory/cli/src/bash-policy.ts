@@ -47,7 +47,7 @@ import {
   type Policy,
   type Verdict,
 } from './policy.ts'
-import { bashReadVerdict, sealedIn } from './read-guard.ts'
+import { bashReadVerdict, routingReadOnly, sealedIn } from './read-guard.ts'
 import { reviewerRole } from './review-plan.ts'
 import { REVIEWER_ROLES } from './job.ts'
 import { sandboxNames } from './sandbox-names.ts'
@@ -93,7 +93,7 @@ const sessionDenied = (given: string, own: string) =>
   )
 
 // The seal keeps a reviewer's blind pass blind, and an agent that could lift it would lift it; a
-// ruling, a test fix, a red or a review plan an agent ran for itself would be its own verdict. A
+// ruling, a test fix, a red, a route or a review plan an agent ran for itself would be its own verdict. A
 // red from the build agent would commit its product changes unjudged.
 const orchestratorOnly = (command: string, agentType: string) =>
   deny(
@@ -830,6 +830,28 @@ function writesVerdict(command: string, context: GuardContext): Verdict {
   return first(written.map((named) => writeVerdict(named.path, context)))
 }
 
+/** Reuse the read-only program policy for intake/research; no runners or git mutations. */
+function researchVerdict(calls: Invocation[], context: GuardContext): Verdict {
+  if (!routingReadOnly(context.job)) return allow
+  const commands = new Set(['start', 'route', 'status', 'block'])
+  const gitReads = new Set(
+    'diff log show status blame ls-files rev-parse rev-list ls-tree cat-file merge-base describe shortlog grep name-rev for-each-ref show-ref diff-tree'.split(
+      ' ',
+    ),
+  )
+  for (const call of calls) {
+    const factory = factoryCall(call)
+    if (factory && factory.command && commands.has(factory.command)) continue
+    const reason = outsideExec(call, context.job.worktree)
+    const mutation = gitCommands(call).find((git) => !gitReads.has(git.sub))
+    if (reason || mutation)
+      return deny(
+        `Before executable routing, only read-only investigation runs: ${reason ?? `git ${mutation?.sub}`} is not allowed. Use factory route after resolving uncertainty.`,
+      )
+  }
+  return allow
+}
+
 export const bashPolicy: Policy = (context) => {
   const command = context.input.tool_input?.command
   if (typeof command !== 'string') return allow
@@ -838,6 +860,7 @@ export const bashPolicy: Policy = (context) => {
     (function* () {
       yield githubVerdict(calls, context)
       yield factoryVerdict(command, calls, context)
+      yield researchVerdict(calls, context)
       yield shellVerdict(calls)
       yield programVerdict(calls)
       yield indirectVerdict(calls)

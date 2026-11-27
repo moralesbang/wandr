@@ -15,7 +15,7 @@ import { locate } from './events.ts'
 import { jobsDir, reviewPass } from './job.ts'
 import { canonical, isWithin } from './paths.ts'
 import { allow, bashWhere, deny, type GuardContext, type Policy, type Verdict } from './policy.ts'
-import { sealedIn } from './read-guard.ts'
+import { routingReadOnly, sealedIn } from './read-guard.ts'
 import { plannedTask, reviewerRole } from './review-plan.ts'
 import { isSealedName, loadSeal } from './seal.ts'
 import { classifyWrite } from './visibility.ts'
@@ -39,6 +39,18 @@ export function writeVerdict(path: string, context: GuardContext): Verdict {
   const sealed = loadSeal(root, job.number)
   const rel = relative(places.handoffDir, absolute)
   const inHandoff = isWithin(absolute, places.handoffDir)
+  if (routingReadOnly(job)) {
+    const researchHandoff =
+      !agent &&
+      inHandoff &&
+      (rel === 'routing-proposal.json' ||
+        rel === 'research.md' ||
+        /^decision-requests\/[^/]+\.md$/.test(rel))
+    if (!researchHandoff)
+      return deny(
+        'Before executable routing, the repo is read-only. The orchestrator writes only routing-proposal.json, research.md or a Decision Request in the job folder.',
+      )
+  }
   if (inHandoff && job.blindPasses[rel] !== undefined) {
     return deny(
       `${rel} is a blind pass, frozen when \`factory unseal\` lifted the seal: its hash is recorded, and \`factory pr\` refuses a changed one. A blind pass rewritten after the build notes were out would not be blind. Say what you add in the final report.`,

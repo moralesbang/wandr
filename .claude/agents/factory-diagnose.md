@@ -14,7 +14,7 @@ Your prompt names `<n>` (the issue number), `<job>` (the job's folder, `factory/
 
 You read everything in the job's folder and the repo at the branch:
 
-- The issue and its ACs: `<job>/issue.md`, and `<job>/acceptance.md`.
+- The issue and its ACs: `<job>/issue.md`, and `<job>/acceptance.md` when the workflow requires acceptance tests. A light plan may have no red or acceptance-test map.
 - The failing output: `<job>/checks/`, `<job>/gate.json`.
 - Every attempt's notes, `<job>/build-notes.md`, and every report and merged findings file in `<job>/reviews/`.
 - The diff against `main` (`git diff <base>...HEAD`) and the commits of the branch.

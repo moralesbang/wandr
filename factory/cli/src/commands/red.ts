@@ -1,3 +1,4 @@
+import { refreshRouting, requireRouted } from './route.ts'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,7 +16,7 @@ import {
 } from '../report.ts'
 import { commitAll, runLogged, uncommitted } from '../shell.ts'
 import { styleProblems } from '../style.ts'
-import { record, Refusal, refuseWhileBlocked, requireJob, withCliCommit } from './common.ts'
+import { record, Refusal, refuseWhileBlocked, withCliCommit } from './common.ts'
 
 const reporter = (runner: 'vitest' | 'playwright') =>
   fileURLToPath(new URL(`../reporters/${runner}.ts`, import.meta.url))
@@ -44,8 +45,11 @@ function readRun(runner: Runner, path: string): Report {
  * lint and format, commits the test agent's work as the red commit.
  */
 export async function red(root: string, number: number): Promise<{ job: Job; problems: string[] }> {
-  const job = requireJob(root, number)
+  const job = await refreshRouting(root, number)
   refuseWhileBlocked(job, 'a red')
+  requireRouted(job, 'a red')
+  if (job.routing?.workflow === 'light')
+    throw new Refusal('The light workflow does not require a red commit.')
   const allowed = canTryRed(job)
   if (!allowed.ok) throw new Refusal(allowed.reason)
   const changed = await uncommitted(job.worktree)

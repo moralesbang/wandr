@@ -4,6 +4,65 @@ The factory takes a GitHub issue to an open pull request with agents. It **deleg
 
 How it got here and what comes next: [`versions/`](versions/).
 
+## Routing
+
+The factory classifies each new issue before implementation. The orchestrator reads the issue and inspects the relevant code, proposes a structured classification, and runs `factory route <n> <file>`. The CLI validates the proposal and records the execution plan; the orchestrator follows that plan instead of choosing which controls to skip.
+
+Three independent dimensions describe the work:
+
+| Dimension | Values | Chooses |
+| --- | --- | --- |
+| Scope | `frontend`, `backend`, `fullstack`, `tooling`, `docs` | The context and verification profile |
+| Complexity | `small`, `standard`, `uncertain` | The stations the work needs |
+| Risk | `low`, `normal`, `high` | The independent reviewers and their depth |
+
+A small backend authorization fix can be high risk. A frontend issue can need the reinforced workflow. Scope is not a synonym for complexity or risk.
+
+| Workflow | Eligibility | Stations |
+| --- | --- | --- |
+| `light` | Low-risk, small, known CSS or documentation work with no behavior change | Build, all local CI checks, independent test review, PR |
+| `standard` | Behavior changes and work that is not eligible for the other workflows | Independent acceptance tests, verified red, build, all checks, risk-sized review, PR |
+| `reinforced` | High risk, including sensitive paths identified by policy | Impact analysis, independent acceptance tests, verified red, build, all checks, both reviewers at high risk, PR |
+| `research` | Uncertain scope or unresolved questions | Read-only investigation, evidence and a new classification before implementation |
+
+The light workflow is deliberately limited to `README.md`, Markdown under `docs/`, and CSS under `apps/web/src/`; executable JSX/TSX copy changes remain standard because paths alone cannot prove them cosmetic. It skips the separate test writer and mandatory red commit. It does not skip checks, independent review, protected paths, the blind pass, or the user's merge. Its reviewer checks the actual result against every AC and whether the claim of no behavior change holds; absence of a new test is not by itself a defect. Existing acceptance tests stay protected.
+
+### Classification and evidence
+
+A proposal records the scope, complexity, expected paths (exact repo-relative file names, not globs), whether behavior changes, the evidence behind the classification, unresolved questions, and the verification needed. The issue's declared risk remains a floor. Only the CLI chooses the workflow. Keep the classification short and factual: it describes scope and guarantees, never an implementation plan for the test agent or an argument for the reviewers to approve.
+
+For example, a CSS spacing issue can propose:
+
+```json
+{
+  "scope": "frontend",
+  "complexity": "small",
+  "expectedPaths": ["apps/web/src/styles.css"],
+  "behaviorChange": false,
+  "evidence": ["The issue changes spacing only; no interaction, data or public contract changes."],
+  "uncertainty": [],
+  "verification": ["Check the affected view at phone and desktop widths; run the complete local checks."]
+}
+```
+
+This is a proposal, not a workflow override: declared normal risk still selects standard work. A low-risk declaration and policy-compatible paths are both needed for light work.
+
+Routing is checked against the actual diff as the job advances. A broader or more sensitive change escalates the plan, invalidates stale verification, and requires the new stations before review or a PR. Reclassification cannot lower a workflow or risk already required for implementation. Research is performed by the orchestrator through read-only exploration, with findings in `research.md`; it must resolve uncertainty before it can become an executable plan. Before classification and during research, the guard permits only read-only commands and the orchestrator's proposal, research report or Decision Request writes. A route never authorizes changing a protected path; that still needs a Decision Request. If a light job already has implementation when escalation requires a red it never established, it raises a Decision Request for a restart; no passing test is relabeled as a verified red.
+
+Jobs created before routing retain the existing standard workflow. New jobs need a validated plan before implementation. There are no path-filtered CI checks: every executable workflow runs the same complete local checks.
+
+### Scope profiles
+
+| Scope | Context and verification |
+| --- | --- |
+| Frontend | The design and flow contracts, component states, accessible interactions; browser evidence when the guarantee needs a browser |
+| Backend | API contracts, persistence, errors, ownership and privacy; real-service tests under the existing testing standard |
+| Full stack | Both profiles, plus evidence that the client and server integrate through the public contract |
+| Tooling | The affected tool's contract, failure modes and regression checks; protected-rule edits still escalate |
+| Docs | Consistency with the current definition, links, examples and any executable instructions |
+
+Profiles specialize the existing agents; they do not create a second agent hierarchy or force a frontend task to build a backend. Choose the least expensive test level that proves the guarantee under the testing standard.
+
 ## The flow
 
 ```mermaid
@@ -11,10 +70,15 @@ flowchart TD
     ready(["User labels the issue factory:ready,<br/>with its Risk field"])
     start["/factory 42 in a terminal:<br/>the orchestrator takes the job"]
     wt["CLI: worktree and branch,<br/>label factory:building"]
+    route{"CLI: validated route"}
+    research["Read-only investigation,<br/>resolve uncertainty and reclassify"]
     test["Test agent: acceptance tests<br/>from the ACs and the contracts"]
     red{"CLI: does every acceptance<br/>test fail on an assertion?"}
 
-    ready --> start --> wt --> test --> red
+    ready --> start --> wt --> route
+    route -->|standard or reinforced| test --> red
+    route -->|light| build
+    route -->|research| research --> route
     red -->|"no: the test agent fixes it"| test
 
     subgraph outer ["Outer loop: independent review, one pass per round"]
@@ -60,8 +124,8 @@ flowchart TD
     classDef wait fill:#fecaca,stroke:#991b1b,color:#450a0a
     class ready,merged,decide user
     class start,verdict orch
-    class wt,red,checks,gate,plan,pr,rule cli
-    class test,build,eval,tqr,fix agent
+    class wt,route,red,checks,gate,plan,pr,rule cli
+    class test,build,eval,tqr,fix,research agent
     class dr wait
 ```
 
@@ -87,7 +151,7 @@ Agents that need to map code first hand the search to a Haiku `Explore` subagent
 The job's risk decides which reviewers judge it and how hard.
 
 - **Declared.** The issue form's **Risk** field: `low` (copy, styling, docs-like changes with no data path), `normal` (the default) or `high` (the privacy boundary, auth, the data model, migrations). The CLI reads it at `factory start`.
-- **Effective.** `factory launch` and `factory review` take the declared risk and raise `low` to `normal` when the branch's diff against its base touches any path below. They never lower a risk and never raise one past `normal`: only the issue declares `high`. The paths that raised it are printed as `raisedBy`.
+- **Effective.** For routed jobs, the CLI applies the routing policy to expected paths and the actual diff. Sensitive paths can require high risk and the reinforced workflow; declared risk and earlier escalation remain floors. Legacy jobs retain the earlier rule: `low` rises to `normal` on the paths below. The paths that raised it are printed as `raisedBy`.
 
 | List | Paths |
 | --- | --- |
@@ -112,7 +176,7 @@ The orchestrator never picks a model or an effort. Before every Agent call it ru
 
 The skill's frontmatter sets the orchestrator's own model and effort, and its body restates them, because frontmatter applies to the turn that loads the skill and no later one. `launch` refuses on a blocked job and logs each plan as `launch.planned`.
 
-### One job, step by step
+### One standard job, step by step
 
 Where each step runs and where information moves. Agents never talk to each other: they hand work over through files in the job's folder and commits on the job's branch.
 
@@ -194,7 +258,7 @@ flowchart LR
 
 **Build attempts.** A job has one budget of 3 build attempts, shared by both loops. A **build attempt** is one run of the build agent until it stops, and it counts when:
 
-- it is the first run, after the red commit;
+- it is the first run, after the red commit (or after the validated plan on the light workflow);
 - it reruns after a red `factory check`, or after a rejected `factory gate`;
 - it reruns because a review round's fix run did not reach green.
 
@@ -204,7 +268,7 @@ A review round's fix run that reaches green costs nothing. Past 3 the job blocks
 
 | Attempt | Who runs it | With |
 | --- | --- | --- |
-| 1 | Build agent, fresh context | The issue and the red commit |
+| 1 | Build agent, fresh context | The issue, routing profile and the red commit when required |
 | 2 | Build agent, fresh context | The failing output and attempt 1's notes |
 | — | The diagnosis agent | The failing test, the diff, both attempts' notes. A technical cause goes to attempt 3; a functional ambiguity goes straight to a Decision Request |
 | 3 | Build agent, fresh context | The diagnosis |
@@ -429,7 +493,7 @@ flowchart LR
 - **is not a merge.** A merge's own diff is empty, which would hide its changes from the gate; agents rebase onto `main`.
 - **leaves no git note.** `refs/notes/*` rides along with `git log --show-notes` past the seal.
 
-**Protected paths.** `factory gate` rejects a build whose diff since the red commit touches any of these, and the hook denies the build agent writing them. Commits already on `main`, fetched by the gate itself, aren't the job's: a job that merges `main` to pick up a fix doesn't answer for them.
+**Protected paths.** `factory gate` rejects any non-CLI commit of the job that touches any of these, and the hook denies the build agent writing them. Commits already on `main`, fetched by the gate itself, aren't the job's: a job that merges `main` to pick up a fix doesn't answer for them.
 
 | What | Paths |
 | --- | --- |
@@ -485,6 +549,7 @@ Run from the repo root as `bun run factory <command>`; `bun run factory` alone p
 | Command | What it does | Refuses when |
 | --- | --- | --- |
 | `start <n> --session <id>` | Creates `.claude/worktrees/<n>-<slug>` on `feat/<n>-<slug>`, installs, reads the issue's Risk, writes the job's state (`job.json`) in the main checkout and `issue.md` in the job's folder, moves the label to `factory:building`, and prints the job with its folder's path. On an existing job, copies in any handoff file that exists only in the main checkout; on a blocked job, moves the label back and prints the user's answer; on a sealed job, says which blind passes are missing | The issue lacks `factory:ready` or numbered ACs; 3 jobs already run; the job is blocked and its latest Decision Request has no answer |
+| `route <n> <file>` | Validates a classification proposal, persists the execution plan and prints it; scope, complexity and risk remain independent | Invalid proposal; blocked or sealed job; a proposal would bypass a control already required |
 | `launch <n> <agent> --task <task>` | Prints the `model` and `effort` for one agent run at the job's effective risk, plus the risk and what raised it, and logs the plan. Tasks: `write`, `fix`, `review`, `verify`, `ruling`, `diagnose`, `build` | The table has no such run (an evaluator at low risk, an unknown agent or task); the job is blocked |
 | `red <n>` | Checks lint and format on the new or changed acceptance tests, runs them, and commits them as the red commit | A file fails lint or format; a test passes, or fails on anything but an assertion; 3 reds were already rejected |
 | `check <n>` | Runs the CI commands under the lock and saves the output in the job's folder | — (exits non-zero on red) |
@@ -497,7 +562,7 @@ Run from the repo root as `bun run factory <command>`; `bun run factory` alone p
 | `atfix <n> --note <text>` | After the user answered a Decision Request raised on a changed-guarantee ruling, commits the fix as ruled, citing the answer | No such answer, or it was already used |
 | `rewrite <n> --note <text>` | Commits the test agent's rewrite of acceptance tests after the user's answer authorized a change of guarantee; the commit cites the answer and the PR lists it | The latest Decision Request has no unused answer, anything but acceptance tests changed, or no note |
 | `block <n> <file>` | Keeps the Decision Request in the job's folder, prints it, label `factory:blocked` | The job is already blocked or sealed |
-| `seal <n> --pass <k> --roles <role,...>` | Moves the build notes, Decision Requests, diagnosis, summary and earlier reports out of the worktree for the blind pass of those reviewers; `review` calls it | The job is sealed already, or `<k>` isn't the pass under way |
+| `seal <n> --pass <k> --roles <role,...>` | Moves the build notes, Decision Requests, diagnosis, summary, research, routing proposal and earlier reports out of the worktree for the blind pass of those reviewers; `review` calls it | The job is sealed already, or `<k>` isn't the pass under way |
 | `unseal <n>` | Puts the sealed files back once every sealed role's own agent wrote its blind pass, and freezes each pass by its hash | A blind pass is missing, empty or not written by its reviewer's own run; a verifier hasn't written its final report |
 | `answer <n> "<text>"` | Records the user's answer to the job's latest Decision Request | The job isn't blocked, or the request already has an answer. **The user's only**, with `!` |
 | `sandbox <n> <role>` | Makes a reviewer's sandbox and prints its path, port, database and bucket | An unknown role |
@@ -574,6 +639,8 @@ A finished job replays from its log at any speed: run `! bun run factory watch`,
   worktrees/<n>-<slug>/              the job's worktree, on feat/<n>-<slug>
     factory/.jobs/<n>/               gitignored: the job's folder, what agents hand each other
       issue.md                       the issue and its ACs, written by factory start
+      routing-proposal.json          the orchestrator's classification input (sealed during blind review)
+      research.md                    read-only investigation findings (sealed during blind review)
       acceptance.md                  the test agent's map of each AC clause to its assertion
       build-notes.md                 decisions and each technical test's value check
       checks/                        the output of every factory check

@@ -19,6 +19,14 @@ You implement one issue in this worktree until `bun run factory check <n>` is gr
 
 You start without the test agent's reasoning.
 
+## Routing profile
+
+The orchestrator passes the CLI-validated scope and verification requirements. Frontend work follows the design and flow contracts and checks visible states and accessibility. Backend work checks the API, persistence, errors and ownership against real services. Full stack work also checks integration across the public contract. Tooling and docs work verify the affected tool or documented instructions. Scope does not reduce risk or allow edits to protected paths.
+
+A light plan has no separately written acceptance tests or mandatory red commit. Implement only the approved nonbehavior copy, styling or documentation change; preserve every existing acceptance test. Do not add tests that duplicate guarantees or only justify the process. Record concrete verification commands and their results in the build notes. A standard or reinforced plan retains independent acceptance tests and the verified red. Research is read-only and never launches you to implement.
+
+If the change needs behavior, a new file outside the expected scope, a sensitive path or a different guarantee, stop and report it for routing reassessment before proceeding. On reinforced work, document affected contracts, data, failure modes and recovery where relevant, with evidence.
+
 ## Write
 
 - Anything in the worktree outside the protected paths (acceptance tests, CI, lint and format config, tsconfig, runner config, `CLAUDE.md`, `knowledge/`, `factory/`, `.claude/`). The guard hook denies those, and judges a Bash write (`>`, `tee`, `sed -i`, `cp`, `rm`…) as it judges an Edit. Keep scratch output in the worktree and delete it before you commit.

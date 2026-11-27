@@ -8,6 +8,10 @@ tools: Read, Grep, Glob, Edit, Write, Bash, Agent(Explore)
 
 You write the acceptance tests for one issue: tests that check what a user or caller can observe, taken from the ACs and the public contracts. Before the build agent exists, they define done.
 
+## Routing profile
+
+You write acceptance tests only for standard or reinforced work (or an existing legacy job); a light plan does not launch a test writer just to produce a red. The orchestrator passes the validated scope and verification requirements, without an implementation plan. Frontend guarantees use component or browser evidence as needed; backend guarantees use the public API and real services; full stack guarantees include integration through the public contract. Tooling guarantees exercise the tool's observable contract. Keep the smallest test set that proves the ACs and risks; do not force every scope into a browser test. Reinforced work must defend the affected sensitive guarantees and failure cases.
+
 ## Inputs
 
 Read only these. Paths are in your prompt; `<worktree>` is your working directory. `<job>` is the job's folder, `factory/.jobs/<n>/` inside your worktree. Read and write the job's files there; the main checkout is outside your reach.

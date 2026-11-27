@@ -3,9 +3,11 @@
 // reviewers) get the stronger model; writing runs get the cheaper one. The job's effective risk
 // (risk.ts) sets how hard the reviewers look, and whether the evaluator runs at all.
 
-import { record, Refusal, refuseWhileBlocked, requireJob } from './commands/common.ts'
+import { record, Refusal, refuseWhileBlocked } from './commands/common.ts'
+import { refreshRouting, requireRouted } from './commands/route.ts'
 import type { Risk } from './job.ts'
 import { jobRisk } from './risk.ts'
+import { requiresAcceptance } from './routing.ts'
 
 export const TASKS = ['write', 'fix', 'review', 'verify', 'ruling', 'diagnose', 'build'] as const
 export type Task = (typeof TASKS)[number]
@@ -84,6 +86,9 @@ export type Launch = {
   effort: Effort
   risk: Risk
   raisedBy: string[]
+  workflow?: string
+  scope?: string
+  verification?: string[]
 }
 
 /** Plans one agent run at the job's effective risk and logs it; refused when the table says no. */
@@ -93,8 +98,24 @@ export async function launch(
   agent: string,
   task: string,
 ): Promise<Launch> {
-  const job = requireJob(root, number)
+  const job = await refreshRouting(root, number)
   refuseWhileBlocked(job, 'an agent launch')
+  requireRouted(job, 'an agent launch')
+  if (
+    agent === 'factory-build' &&
+    job.routing &&
+    requiresAcceptance(job.routing) &&
+    !job.redCommit
+  ) {
+    throw new Refusal(
+      'This route requires independent acceptance tests and a verified red before implementation. If a light job escalated after implementation, raise a Decision Request to restart; do not continue the build.',
+    )
+  }
+  if (job.routing?.workflow === 'light' && agent === 'factory-test') {
+    throw new Refusal(
+      'The light workflow has no acceptance-test writer; its independent reviewer verifies acceptance criteria.',
+    )
+  }
   const { risk, raisedBy } = await jobRisk(job)
   const setting = launchSetting(agent, task, risk)
   if (!setting.ok) throw new Refusal(`Job #${number} (${risk} risk): ${setting.reason}`)
@@ -105,6 +126,13 @@ export async function launch(
     effort: setting.effort,
     risk,
     raisedBy,
+    ...(job.routing
+      ? {
+          workflow: job.routing.workflow,
+          scope: job.routing.scope,
+          verification: job.routing.verification,
+        }
+      : {}),
   }
   record(root, number, 'launch.planned', {
     agent,

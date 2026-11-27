@@ -51,6 +51,7 @@ export function guardJob(
           since: 'g',
           changed: [],
           risk: 'normal' as const,
+          routingRevision: 0,
           raisedBy: [],
           roles: options.plan as never,
           at: 'x',

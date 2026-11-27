@@ -8,6 +8,7 @@ import { loadJob, saveJob, stateDir, type Job } from '../job.ts'
 import { loadSeal } from '../seal.ts'
 import { git } from '../shell.ts'
 import { Refusal } from './common.ts'
+import { planRouting } from '../routing.ts'
 import { review, reviewReport } from './review.ts'
 
 let root = ''
@@ -204,5 +205,54 @@ describe('factory unseal, while a verifier is still reading', () => {
     writeReport(root, 7, 2, 'test-reviewer')
     unseal(root, 7)
     expect(loadSeal(root, 7)).toBeNull()
+  })
+})
+
+const routing = () =>
+  planRouting(
+    {
+      scope: 'frontend',
+      complexity: 'standard',
+      evidence: ['The issue changes the icon behavior.'],
+      expectedPaths: ['apps/web/src/icon.ts', 'apps/web/e2e/icons.spec.ts'],
+      behaviorChange: true,
+      uncertainty: [],
+      verification: ['Run the icon acceptance tests.'],
+    },
+    'normal',
+  )
+
+describe('factory review routing revisions', () => {
+  test('new jobs require classification before review', async () => {
+    save({ routingRequired: true })
+    expect(((await review(root, 7).catch((caught) => caught)) as Error).message).toContain('route')
+    expect(loadSeal(root, 7)).toBeNull()
+  })
+
+  test('records the routing revision and refuses reusing the plan after it changes', async () => {
+    save({ routingRequired: true, routing: routing(), routingRevision: 1 })
+    const plan = await review(root, 7)
+    expect(plan.routingRevision).toBe(1)
+    const job = loadJob(root, 7)!
+    saveJob(root, { ...job, routingRevision: 2 })
+    expect(((await review(root, 7).catch((caught) => caught)) as Error).message).toContain(
+      'predates',
+    )
+    expect(loadJob(root, 7)?.reviews).toHaveLength(1)
+  })
+
+  test('a new routing revision forces a full independent review even after only test changes', async () => {
+    await afterFirstPass({ evaluator: 'approve', 'test-reviewer': 'changes' })
+    await commit('apps/web/e2e/icons.spec.ts')
+    saveJob(root, {
+      ...loadJob(root, 7)!,
+      routingRequired: true,
+      routing: routing(),
+      routingRevision: 1,
+    })
+    const plan = await review(root, 7)
+    expect(plan.routingRevision).toBe(1)
+    expect(plan.roles).toEqual({ evaluator: 'review', 'test-reviewer': 'review' })
+    expect(loadSeal(root, 7)?.roles).toEqual(['evaluator', 'test-reviewer'])
   })
 })

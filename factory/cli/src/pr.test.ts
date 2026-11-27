@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { makeJob } from './job-fixture.ts'
-import { approves, prBody, prComment, usageTable } from './commands/pr.ts'
+import { approves, lightAcceptance, prBody, prComment, usageTable } from './commands/pr.ts'
 import type { FactoryEvent } from './events.ts'
 
 describe('approves', () => {
@@ -123,5 +123,32 @@ describe('usageTable and prComment', () => {
     })
     expect(comment.indexOf('TABLE')).toBeLessThan(comment.indexOf('Build notes'))
     expect(comment.length).toBeLessThan(65_536)
+  })
+})
+
+describe('lightweight acceptance evidence', () => {
+  const issue =
+    '### Acceptance criteria\n\nAC1: The title is readable.\nAC2: Dark mode has the correct contrast.\n'
+  test('uses each independent observation in issue order', () => {
+    expect(
+      lightAcceptance(
+        issue,
+        'Verdict: approve\n\nAC2: Checked the dark theme in the browser.\nAC1: Compared the rendered title with the issue.',
+      ),
+    ).toBe(
+      'AC1: Compared the rendered title with the issue.\nAC2: Checked the dark theme in the browser.',
+    )
+  })
+  test('refuses an approving report that omits an acceptance criterion', () => {
+    expect(() => lightAcceptance(issue, 'Verdict: approve\nAC1: Verified.')).toThrow('AC2')
+  })
+  test('refuses blank mappings and ambiguous duplicates', () => {
+    expect(() => lightAcceptance(issue, 'AC1: \nAC2: Verified.')).toThrow('AC1')
+    expect(() => lightAcceptance(issue, 'AC1: One.\nAC1: Two.\nAC2: Checked.')).toThrow(
+      'repeats AC1',
+    )
+  })
+  test('refuses an issue without parseable acceptance criteria', () => {
+    expect(() => lightAcceptance('# An issue', 'Verdict: approve')).toThrow('Cannot verify')
   })
 })

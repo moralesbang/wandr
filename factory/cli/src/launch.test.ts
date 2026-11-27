@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { Refusal } from './commands/common.ts'
 import { readEvents } from './events.ts'
 import { makeJob } from './job-fixture.ts'
+import { planRouting } from './routing.ts'
 import { saveJob, type Risk } from './job.ts'
 import { launch, launchSetting, ORCHESTRATOR, TASKS, type Task } from './launch.ts'
 import { git } from './shell.ts'
@@ -47,6 +48,20 @@ const MATRIX = AGENT_NAMES.flatMap((agent) =>
     ),
   ),
 )
+
+const routing = (uncertainty: string[] = []) =>
+  planRouting(
+    {
+      scope: 'frontend',
+      complexity: 'small',
+      evidence: ['Only stylesheet changes'],
+      expectedPaths: ['apps/web/src/styles.css'],
+      behaviorChange: false,
+      uncertainty,
+      verification: ['Review rendered layout'],
+    },
+    'low',
+  )
 
 describe('launchSetting: the whole table', () => {
   test.each(MATRIX)('%s %s at %s risk: %s', (agent, task, risk, expected) => {
@@ -142,9 +157,63 @@ describe('factory launch', () => {
     expect(readEvents(root, 7).some((item) => item.kind === 'launch.planned')).toBe(false)
   })
 
+  test('an escalated light job cannot continue implementation without independent acceptance tests', async () => {
+    const lightPlan = planRouting(
+      {
+        scope: 'frontend',
+        complexity: 'small',
+        evidence: ['Only stylesheet spacing changes'],
+        expectedPaths: ['apps/web/src/styles.css'],
+        behaviorChange: false,
+        uncertainty: [],
+        verification: ['Inspect spacing'],
+      },
+      'low',
+    )
+    saveJob(
+      root,
+      makeJob({
+        worktree: tree,
+        base,
+        risk: 'low',
+        routingRequired: true,
+        routing: lightPlan,
+        attempts: 1,
+      }),
+    )
+    await commit('apps/api/src/routes/walks.ts')
+    await expect(launch(root, 7, 'factory-build', 'build')).rejects.toThrow('verified red')
+    expect(readEvents(root, 7).some((item) => item.kind === 'launch.planned')).toBe(false)
+  })
+
   test('a task the agent does not have is refused', async () => {
     saveJob(root, makeJob({ worktree: tree, base }))
     const error = await launch(root, 7, 'factory-build', 'review').catch((caught) => caught)
     expect(error).toBeInstanceOf(Refusal)
+  })
+})
+
+describe('v1.4 launch requirements', () => {
+  test('unclassified new jobs cannot launch agents', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'factory-unclassified-'))
+    try {
+      saveJob(root, makeJob({ routingRequired: true }))
+      await expect(launch(root, 7, 'factory-build', 'build')).rejects.toThrow('classif')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('research cannot launch implementation', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'factory-research-launch-'))
+    try {
+      saveJob(
+        root,
+        makeJob({ routingRequired: true, routing: routing(['Need to inspect behavior']) }),
+      )
+      await expect(launch(root, 7, 'factory-build', 'build')).rejects.toThrow()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

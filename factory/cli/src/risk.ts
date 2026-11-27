@@ -26,5 +26,17 @@ export const branchChanges = async (job: Pick<Job, 'worktree' | 'base'>) =>
   lines(await git(job.worktree, 'diff', '--name-only', '--no-renames', job.base, 'HEAD'))
 
 /** The job's effective risk now, from its branch's diff. */
-export const jobRisk = async (job: Pick<Job, 'worktree' | 'base' | 'risk'>) =>
-  effectiveRisk(job.risk, await branchChanges(job))
+export const jobRisk = async (
+  job: Pick<Job, 'worktree' | 'base' | 'risk'> & Partial<Pick<Job, 'routing'>>,
+): Promise<EffectiveRisk> => {
+  const changed = await branchChanges(job)
+  const effective = effectiveRisk(job.risk, changed)
+  const routed = job.routing?.risk
+  const risk =
+    routed === 'high' || effective.risk === 'high'
+      ? 'high'
+      : routed === 'normal' || effective.risk === 'normal'
+        ? 'normal'
+        : 'low'
+  return { risk, raisedBy: effective.raisedBy }
+}
