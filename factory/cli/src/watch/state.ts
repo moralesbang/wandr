@@ -227,7 +227,7 @@ export type JobInfo = {
 }
 
 /** The orchestrator's own setting, as in ORCHESTRATOR in launch.ts (a test keeps them equal). */
-export const ORCHESTRATOR_PLAN = { model: 'sonnet', effort: 'medium' } as const
+export const ORCHESTRATOR_PLAN = { model: 'opus', effort: 'high' } as const
 
 /** A run's reads: the Read tool's, and the paths a Bash command, a Grep or a Glob read. */
 type ReadEntry = Annotated & { via: string }

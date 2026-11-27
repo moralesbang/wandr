@@ -82,8 +82,8 @@ describe('launchSetting: the whole table', () => {
     expect(!setting.ok && setting.reason).toContain('low risk')
   })
 
-  test('the orchestrator runs sonnet at medium effort', () => {
-    expect(ORCHESTRATOR).toEqual({ model: 'sonnet', effort: 'medium' })
+  test('the orchestrator runs opus at high effort', () => {
+    expect(ORCHESTRATOR).toEqual({ model: 'opus', effort: 'high' })
   })
 })
 
@@ -119,6 +119,8 @@ describe('factory launch', () => {
     saveJob(root, makeJob({ worktree: tree, base, risk: 'high' }))
     const planned = await launch(root, 7, 'factory-test-reviewer', 'verify')
     expect(planned).toEqual({
+      planId: expect.stringMatching(/^[0-9a-f]{8}$/),
+      header: `factory-launch: 7 factory-test-reviewer verify ${planned.planId}`,
       agent: 'factory-test-reviewer',
       task: 'verify',
       model: 'opus',
@@ -128,6 +130,7 @@ describe('factory launch', () => {
     })
     const event = readEvents(root, 7).find((item) => item.kind === 'launch.planned')
     expect(event?.detail).toEqual({
+      planId: planned.planId,
       agent: 'factory-test-reviewer',
       task: 'verify',
       model: 'opus',

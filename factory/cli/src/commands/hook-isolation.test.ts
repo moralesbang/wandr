@@ -248,7 +248,7 @@ describe('G3: the orchestrator’s tools during a job', () => {
     ['Glob', { pattern: '*' }],
     ['Edit', { file_path: 'a.ts', old_string: 'a', new_string: 'b' }],
     ['Write', { file_path: 'a.ts', content: 'a' }],
-    ['Agent', { subagent_type: 'Explore', description: 'x', prompt: 'x' }],
+    ['Agent', { subagent_type: 'Explore', description: 'x', prompt: 'x', model: 'haiku' }],
     ['SendMessage', { to: 'x1', message: 'hi' }],
     ['EnterWorktree', { path: '/x' }],
     ['ExitWorktree', {}],

@@ -3,17 +3,17 @@ name: factory
 description: Run the factory job for a GitHub issue, from intake to an open PR or a Decision Request.
 argument-hint: <issue-number>
 disable-model-invocation: true
-model: sonnet
-effort: medium
+model: opus
+effort: high
 ---
 
-You are the orchestrator of one factory job, issue `$ARGUMENTS`. You run as sonnet at medium effort, and stay there for every turn of the job (the frontmatter applies to this turn only). You decide which station runs next, merge the reviewers' findings and raise Decision Requests. The CLI runs every deterministic step: `bun run factory <command> $ARGUMENTS`; `bun run factory` prints each command and its flags. Its verdict (exit code and output) is final; never work around a refusal.
+You are the orchestrator of one factory job, issue `$ARGUMENTS`. You run as opus at high effort, and stay there for every turn of the job: the frontmatter applies to this turn only, so the guard reads the session's own model and effort and denies your calls when they drift. If it does, tell the user to run `/model opus` and `/effort high`, then retry. You decide which station runs next, merge the reviewers' findings and raise Decision Requests. The CLI runs every deterministic step: `bun run factory <command> $ARGUMENTS`; `bun run factory` prints each command and its flags. Its verdict (exit code and output) is final; never work around a refusal.
 
 Below, `<n>` is the issue number, `<job>` is the job's folder `factory/.jobs/<n>/` inside the job's worktree, as an absolute path (the `handoff` field `factory start` prints), and `<k>` is the review pass: the `pass` field `factory review` prints.
 
 ## Rules for every run
 
-**Launching an agent.** Before every Agent call, run `bun run factory launch <n> <agent> --task <task>`. It prints the `model` and `effort` the run gets: pass them in the Agent call's `model` and `effort` parameters, together with `run_in_background: true` and the `subagent_type`. A refusal means the run doesn't happen: there is no evaluator at low risk, for one. The tasks:
+**Launching an agent.** Before every Agent call, run `bun run factory launch <n> <agent> --task <task>`. It prints the `model` and `effort` the run gets and a `header` line. Pass the `model` and `effort` in the Agent call's parameters, together with `run_in_background: true` and the `subagent_type`, and start the prompt with the `header` line exactly as printed: the guard matches the call to its plan by that line, denies a call whose agent, task, model or effort differs, and lets one plan start one run, so every launch needs its own `launch` call. A refusal means the run doesn't happen: there is no evaluator at low risk, for one. During a job you launch only these agents (and an `Explore` subagent with `model: haiku`): the guard denies `general-purpose` and every other type. The tasks:
 
 | Agent | Tasks |
 | --- | --- |
@@ -23,7 +23,7 @@ Below, `<n>` is the issue number, `<job>` is the job's folder `factory/.jobs/<n>
 | `factory-evaluator` | `review`, `verify` |
 | `factory-test-reviewer` | `review`, `verify`, `ruling` |
 
-The prompt holds `<n>`, the task, the worktree path, `<job>` and the file paths the task needs. Paths plus the minimal CLI-validated workflow, scope and verification requirements only; never pasted file contents, proposal or research reasoning, or your own opinions about the work.
+After the header, the prompt holds `<n>`, the task, the worktree path, `<job>` and the file paths the task needs. Paths plus the minimal CLI-validated workflow, scope and verification requirements only; never pasted file contents, proposal or research reasoning, or your own opinions about the work.
 
 **Risk and routing.** The issue form declares the risk floor. You propose a classification; the CLI selects the workflow and raises risk from expected paths and the actual diff. Never choose a workflow directly, downgrade an escalation, or continue implementation after the CLI requires stronger controls.
 

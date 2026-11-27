@@ -93,6 +93,7 @@ describe('routing authority', () => {
           subagent_type: 'Explore',
           prompt: 'Inspect interfaces read-only',
           description: 'explore',
+          model: 'haiku',
         }),
       ).toBeNull()
     },

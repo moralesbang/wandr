@@ -3,6 +3,7 @@
 // reviewers) get the stronger model; writing runs get the cheaper one. The job's effective risk
 // (risk.ts) sets how hard the reviewers look, and whether the evaluator runs at all.
 
+import { randomUUID } from 'node:crypto'
 import { record, Refusal, refuseWhileBlocked } from './commands/common.ts'
 import { refreshRouting, requireRouted } from './commands/route.ts'
 import type { Risk } from './job.ts'
@@ -16,8 +17,11 @@ export type Model = 'sonnet' | 'opus'
 export type Effort = 'low' | 'medium' | 'high'
 type Setting = { model: Model; effort: Effort }
 
-/** The main session's own setting, for the skill's frontmatter; `factory launch` never plans it. */
-export const ORCHESTRATOR: Setting = { model: 'sonnet', effort: 'medium' }
+/**
+ * The main session's own setting: the skill's frontmatter states it and the guard enforces it
+ * (orchestrator-guard.ts); `factory launch` never plans it. The orchestrator's work is judgment.
+ */
+export const ORCHESTRATOR: Setting = { model: 'opus', effort: 'high' }
 
 const s = (model: Model, effort: Effort): Setting => ({ model, effort })
 const always = (setting: Setting) => ({ low: setting, normal: setting, high: setting })
@@ -79,7 +83,21 @@ export function launchSetting(agent: string, task: string, risk: Risk): LaunchSe
   return { ok: true, ...setting }
 }
 
+/**
+ * The first line of an Agent call's prompt, which names the plan it carries out: the guard parses
+ * it to match the call to its plan by id, agent, task, model and effort (orchestrator-guard.ts).
+ */
+export const LAUNCH_HEADER =
+  /^factory-launch: (\d+) (factory-[a-z-]+) ([a-z]+) ([0-9a-f]{8})(?:\r?\n|$)/
+
+const launchHeader = (job: number, agent: string, task: string, planId: string) =>
+  `factory-launch: ${job} ${agent} ${task} ${planId}`
+
 export type Launch = {
+  /** One plan authorizes one launch: the id the guard uses the plan up by. */
+  planId: string
+  /** The line the Agent call's prompt starts with. */
+  header: string
   agent: string
   task: Task
   model: Model
@@ -119,7 +137,10 @@ export async function launch(
   const { risk, raisedBy } = await jobRisk(job)
   const setting = launchSetting(agent, task, risk)
   if (!setting.ok) throw new Refusal(`Job #${number} (${risk} risk): ${setting.reason}`)
+  const planId = randomUUID().slice(0, 8)
   const planned: Launch = {
+    planId,
+    header: launchHeader(number, agent, task, planId),
     agent,
     task: task as Task,
     model: setting.model,
@@ -135,6 +156,7 @@ export async function launch(
       : {}),
   }
   record(root, number, 'launch.planned', {
+    planId,
     agent,
     task,
     model: setting.model,
