@@ -53,6 +53,8 @@ const SEALED = [
   'decision-requests/draft.md',
   'diagnosis.md',
   'summary.md',
+  'research.md',
+  'routing-proposal.json',
   'reviews/1.evaluator.md',
   'reviews/1.test-reviewer.md',
   'reviews/1.findings.md',

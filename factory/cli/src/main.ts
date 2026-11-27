@@ -18,6 +18,7 @@ import {
 } from './commands/lifecycle.ts'
 import { pr } from './commands/pr.ts'
 import { red } from './commands/red.ts'
+import { route, ROUTE_USAGE } from './commands/route.ts'
 import { REVIEW_USAGE, reviewReport } from './commands/review.ts'
 import { RULING_USAGE, ruling } from './commands/ruling.ts'
 import { LAUNCH_USAGE, launch } from './launch.ts'
@@ -30,6 +31,7 @@ import { watch } from './watch/server.ts'
 const USAGE = `Usage: bun run factory <command>
 
   start <n> --session <id>   take issue <n>, or resume its job
+${ROUTE_USAGE}
 ${LAUNCH_USAGE}
   red <n>                    verify the red and commit it
   check <n>                  run CI's steps in the job's worktree
@@ -83,6 +85,13 @@ async function main(argv: string[]): Promise<number> {
   const root = mainRoot()
 
   switch (command) {
+    case 'route': {
+      const file = positionals[2]
+      if (!file) throw new Refusal('route needs the proposal file: route <n> <file>')
+      const job = await route(root, issueNumber(arg), file)
+      print({ routing: job.routing, routingRevision: job.routingRevision })
+      return 0
+    }
     case 'start': {
       if (!values.session)
         throw new Refusal('start needs --session <id> (the skill passes ${CLAUDE_SESSION_ID}).')

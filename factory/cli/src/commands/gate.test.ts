@@ -7,6 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { makeJob } from '../job-fixture.ts'
+import { planRouting } from '../routing.ts'
 import { saveJob } from '../job.ts'
 import { git, patchId } from '../shell.ts'
 import { gate } from './gate.ts'
@@ -76,6 +77,20 @@ const mainMoves = async () => {
   await git(tree, 'push', '--quiet', 'origin', 'main')
   await git(tree, 'checkout', '--quiet', 'feat/7-add-a-thing')
 }
+
+const routing = () =>
+  planRouting(
+    {
+      scope: 'frontend',
+      complexity: 'small',
+      evidence: ['Change stylesheet spacing'],
+      expectedPaths: ['apps/web/src/styles.css'],
+      behaviorChange: false,
+      uncertainty: [],
+      verification: ['Review spacing at phone size'],
+    },
+    'low',
+  )
 
 describe('factory gate', () => {
   test("passes a job that rebased onto main's change to a protected path", async () => {
@@ -298,5 +313,43 @@ describe("factory gate: the CLI's commits stay in the branch", () => {
     const result = await runGate()
     expect(result.passed).toBe(false)
     expect(result.problems.join('\n')).toContain('apps/web/e2e/b.spec.ts')
+  })
+})
+
+const lightJob = async () =>
+  makeJob({
+    worktree: tree,
+    base,
+    branch: 'feat/7-add-a-thing',
+    risk: 'low',
+    routingRequired: true,
+    routing: routing(),
+    redCommit: null,
+    lastCheck: {
+      tree: await git(tree, 'rev-parse', 'HEAD^{tree}'),
+      green: true,
+      failedStep: null,
+      at: 'now',
+      log: 'check.log',
+    },
+  })
+
+describe('v1.4 light gate', () => {
+  test('passes a planned CSS change without a red commit', async () => {
+    await commit('apps/web/src/styles.css', 'style: adjust spacing')
+    saveJob(root, await lightJob())
+    expect((await gate(root, 7)).result.problems).toEqual([])
+  })
+
+  test('a growing light diff invalidates checks and requires acceptance tests', async () => {
+    await commit('apps/web/src/styles.css', 'style: adjust spacing')
+    await commit('apps/api/src/routes/walks.ts', 'fix: enforce ownership')
+    saveJob(root, await lightJob())
+    const result = await gate(root, 7)
+    expect(result.result.passed).toBe(false)
+    expect(result.job.routing?.workflow).toBe('reinforced')
+    expect(result.job.routing?.risk).toBe('high')
+    expect(result.result.problems.join(' ')).toContain('red commit')
+    expect(result.job.lastCheck).toBeNull()
   })
 })

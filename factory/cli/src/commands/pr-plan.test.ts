@@ -15,6 +15,8 @@ import {
 import { saveJob, stateDir, type ReviewPlan } from '../job.ts'
 import { git } from '../shell.ts'
 import { Refusal } from './common.ts'
+import { planRouting } from '../routing.ts'
+import { loadJob } from '../job.ts'
 import { pr } from './pr.ts'
 
 let root = ''
@@ -66,6 +68,7 @@ const blind = (pass: number, role: string, text: string) => {
 
 const plan = (pass: number, roles: ReviewPlan['roles'], at = head): ReviewPlan => ({
   pass,
+  routingRevision: 0,
   head: at,
   since: null,
   changed: [],
@@ -212,5 +215,80 @@ describe('factory pr follows the review plan', () => {
     expect(fake.calls()).toContain('gh pr create')
     const comment = readFileSync(join(stateDir(root, 7), 'pr-comment.md'), 'utf8')
     expect(comment).toContain('low risk')
+  })
+})
+
+const routed = () => {
+  const routing = planRouting(
+    {
+      scope: 'docs',
+      complexity: 'small',
+      evidence: ['The issue only corrects documentation.'],
+      expectedPaths: ['README.md'],
+      behaviorChange: false,
+      uncertainty: [],
+      verification: ['Read the rendered documentation.'],
+    },
+    'low',
+  )
+  saveJob(
+    root,
+    makeJob({
+      worktree: tree,
+      base: head,
+      risk: 'low',
+      routingRequired: true,
+      routing,
+      routingRevision: 1,
+      gate: { head, passed: true, at: 'now' },
+      reviews: [{ ...plan(1, { 'test-reviewer': 'review' }), risk: 'low', routingRevision: 1 }],
+    }),
+  )
+  put(
+    'issue.md',
+    '### Acceptance criteria\n\nAC1: The heading is correct.\nAC2: The link is valid.\n',
+  )
+  blind(1, 'test-reviewer', 'Both criteria verified independently.\n')
+}
+
+describe('factory pr routing guarantees', () => {
+  test('light opens without acceptance.md and publishes independently written AC evidence', async () => {
+    routed()
+    rmSync(join(handoff, 'acceptance.md'))
+    report(
+      1,
+      'test-reviewer',
+      'Verdict: approve\n\nAC1: Read the heading in README.md:1.\nAC2: Opened the target link successfully.\n',
+    )
+    await pr(root, 7)
+    const body = readFileSync(join(stateDir(root, 7), 'pr-body.md'), 'utf8')
+    expect(body).toContain('workflow: light; profile: docs; risk: low')
+    expect(body).toContain('AC2: Opened the target link successfully.')
+  })
+
+  test('light refuses a reviewer approval without evidence for every AC', async () => {
+    routed()
+    report(1, 'test-reviewer', 'Verdict: approve\n\nAC1: Read the heading.\n')
+    expect(((await refusal()) as Refusal).message).toContain('AC2')
+    expect(fake.calls()).toBe('')
+  })
+
+  test('refuses approval from an earlier routing revision', async () => {
+    routed()
+    const job = loadJob(root, 7)!
+    saveJob(root, {
+      ...job,
+      reviews: job.reviews.map((review) => ({ ...review, routingRevision: 0 })),
+    })
+    expect(((await refusal()) as Refusal).message).toContain('predates')
+    expect(fake.calls()).toBe('')
+  })
+
+  test('unclassified new jobs cannot open a PR with legacy approvals', async () => {
+    reviewed()
+    const job = loadJob(root, 7)!
+    saveJob(root, { ...job, routingRequired: true })
+    expect(((await refusal()) as Refusal).message).toContain('route')
+    expect(fake.calls()).toBe('')
   })
 })

@@ -50,6 +50,10 @@ import {
   type Seal,
 } from './seal.ts'
 
+/** Intake and research inspect the repo but cannot begin implementation. */
+export const routingReadOnly = (job: GuardContext['job']) =>
+  (job.routingRequired && !job.routing) || job.routing?.workflow === 'research'
+
 const str = (value: unknown) => (typeof value === 'string' ? value : undefined)
 
 const GLOB = /[*?[{]/
@@ -141,6 +145,8 @@ function sealedCandidates(sealed: Seal): string[] {
       'decision-requests',
       'diagnosis.md',
       'summary.md',
+      'research.md',
+      'routing-proposal.json',
       ...reviews,
       ...sealed.files,
     ]),
@@ -473,7 +479,7 @@ export const readPolicy: Policy = (context) => {
 
 /** Names of sealed material as a prompt would write them; the sealed store with or without `/`. */
 const SEALED_WORDS =
-  /build[- ]notes|decision[- ]requests?|diagnosis\.md|summary\.md|findings\.md|reviews\/\d+\.(?:evaluator|test-reviewer)\.md|\/sealed(?![\w.-])/gi
+  /build[- ]notes|decision[- ]requests?|diagnosis\.md|summary\.md|research\.md|routing-proposal\.json|findings\.md|reviews\/\d+\.(?:evaluator|test-reviewer)\.md|\/sealed(?![\w.-])/gi
 
 /** What a verifier may be told: where its inputs are, and their names. */
 const verifierMayHear = (role: string, word: string) =>
@@ -523,6 +529,13 @@ const promptPolicy =
   (...fields: string[]): Policy =>
   (context) => {
     if (context.agent) return allow
+    if (routingReadOnly(context.job)) {
+      const recipient = str(context.input.tool_input?.subagent_type)
+      if (recipient !== 'Explore')
+        return deny(
+          'Before executable routing, only read-only exploration may run. Classify with factory route first.',
+        )
+    }
     const sealed = loadSeal(context.root, context.job.number)
     if (!sealed) return allow
     const text = fields.map((field) => str(context.input.tool_input?.[field]) ?? '').join('\n')

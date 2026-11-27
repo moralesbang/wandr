@@ -12,7 +12,7 @@ body:
     id: risk
     attributes:
       label: Risk
-      description: How much a wrong build could hurt. It decides which reviewers judge the build and how hard. The factory raises low to normal when the branch touches the privacy boundary or a dependency or build file.
+      description: How much a wrong build could hurt. It decides which reviewers judge the build and how hard. The factory classifies scope and complexity automatically and can raise risk when expected or changed paths require stronger controls.
       options:
         - 'low: copy, styling, docs-like changes with no data path'
         - 'normal: the default'

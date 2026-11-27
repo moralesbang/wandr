@@ -44,13 +44,20 @@ export type Seal = {
 }
 
 /** What a blind pass must not see, at the top of the job's folder; reviews/ is sorted per file. */
-const SEALED_TOP = ['build-notes.md', 'decision-requests', 'diagnosis.md', 'summary.md'] as const
+const SEALED_TOP = [
+  'build-notes.md',
+  'decision-requests',
+  'diagnosis.md',
+  'summary.md',
+  'research.md',
+  'routing-proposal.json',
+] as const
 
 const BLIND_PASS = /\.blind\.md$/
 
 /**
  * Whether a path in the job's folder is sealed material: the build notes, the Decision Requests,
- * the diagnosis, the summary, and every review file but a blind pass.
+ * the diagnosis, the summary, routing research and proposal, and every review file but a blind pass.
  */
 export function isSealedName(rel: string): boolean {
   const parts = rel.split('/').filter(Boolean)

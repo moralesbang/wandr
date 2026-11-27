@@ -1,10 +1,11 @@
+import { refreshRouting, requireRouted } from './route.ts'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { handoffDir, saveJob, type Job } from '../job.ts'
 import { protectedFromBuild } from '../paths.ts'
 import { git, lines, patchId, uncommitted } from '../shell.ts'
 import { testChanges, type TestChanges } from '../test-changes.ts'
-import { record, refuseWhileBlocked, requireJob } from './common.ts'
+import { record, refuseWhileBlocked } from './common.ts'
 
 export type GateResult = { passed: boolean; problems: string[]; tests: TestChanges; head: string }
 
@@ -104,8 +105,9 @@ export async function gate(
   root: string,
   number: number,
 ): Promise<{ job: Job; result: GateResult }> {
-  const job = requireJob(root, number)
+  const job = await refreshRouting(root, number)
   refuseWhileBlocked(job, 'the gate')
+  requireRouted(job, 'the gate')
   const cwd = job.worktree
   const head = await git(cwd, 'rev-parse', 'HEAD')
   const headTree = await git(cwd, 'rev-parse', 'HEAD^{tree}')
@@ -114,7 +116,10 @@ export async function gate(
   const main = await git(cwd, 'rev-parse', 'FETCH_HEAD')
   const problems: string[] = []
 
-  if (!job.redCommit) problems.push('There is no red commit yet. Run factory red first.')
+  if (!job.redCommit && job.routing?.workflow !== 'light')
+    problems.push(
+      'There is no red commit yet. Run factory red first. If a light job escalated after implementation, raise a Decision Request to restart with independent acceptance tests before implementation.',
+    )
   const dirty = await uncommitted(cwd)
   if (dirty.length)
     problems.push(`Uncommitted changes: ${dirty.join(', ')}. Commit or revert them.`)

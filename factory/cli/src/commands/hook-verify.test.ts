@@ -28,6 +28,7 @@ const plan = (pass: number, roles: ReviewPlan['roles']): ReviewPlan => ({
   since: pass === 1 ? null : `head${pass - 1}`,
   changed: [],
   risk: 'normal',
+  routingRevision: 0,
   raisedBy: [],
   roles,
   at: '2026-01-01T00:00:00Z',

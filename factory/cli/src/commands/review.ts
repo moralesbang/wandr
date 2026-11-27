@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { handoffDir, reviewPass, saveJob, type Job, type ReviewPlan } from '../job.ts'
 import { approves } from './pr.ts'
+import { refreshRouting, requireRouted } from './route.ts'
 import { planRoles, rolesWith, type PreviousPass } from '../review-plan.ts'
 import { jobRisk } from '../risk.ts'
 import { loadSeal, refuseWhileSealed, seal, sealedStore } from '../seal.ts'
@@ -25,12 +26,18 @@ const previousPass = (job: Job, plan: ReviewPlan | undefined): PreviousPass | nu
   plan ? { roles: plan.roles, evaluatorApproved: evaluatorApproved(job, plan) } : null
 
 export async function review(root: string, number: number): Promise<ReviewPlan> {
-  const job = requireJob(root, number)
+  const job = await refreshRouting(root, number)
   refuseWhileBlocked(job, 'a review plan')
+  requireRouted(job, 'a review plan')
   const pass = reviewPass(job)
   const head = await git(job.worktree, 'rev-parse', 'HEAD')
   const planned = job.reviews.find((plan) => plan.pass === pass)
   if (planned) {
+    if ((planned.routingRevision ?? 0) !== job.routingRevision) {
+      throw new Refusal(
+        'The review pass predates the current route. Write the findings and run factory round before review.',
+      )
+    }
     if (planned.head === head) return planned
     throw new Refusal(
       `Review pass ${pass} of job #${number} was planned on ${planned.head.slice(0, 7)}, and HEAD is now ${head.slice(0, 7)}. A change after a review pass goes through a round: write the findings, then run factory round ${number}.`,
@@ -42,7 +49,12 @@ export async function review(root: string, number: number): Promise<ReviewPlan> 
     ? lines(await git(job.worktree, 'diff', '--name-only', '--no-renames', previous.head, head))
     : []
   const { risk, raisedBy } = await jobRisk(job)
-  const roles = planRoles({ risk, previous: previousPass(job, previous), changed })
+  const previousRouting = (previous?.routingRevision ?? 0) === job.routingRevision
+  const roles = planRoles({
+    risk,
+    previous: previousRouting ? previousPass(job, previous) : null,
+    changed,
+  })
   const plan: ReviewPlan = {
     pass,
     head,
@@ -51,6 +63,7 @@ export async function review(root: string, number: number): Promise<ReviewPlan> 
     risk,
     raisedBy,
     roles,
+    routingRevision: job.routingRevision,
     at: new Date().toISOString(),
   }
   const blind = rolesWith(plan, 'review')
@@ -61,6 +74,7 @@ export async function review(root: string, number: number): Promise<ReviewPlan> 
     head,
     since: plan.since,
     changed: changed.length,
+    routingRevision: job.routingRevision,
     risk,
     raisedBy,
     roles,

@@ -18,6 +18,7 @@ import {
 import { join, resolve } from 'node:path'
 import { z } from 'zod'
 import { JOBS_FOLDER, jobFolder } from './paths.ts'
+import { RoutingPlan } from './routing.ts'
 
 export const MAX_JOBS = 3
 export const MAX_BUILD_ATTEMPTS = 3
@@ -47,6 +48,7 @@ export const ReviewPlan = z.object({
   /** The files changed since then. */
   changed: z.array(z.string()),
   risk: Risk,
+  routingRevision: z.number().int().nonnegative().default(0),
   raisedBy: z.array(z.string()),
   roles: z.object({ evaluator: RoleTask.optional(), 'test-reviewer': RoleTask }),
   at: z.string(),
@@ -67,6 +69,11 @@ export const Job = z.object({
   title: z.string(),
   /** The risk the issue declares; an issue without the field is normal. */
   risk: Risk.default('normal'),
+  /** Legacy jobs retain the original flow; every new job must be classified before execution. */
+  routingRequired: z.boolean().default(false),
+  routing: RoutingPlan.nullable().default(null),
+  routingHistory: z.array(RoutingPlan).default([]),
+  routingRevision: z.number().int().nonnegative().default(0),
   slug: z.string(),
   branch: z.string(),
   worktree: z.string(),
@@ -162,6 +169,8 @@ export const handoffDir = (job: Pick<Job, 'number' | 'worktree'>) =>
 /** The files and folders agents and the orchestrator hand each other, in the handoff folder. */
 export const HANDOFF_FILES = [
   'issue.md',
+  'research.md',
+  'routing-proposal.json',
   'acceptance.md',
   'build-notes.md',
   'checks',

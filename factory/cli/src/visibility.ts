@@ -61,8 +61,8 @@ const FINDINGS: Input = {
   from: 'after-blind-pass',
 }
 const ORCHESTRATOR_NOTES: Input = {
-  label: "The orchestrator's diagnosis and summary",
-  paths: ['job:diagnosis.md', 'job:summary.md'],
+  label: "The orchestrator's diagnosis, summary and routing research",
+  paths: ['job:diagnosis.md', 'job:summary.md', 'job:research.md', 'job:routing-proposal.json'],
   from: 'after-blind-pass',
 }
 

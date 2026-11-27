@@ -2,6 +2,8 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { readEvents, type FactoryEvent } from '../events.ts'
 import { wroteInJob } from '../runs.ts'
+import { parseCriteria } from '../issue.ts'
+import { refreshRouting, requireRouted } from './route.ts'
 import type { RunUsage } from '../usage.ts'
 import {
   handoffDir,
@@ -14,7 +16,7 @@ import {
 } from '../job.ts'
 import { fileHash, refuseWhileSealed } from '../seal.ts'
 import { gh, git } from '../shell.ts'
-import { LABELS, record, Refusal, refuseWhileBlocked, requireJob } from './common.ts'
+import { LABELS, record, Refusal, refuseWhileBlocked } from './common.ts'
 import { moveLabel } from './start.ts'
 
 /** GitHub refuses comments and bodies over 65,536 characters. */
@@ -51,6 +53,11 @@ export function prBody(job: Job, parts: { summary: string; acceptance: string })
     [
       `Closes #${job.number}`,
       `## Summary\n\n${parts.summary}`,
+      ...(job.routing
+        ? [
+            `## Execution plan\n\nPolicy ${job.routing.policyVersion}; workflow: ${job.routing.workflow}; profile: ${job.routing.scope}; risk: ${job.routing.risk}.\n\n${job.routing.reasons.map((reason) => `- ${reason}`).join('\n')}\n\nVerification:\n${job.routing.verification.map((item) => `- ${item}`).join('\n')}`,
+          ]
+        : []),
       `## Acceptance criteria\n\n${parts.acceptance}`,
       `## Checks\n\nThe local CI checks passed on \`${job.gate?.head.slice(0, 7)}\`${check ? ` (${check.at})` : ''}. ${job.attempts} build attempt(s), ${job.rounds} review round(s) with findings.`,
       `## Acceptance test fixes\n\n${fixes}`,
@@ -201,10 +208,35 @@ export function requireFrozenBlindPasses(
   }
 }
 
+/** Lightweight changes earn acceptance evidence from the independent reviewer, not the builder. */
+export function lightAcceptance(issue: string, report: string): string {
+  const parsed = parseCriteria(issue)
+  if (!parsed.ok) throw new Refusal(`Cannot verify lightweight acceptance: ${parsed.reason}`)
+  const evidence = new Map<string, string>()
+  for (const line of report.split('\n')) {
+    const match = /^\s*(?:[-*]\s+)?(AC\d+):\s*(\S.*)$/i.exec(line)
+    if (!match) continue
+    const id = match[1]!.toUpperCase()
+    if (evidence.has(id))
+      throw new Refusal(
+        `The test reviewer's report repeats ${id}; provide one clear evidence mapping.`,
+      )
+    evidence.set(id, match[2]!.trim())
+  }
+  const missing = parsed.criteria.filter(({ id }) => !evidence.has(id))
+  if (missing.length) {
+    throw new Refusal(
+      `The test reviewer's report needs acceptance evidence for ${missing.map(({ id }) => id).join(', ')} as AC<n>: <observation and verification>.`,
+    )
+  }
+  return parsed.criteria.map(({ id }) => `${id}: ${evidence.get(id)}`).join('\n')
+}
+
 /** Opens the PR once the gate passed on HEAD and every reviewer the pass's plan names approves. */
 export async function pr(root: string, number: number): Promise<Job> {
-  const job = requireJob(root, number)
+  const job = await refreshRouting(root, number)
   refuseWhileBlocked(job, 'the PR')
+  requireRouted(job, 'the PR')
   refuseWhileSealed(root, job, 'the PR')
   // What the agents and the orchestrator wrote is in the handoff folder; what the CLI posts is
   // kept with the job's state.
@@ -221,6 +253,11 @@ export async function pr(root: string, number: number): Promise<Job> {
       `Review pass ${pass} has no plan. Run: bun run factory review ${number}, then the reviewers it names.`,
     )
   }
+  if ((plan.routingRevision ?? 0) !== job.routingRevision) {
+    throw new Refusal(
+      'The review plan predates the current routing policy decision. Run factory round and review again.',
+    )
+  }
   if (plan.head !== head) {
     throw new Refusal(
       `Review pass ${pass} reviewed ${plan.head.slice(0, 7)}, and HEAD is ${head.slice(0, 7)}: what changed since was never reviewed.`,
@@ -231,7 +268,10 @@ export async function pr(root: string, number: number): Promise<Job> {
   requireOwnWrites(events, plan)
   requireFrozenBlindPasses(job, plan, dir)
   const summary = read(join(dir, 'summary.md'))
-  const acceptance = read(join(dir, 'acceptance.md'))
+  const acceptance =
+    job.routing?.workflow === 'light'
+      ? lightAcceptance(read(join(dir, 'issue.md')) ?? '', reports['test-reviewer'])
+      : read(join(dir, 'acceptance.md'))
   if (!summary) throw new Refusal(`Write the PR summary in ${dir}/summary.md first.`)
   if (!acceptance) throw new Refusal(`The test agent's ${dir}/acceptance.md is missing.`)
 

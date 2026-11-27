@@ -23,11 +23,11 @@ Below, `<n>` is the issue number, `<job>` is the job's folder `factory/.jobs/<n>
 | `factory-evaluator` | `review`, `verify` |
 | `factory-test-reviewer` | `review`, `verify`, `ruling` |
 
-The prompt holds `<n>`, the task, the worktree path, `<job>` and the file paths the task needs. Paths only, never pasted contents, never your own reasoning or opinions about the work.
+The prompt holds `<n>`, the task, the worktree path, `<job>` and the file paths the task needs. Paths plus the minimal CLI-validated workflow, scope and verification requirements only; never pasted file contents, proposal or research reasoning, or your own opinions about the work.
 
-**Risk.** The issue form declares the risk and the CLI raises it from the diff (`launch` and `review` print it). You never pick it.
+**Risk and routing.** The issue form declares the risk floor. You propose a classification; the CLI selects the workflow and raises risk from expected paths and the actual diff. Never choose a workflow directly, downgrade an escalation, or continue implementation after the CLI requires stronger controls.
 
-**Visibility.** Hand an agent only what its inputs allow (`factory/cli/src/visibility.ts`). The test agent never gets implementation plans. While the job is sealed, your prompts, messages and the files you write in `<job>` carry no build notes, Decision Request or earlier report, by name or by quote: the guard denies them.
+**Visibility.** Hand an agent only what its inputs allow (`factory/cli/src/visibility.ts`). The test agent never gets implementation plans. While the job is sealed, your prompts, messages and the files you write in `<job>` carry no build notes, Decision Request, routing proposal, research report or earlier report, by name or by quote: the guard denies them.
 
 **Waiting.** While background agents run, wait without narrating. Every turn costs money; the next turn is the agents' completion notice. Each agent ends by reporting what it wrote: check the files exist before the next step. The PR comment carries a per-agent cost table. The user follows the job live with `! bun run factory watch`, which prints a URL with a token; you run neither `watch` nor `hook`, and neither `clean` nor `clean --abandon`: the user runs those, from their own prompt, and the guard denies them to you. You have no MCP tool during a job, and only the tools of the guard's list; `git credential`, `git notes`, `git config` of an alias or a hooks path, a shell fed its code on stdin (`| bash`) and `claude` are denied too.
 
@@ -38,9 +38,16 @@ The prompt holds `<n>`, the task, the worktree path, `<job>` and the file paths 
 1. Run `bun run factory start $ARGUMENTS --session ${CLAUDE_SESSION_ID}`, with exactly this session id: the guard denies any other. It creates or resumes the job and prints the job and, on a resumed blocked job, the user's answer to the last Decision Request. Read the answer: it is the user's decision. If a station already finished (`red` commit set, reviews on disk), continue from the first station not done.
 2. If `start` reports a seal, follow what it says: it names the blind passes still missing and the `unseal` to run after them. That is step 4.
 3. Call EnterWorktree with the `worktree` path from the output. Every agent now works there, and neither you nor they can write outside it: every file you or an agent writes goes under `<job>` or elsewhere in the worktree. The job's state (`job.json`, `events.jsonl`) stays in the main checkout, written only by the CLI and the hooks; read it through `bun run factory status`.
-4. Done when you are in the worktree and `<job>/issue.md` exists.
+4. For a new job without a validated route, classify it before launching a writer. Read the issue and inspect the relevant public interfaces and code to establish scope; do not implement. Write `<job>/routing-proposal.json` with `scope` (`frontend`, `backend`, `fullstack`, `tooling`, `docs`), `complexity` (`small`, `standard`, `uncertain`), `expectedPaths` (exact repo-relative file names), `behaviorChange`, `evidence`, `uncertainty` and `verification`. The evidence explains the classification using facts and paths; verification names the guarantees and the checks that can prove them. Do not place implementation instructions or approval arguments in the proposal.
+5. Run `bun run factory route <n> <job>/routing-proposal.json` and follow its validated plan. The CLI's policy, not your estimate of the issue's size, decides the workflow. Existing jobs without routing keep their legacy standard flow; do not reinterpret work already under way as light.
+6. `research`: investigate as the orchestrator, inspecting the repo read-only; write `<job>/research.md` with findings, evidence and resolved or remaining questions, then update the proposal. Do not launch a writer, count a build attempt, change product files or open a PR. Re-run `route` with the resulting classification when uncertainty is resolved. If the answer needs a product or architecture decision, raise a Decision Request instead of guessing.
+7. `light`: eligible paths are `README.md`, Markdown under `docs/`, and CSS under `apps/web/src/`; executable JSX/TSX copy changes remain standard. Skip step 2 and go to step 3. Do not manufacture a new test only to obtain a red. `standard` and `reinforced`: go to step 2. Before a reinforced build, record impact evidence: affected data and contracts, the privacy or authorization boundary, failure cases, and recovery where relevant. Keep implementation reasoning out of the test writer's and blind reviewers' prompts.
+
+Done when you are in the worktree, `<job>/issue.md` exists, and the CLI has accepted an executable plan (or the job is an existing legacy standard job).
 
 ## 2. The red
+
+Only the standard and reinforced workflows, and legacy jobs, require this station. A light plan goes directly to the build; research cannot implement.
 
 1. Launch `factory-test`, task `write`. Give it `<job>/issue.md` and `<job>`.
 2. Run `bun run factory red <n>`. Exit 0 prints the red commit: go to step 3.
@@ -54,9 +61,9 @@ Done when `red` printed a red commit and `<job>/acceptance.md` exists.
 A build attempt is one run of `factory-build` until it stops. A job has one budget of 3, for the build loop and the review rounds together. A run counts when it is the first, or a rerun after a red `factory check` or a rejected `factory gate`. A review round's fix run that reaches green costs nothing.
 
 1. Before each counted run, run `bun run factory attempt <n>`. Refused (it would be the 4th): raise a Decision Request.
-2. Launch `factory-build`, task `build`, with `<job>/issue.md`, `<job>`, the worktree path, and, for an attempt after the first, the failing check log under `<job>/checks/`, `<job>/build-notes.md`, the latest `<job>/reviews/<k>.findings.md` if a round sent it back, and `<job>/diagnosis.md` if it exists.
+2. Launch `factory-build`, task `build`, with the validated scope/profile and verification requirements, `<job>/issue.md`, `<job>`, the worktree path, and, for an attempt after the first, the failing check log under `<job>/checks/`, `<job>/build-notes.md`, the latest `<job>/reviews/<k>.findings.md` if a round sent it back, and `<job>/diagnosis.md` if it exists.
 3. If the build agent escalates (a public contract, the architecture, an acceptance test, a protected path, or anything outside the ACs), raise a Decision Request with its reason. A question about an acceptance test follows step 5, item 4.
-4. When it stops, run `bun run factory gate <n>`. Exit 0: go to step 4. The gate rejects an agent's merge commit (the build agent rebases onto `main`, never merges), any `refs/notes/*`, and a branch that lost a commit the CLI made (the red commit, an acceptance-test fix): it recognizes them after a rebase by their patch, and names the one missing.
+4. When it stops, run `bun run factory gate <n>`. If route reassessment requires a stronger workflow, complete the newly required stations before retrying: a light job that now needs acceptance tests returns to step 2 before implementation. If implementation already exists without a pre-implementation red, raise a Decision Request explaining that a restart is needed to establish the red correctly; do not invent a failing assertion, erase implemented work or claim a passing test is a valid red. Exit 0: go to step 4. The gate rejects an agent's merge commit (the build agent rebases onto `main`, never merges), any `refs/notes/*`, and a branch that lost a commit the CLI made (the red commit, an acceptance-test fix): it recognizes them after a rebase by their patch, and names the one missing.
 5. Exit 1: the run ended red, and the next run counts. After a first red attempt, repeat from step 1 with the failing output. After a second, diagnose: launch `factory-diagnose`, task `diagnose`, with `<job>` and the worktree path. It writes `<job>/diagnosis.md`.
    - A technical cause: run attempt 3 with the diagnosis.
    - A functional ambiguity (the ACs or contracts allow two readings): raise a Decision Request.
@@ -93,7 +100,7 @@ Done when every role of the plan that isn't `carry` has its final report for pas
 ## 6. The PR
 
 1. Write `<job>/summary.md`: what changed and why, in plain words, in English, for a reviewer who has not seen the issue. No test lists (the CLI adds the ACs from `acceptance.md`).
-2. Run `bun run factory pr <n>`. It needs, for each role in the pass's plan, its final report for the pass (and, for a `review` role, its blind pass) or a carried approval. A refusal names what is missing; fix that and rerun. It prints the PR URL.
+2. Run `bun run factory pr <n>`. It needs, for each role in the pass's plan, its final report for the pass (and, for a `review` role, its blind pass) or a carried approval. A refusal names what is missing; fix that and rerun. A light job uses independent review evidence against its ACs instead of claiming a test agent wrote acceptance tests. Research cannot open a PR. It prints the PR URL.
 3. End with one line in the terminal, in Spanish: the PR URL and the number of attempts and rounds used.
 
 ## 7. A Decision Request
