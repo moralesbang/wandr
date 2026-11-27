@@ -13,7 +13,7 @@ Below, `<n>` is the issue number, `<job>` is the job's folder `factory/.jobs/<n>
 
 ## Rules for every run
 
-**Launching an agent.** Before every Agent call, run `bun run factory launch <n> <agent> --task <task>`. It prints the `model` and `effort` the run gets: pass them in the Agent call's `model` and `effort` parameters, together with `run_in_background: true` and the `subagent_type`. A refusal means the run doesn't happen: there is no evaluator at low risk, for one. The tasks:
+**Launching an agent.** Before every Agent call, run `bun run factory launch <n> <agent> --task <task>`. It prints the `model` and `effort` the run gets and a `header` line. Pass the `model` and `effort` in the Agent call's parameters, together with `run_in_background: true` and the `subagent_type`, and start the prompt with the `header` line exactly as printed: the guard matches the call to its plan by that line, denies a call whose agent, task, model or effort differs, and lets one plan start one run, so every launch needs its own `launch` call. A refusal means the run doesn't happen: there is no evaluator at low risk, for one. During a job you launch only these agents (and an `Explore` subagent with `model: haiku`): the guard denies `general-purpose` and every other type. The tasks:
 
 | Agent | Tasks |
 | --- | --- |
@@ -23,7 +23,7 @@ Below, `<n>` is the issue number, `<job>` is the job's folder `factory/.jobs/<n>
 | `factory-evaluator` | `review`, `verify` |
 | `factory-test-reviewer` | `review`, `verify`, `ruling` |
 
-The prompt holds `<n>`, the task, the worktree path, `<job>` and the file paths the task needs. Paths plus the minimal CLI-validated workflow, scope and verification requirements only; never pasted file contents, proposal or research reasoning, or your own opinions about the work.
+After the header, the prompt holds `<n>`, the task, the worktree path, `<job>` and the file paths the task needs. Paths plus the minimal CLI-validated workflow, scope and verification requirements only; never pasted file contents, proposal or research reasoning, or your own opinions about the work.
 
 **Risk and routing.** The issue form declares the risk floor. You propose a classification; the CLI selects the workflow and raises risk from expected paths and the actual diff. Never choose a workflow directly, downgrade an escalation, or continue implementation after the CLI requires stronger controls.
 

@@ -163,10 +163,24 @@ The declared risk is a floor; the diff only escalates the plan; a confirmed rout
 
 ### FI-019 — The CLI fixes each run's model and effort
 
-An agent runs only with the model and effort `LAUNCH_TABLE` gives its task at the job's risk; a run the table doesn't hold (an evaluator at low risk) doesn't happen. The orchestrator runs `ORCHESTRATOR` (Opus at high effort). The guard enforces both: it denies the orchestrator's calls while the main session's latest assistant message ran another model or effort, and an Agent call for a factory agent whose model or effort differs from the unused plan `factory launch` logged for it, or that has no plan. One plan authorizes one launch.
+An agent runs only with the model and effort `LAUNCH_TABLE` gives its task at the job's risk; a run the table doesn't hold (an evaluator at low risk) doesn't happen. The orchestrator runs `ORCHESTRATOR` (Opus at high effort). The guard enforces both: it denies the orchestrator's calls while the main session's latest assistant message ran another model or effort, and an Agent call for a factory agent that doesn't carry its plan. A plan is `factory launch`'s `launch.planned` event, named by an id; the call's prompt starts with the `header` line `factory launch` printed, and the call's agent, task, model and effort must be the plan's. One plan authorizes one launch.
 
-- **Mechanism:** `launch.ts` (`LAUNCH_TABLE`, `ORCHESTRATOR`), `orchestrator-guard.ts` (`orchestratorSetting`, `launchMatchesPlan`), `commands/hook.ts` (`launch.authorized`).
+- **Mechanism:** `launch.ts` (`LAUNCH_TABLE`, `ORCHESTRATOR`, `LAUNCH_HEADER`), `orchestrator-guard.ts` (`orchestratorSetting`, `launchPolicy`), `commands/hook.ts` (`launch.authorized`).
 - **Defended by:** `commands/hook-orchestrator.acceptance.test.ts`, `launch.test.ts`, `agent-frontmatter.test.ts`.
+
+### FI-024 — A factory agent launches only Explore, on Haiku
+
+Every subagent of a job may launch one kind of subagent: `Explore`, with `model: haiku`. Any other type (`general-purpose`, another factory agent) and any other Explore model, or none, is denied: an agent's `tools: Agent(Explore)` allowlist doesn't constrain it, and an unpinned launch takes whatever model its type defaults to.
+
+- **Mechanism:** `orchestrator-guard.ts` (`launchPolicy`), `commands/hook.ts`.
+- **Defended by:** `commands/hook-orchestrator.acceptance.test.ts`.
+
+### FI-025 — Inside a job the orchestrator launches only the factory's agents and Explore
+
+While a job's session is bound to it (from `factory start --session` until its folder is cleaned, in any state, `pr_open` included), the orchestrator's Agent calls are the factory's agents, each with its plan (FI-019), and `Explore` on Haiku. Any other type, `general-purpose` included, is denied, so unrelated work can't ride on a job's session.
+
+- **Mechanism:** `orchestrator-guard.ts` (`launchPolicy`), `commands/hook.ts`, `job.ts` (`locateSession`).
+- **Defended by:** `commands/hook-orchestrator.acceptance.test.ts`.
 
 ## Record
 

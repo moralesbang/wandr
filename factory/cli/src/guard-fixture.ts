@@ -37,16 +37,40 @@ export function mainTranscript(root: string, model = 'claude-opus-5-5', effort =
   return path
 }
 
-/** What `factory launch` does before an Agent call: logs the plan, returns what the call carries. */
-export function planLaunch(root: string, agent: string, model = 'opus', effort = 'medium') {
+let plans = 0
+
+/**
+ * What `factory launch` does before an Agent call: logs the plan, returns what the call carries,
+ * the `header` its prompt starts with included.
+ */
+export function planLaunch(
+  root: string,
+  agent: string,
+  task = 'review',
+  model = 'opus',
+  effort = 'medium',
+) {
+  const planId = (++plans).toString(16).padStart(8, '0')
   appendEvent(root, {
     t: new Date().toISOString(),
     job: 7,
     source: 'cli',
     kind: 'launch.planned',
-    detail: { agent, model, effort },
+    detail: { planId, agent, task, model, effort },
   })
-  return { model, effort }
+  return { model, effort, planId, header: `factory-launch: 7 ${agent} ${task} ${planId}` }
+}
+
+/** An orchestrator's Agent call for a factory agent, carrying the plan `factory launch` made. */
+export function plannedCall(root: string, agent: string, prompt: string, task = 'review') {
+  const { model, effort, header } = planLaunch(root, agent, task)
+  return {
+    subagent_type: agent,
+    description: 'review',
+    prompt: `${header}\n${prompt}`,
+    model,
+    effort,
+  }
 }
 
 export type GuardJob = ReturnType<typeof guardJob>
@@ -124,7 +148,14 @@ export function guardJob(
         typeof factoryAgent === 'string' &&
         factoryAgent.startsWith('factory-')
       ) {
-        input = { ...planLaunch(root, factoryAgent), ...input }
+        const planned = planLaunch(root, factoryAgent)
+        const given = (input as { prompt?: unknown }).prompt
+        input = {
+          model: planned.model,
+          effort: planned.effort,
+          ...input,
+          prompt: `${planned.header}\n${typeof given === 'string' ? given : ''}`,
+        }
       }
       const out = hookGuard(
         root,

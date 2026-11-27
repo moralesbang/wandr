@@ -11,7 +11,7 @@ import { makeJob } from '../job-fixture.ts'
 import { stateDir, saveJob, type ReviewPlan } from '../job.ts'
 import { seal } from '../seal.ts'
 import { hookGuard } from './hook.ts'
-import { mainTranscript, planLaunch } from '../guard-fixture.ts'
+import { mainTranscript, plannedCall } from '../guard-fixture.ts'
 
 let root = ''
 let worktree = ''
@@ -83,12 +83,7 @@ const read = (who: Who, path: string) => call(who, 'Read', { file_path: path })
 const bash = (who: Who, command: string) => call(who, 'Bash', { command })
 const write = (who: Who, path: string) => call(who, 'Write', { file_path: path, content: 'x' })
 const launch = (type: string, prompt: string) =>
-  call(null, 'Agent', {
-    subagent_type: type,
-    description: 'review',
-    prompt,
-    ...planLaunch(root, type),
-  })
+  call(null, 'Agent', plannedCall(root, type, prompt))
 
 describe('the evaluator reviews blind while the test reviewer verifies (sealed for the evaluator)', () => {
   beforeEach(() => {

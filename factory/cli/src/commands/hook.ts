@@ -25,7 +25,12 @@ import { bashPolicy } from '../bash-policy.ts'
 import { allow, first, type Policy, type Verdict } from '../policy.ts'
 import { agentPolicy, messagePolicy, readPolicy } from '../read-guard.ts'
 import { writePolicy } from '../write-guard.ts'
-import { launchedAgent, launchMatchesPlan, orchestratorSetting } from '../orchestrator-guard.ts'
+import {
+  launchedAgent,
+  launchedPlanId,
+  launchPolicy,
+  orchestratorSetting,
+} from '../orchestrator-guard.ts'
 
 const readText = (path: string) => {
   try {
@@ -249,7 +254,7 @@ function judge(mainRoot: string, input: HookInput, found: Job): string {
     first([
       orchestratorSetting(context),
       entry ? entry.policy(context) : allow,
-      launchMatchesPlan(context),
+      launchPolicy(context),
     ])
   if (!verdict || verdict.ok) {
     const launched = agent ? null : launchedAgent(tool, input.tool_input)
@@ -261,7 +266,7 @@ function judge(mainRoot: string, input: HookInput, found: Job): string {
         source: 'hook',
         kind: 'launch.authorized',
         ...(input.tool_use_id ? { toolUseId: input.tool_use_id } : {}),
-        detail: { agent: launched },
+        detail: { agent: launched, planId: launchedPlanId(input.tool_input) },
       })
     }
     return ''

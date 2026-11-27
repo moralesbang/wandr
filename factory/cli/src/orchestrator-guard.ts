@@ -6,7 +6,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { readEvents } from './events.ts'
-import { ORCHESTRATOR } from './launch.ts'
+import { LAUNCH_HEADER as HEADER, ORCHESTRATOR } from './launch.ts'
 import { allow, deny, type Policy } from './policy.ts'
 
 const str = (value: unknown) => (typeof value === 'string' ? value : undefined)
@@ -78,67 +78,99 @@ export const orchestratorSetting: Policy = (context) => {
   )
 }
 
+const isLaunch = (tool: string | undefined) => tool === 'Agent' || tool === 'Task'
+
 /** The factory agent an orchestrator call launches, or null for anything else (Explore included). */
 export function launchedAgent(
   tool: string | undefined,
   input: Record<string, unknown> | undefined,
 ): string | null {
-  if (tool !== 'Agent' && tool !== 'Task') return null
+  if (!isLaunch(tool)) return null
   const type = str(input?.subagent_type)
   return type?.startsWith('factory-') ? type : null
 }
 
-/**
- * The plan an agent's next launch is judged by: the latest `launch.planned` for it that no
- * authorized launch used up. One plan authorizes one launch, so a stale plan can't authorize a later
- * run, and a newer plan replaces an older unused one. Matching is by agent and by order in the log.
- */
-function unusedPlan(
-  events: ReturnType<typeof readEvents>,
-  agent: string,
-): { model: string; effort: string } | null {
-  let plan: { model: string; effort: string } | null = null
-  for (const event of events) {
-    if (event.detail?.agent !== agent) continue
-    if (event.kind === 'launch.planned') {
-      plan = { model: String(event.detail.model ?? ''), effort: String(event.detail.effort ?? '') }
-    } else if (event.kind === 'launch.authorized') {
-      plan = null
-    }
-  }
-  return plan
-}
+/** The plan id a call names in its prompt's first line, or null. */
+export const launchedPlanId = (input: Record<string, unknown> | undefined): string | null =>
+  HEADER.exec(str(input?.prompt) ?? '')?.[4] ?? null
 
 /**
- * An orchestrator's launch of a factory agent carries the model and effort of the unused plan
- * `factory launch` logged for that agent. Subagents' own calls (their `Agent(Explore)`) and every
- * other subagent type are not judged here. The hook logs `launch.authorized` for a launch it lets
- * through, which uses the plan up.
+ * Which subagents a job's session may launch. Every subagent of a job launches only `Explore`, on
+ * `haiku`. The orchestrator launches `Explore` on `haiku` too, and a factory agent only with a
+ * plan: its prompt starts with the header `factory launch` printed, the plan's id is known and
+ * unused, and the call's agent, task, model and effort are the plan's. One plan authorizes one
+ * launch, so a stale plan can't authorize a later run, and the task is part of the plan, so a
+ * ruling's plan can't authorize a review. Any other type, `general-purpose` included, is denied.
+ * The hook logs `launch.authorized` with the plan id for a launch it lets through, which uses the
+ * plan up; the same call judged again (a retry) is the launch already authorized.
  */
-export const launchMatchesPlan: Policy = (context) => {
-  if (context.agent) return allow
-  const agent = launchedAgent(context.input.tool_name, context.input.tool_input)
-  if (!agent) return allow
-  const n = context.job.number
-  const events = readEvents(context.root, n)
-  const toolUseId = context.input.tool_use_id
-  // The same call judged again (a retry) is the launch the plan was already used for.
-  if (
-    toolUseId !== undefined &&
-    events.some((event) => event.kind === 'launch.authorized' && event.toolUseId === toolUseId)
-  ) {
-    return allow
+export const launchPolicy: Policy = (context) => {
+  const { tool_name: tool, tool_input: input, tool_use_id: toolUseId } = context.input
+  if (!isLaunch(tool)) return allow
+  const type = str(input?.subagent_type) ?? ''
+  const model = str(input?.model)
+  const none = type || 'a call with no subagent_type'
+  if (type === 'Explore') {
+    // Explore's default model in this setup can't be read from the guard's inputs, and runs of it
+    // have passed `sonnet`: it is pinned, not defaulted.
+    return model === 'haiku'
+      ? allow
+      : deny(
+          `An Explore subagent of a factory job runs on haiku: pass model "haiku" in the Agent call (this one carries ${model ?? 'none'}).`,
+        )
   }
-  const plan = unusedPlan(events, agent)
-  if (!plan) {
+  if (context.agent) {
     return deny(
-      `No unused launch plan for ${agent} in job #${n}: run \`bun run factory launch ${n} ${agent} --task <task>\` and copy the model and effort it prints into this Agent call. One plan authorizes one launch.`,
+      `A factory agent launches only an Explore subagent (model "haiku"); ${none} is not one.`,
     )
   }
-  const model = str(context.input.tool_input?.model)
-  const effort = str(context.input.tool_input?.effort)
-  if (model === plan.model && effort === plan.effort) return allow
+  const n = context.job.number
+  const run = `bun run factory launch ${n} <agent> --task <task>`
+  if (!type.startsWith('factory-')) {
+    return deny(
+      `During job #${n} the orchestrator launches only the factory's agents, each after \`${run}\`, and Explore on haiku; ${none} is neither.`,
+    )
+  }
+  const header = HEADER.exec(str(input?.prompt) ?? '')
+  if (!header) {
+    return deny(
+      `This Agent call for ${type} doesn't start its prompt with the header \`${run}\` prints (a line "factory-launch: <n> <agent> <task> <plan id>"). Run it and put that line first.`,
+    )
+  }
+  const [, headerJob, headerAgent, headerTask, planId] = header
+  const events = readEvents(context.root, n)
+  const plan = events.find(
+    (event) => event.kind === 'launch.planned' && event.detail?.planId === planId,
+  )
+  if (!plan || Number(headerJob) !== n) {
+    return deny(`Launch plan ${planId} is not a plan of job #${n}: run \`${run}\`.`)
+  }
+  const used = events.find(
+    (event) => event.kind === 'launch.authorized' && event.detail?.planId === planId,
+  )
+  if (used && (toolUseId === undefined || used.toolUseId !== toolUseId)) {
+    return deny(
+      `Launch plan ${planId} was already used for a launch. One plan authorizes one launch: run \`${run}\` again.`,
+    )
+  }
+  const planned = {
+    agent: String(plan.detail?.agent),
+    task: String(plan.detail?.task),
+    model: String(plan.detail?.model),
+    effort: String(plan.detail?.effort),
+  }
+  // The header's agent and task are the call's own claim: the type is the call's agent.
+  const carried = {
+    agent: headerAgent === type ? type : `${type} (header ${headerAgent})`,
+    task: headerTask,
+    model: model ?? 'none',
+    effort: str(input?.effort) ?? 'none',
+  }
+  const differs = (['agent', 'task', 'model', 'effort'] as const).filter(
+    (key) => carried[key] !== planned[key],
+  )
+  if (differs.length === 0) return allow
   return deny(
-    `This Agent call for ${agent} carries model ${model ?? 'none'} and effort ${effort ?? 'none'}; the factory fixed ${plan.model} and ${plan.effort} for it (factory launch). Pass exactly those in the call's model and effort.`,
+    `This Agent call differs from launch plan ${planId} in ${differs.join(', ')}: the plan is ${planned.agent} ${planned.task} on ${planned.model} at ${planned.effort} effort, the call is ${carried.agent} ${carried.task} on ${carried.model} at ${carried.effort}. Pass exactly the plan's.`,
   )
 }
