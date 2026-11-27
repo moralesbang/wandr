@@ -14,9 +14,9 @@ body:
       label: Risk
       description: How much a wrong build could hurt. It decides which reviewers judge the build and how hard. The factory raises low to normal when the branch touches the privacy boundary or a dependency or build file.
       options:
-        - "low: copy, styling, docs-like changes with no data path"
-        - "normal: the default"
-        - "high: the privacy boundary, auth, the data model, migrations"
+        - 'low: copy, styling, docs-like changes with no data path'
+        - 'normal: the default'
+        - 'high: the privacy boundary, auth, the data model, migrations'
       default: 1
     validations:
       required: true
