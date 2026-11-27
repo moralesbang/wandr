@@ -280,11 +280,24 @@ describe('gh and the seal commands', () => {
     'bun run factory seal 7 --pass 2 --roles evaluator',
     'bun run factory review 7',
     'bun factory/cli/src/main.ts unseal 7',
+    'bun run factory ruling 7',
+    'bun run factory atfix 7 --ruling 1 --note x',
+    'bun run factory rewrite 7 --note x',
+    'bun run factory launch 7 factory-build --task build',
+    'bun run factory round 7',
+    'bun run factory pr 7',
   ])('denies a subagent running %s', (command) => {
     const decision = bash(EVALUATOR, command)
     expect(decision?.permissionDecision).toBe('deny')
     expect(decision?.permissionDecisionReason).toContain('orchestrator')
   })
+
+  test.each(['bun run factory check 7', 'bun run factory status'])(
+    'lets a subagent run %s',
+    (command) => {
+      expect(bash(EVALUATOR, command)).toBeNull()
+    },
+  )
 
   test.each(['gh issue view 7 --comments', 'bun run factory unseal 7'])(
     'lets the orchestrator run %s',

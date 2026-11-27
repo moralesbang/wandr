@@ -15,6 +15,7 @@ import { loadJob, saveJob, stateDir } from '../job.ts'
 import { git } from '../shell.ts'
 import { record, Refusal } from './common.ts'
 import { abandon, atfix, block, composeProjectOf, rewrite } from './lifecycle.ts'
+import { ruling } from './ruling.ts'
 
 let root = ''
 let tree = ''
@@ -26,6 +27,7 @@ beforeEach(async () => {
   await git(tree, 'config', 'user.name', 'Test')
   await git(tree, 'config', 'commit.gpgsign', 'false')
   writeFileSync(join(tree, 'a.txt'), 'one\n')
+  writeFileSync(join(tree, '.gitignore'), 'factory/.jobs/\n')
   await git(tree, 'add', '-A')
   await git(tree, 'commit', '--quiet', '-m', 'first')
 })
@@ -108,11 +110,18 @@ describe('factory rewrite', () => {
   })
 })
 
+/** Asks for a ruling on the fix in the worktree and writes a same-guarantee one. */
+const sameGuarantee = async () => {
+  const asked = await ruling(root, 7)
+  writeFileSync(asked.file, `Verdict: same-guarantee\nDiff: ${asked.diff}\n`)
+  return asked.ruling
+}
+
 describe('factory atfix', () => {
-  test('commits a plain fix with no citation when nothing was answered', async () => {
+  test('commits a fix on a ruling with no citation when nothing was answered', async () => {
     saveJob(root, makeJob({ worktree: tree }))
     writeFileSync(join(tree, 'x.acceptance.test.ts'), 'x\n')
-    await atfix(root, 7, 'rename a helper')
+    await atfix(root, 7, 'rename a helper', { ruling: await sameGuarantee() })
     expect(await git(tree, 'log', '-1', '--format=%B')).not.toContain('Authorized-By')
   })
 
@@ -128,7 +137,7 @@ describe('factory atfix', () => {
     expect(first.answers[0]?.cited).toBe(true)
 
     writeFileSync(join(tree, 'y.acceptance.test.ts'), 'y\n')
-    await atfix(root, 7, 'another fix')
+    await atfix(root, 7, 'another fix', { ruling: await sameGuarantee() })
     expect(await git(tree, 'log', '-1', '--format=%B')).not.toContain('Authorized-By')
   })
 })

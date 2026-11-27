@@ -3,7 +3,7 @@
 import { parseArgs } from 'node:util'
 import { handoffDir, mainRoot } from './job.ts'
 import { check } from './commands/check.ts'
-import { Refusal } from './commands/common.ts'
+import { Refusal, requireJob } from './commands/common.ts'
 import { gate } from './commands/gate.ts'
 import { hookGuard, hookLog } from './commands/hook.ts'
 import {
@@ -18,6 +18,9 @@ import {
 } from './commands/lifecycle.ts'
 import { pr } from './commands/pr.ts'
 import { red } from './commands/red.ts'
+import { REVIEW_USAGE, review, verifierReads } from './commands/review.ts'
+import { RULING_USAGE, ruling } from './commands/ruling.ts'
+import { LAUNCH_USAGE, launch } from './launch.ts'
 import { answer } from './commands/answer.ts'
 import { SANDBOX_USAGE, sandboxCommand } from './commands/sandbox.ts'
 import { describeAnswer, start } from './commands/start.ts'
@@ -27,12 +30,15 @@ import { watch } from './watch/server.ts'
 const USAGE = `Usage: bun run factory <command>
 
   start <n> --session <id>   take issue <n>, or resume its job
+${LAUNCH_USAGE}
   red <n>                    verify the red and commit it
   check <n>                  run CI's steps in the job's worktree
   attempt <n>                record a new build attempt
   gate <n>                   the gate before review
-  round <n>                  record a new review round with findings
-  atfix <n> --note <text>    commit a same-guarantee acceptance-test fix
+${REVIEW_USAGE}
+  round <n>                  record a new review round with the merged findings (reviews/<k>.findings.md)
+${RULING_USAGE}
+  atfix <n> --note <text>    after an answered Decision Request, commit the acceptance-test fix it authorized
   rewrite <n> --note <text>  commit a rewrite of acceptance tests (needs an answered Decision Request)
   block <n> <file>           keep a Decision Request and block the job
   seal <n> --pass <k> --roles <r,...>  seal the build notes and earlier reports for a blind pass
@@ -69,6 +75,8 @@ async function main(argv: string[]): Promise<number> {
       abandon: { type: 'boolean' },
       pass: { type: 'string' },
       roles: { type: 'string' },
+      task: { type: 'string' },
+      ruling: { type: 'string' },
     },
   })
   const [command, arg] = positionals
@@ -116,9 +124,34 @@ async function main(argv: string[]): Promise<number> {
       print(result)
       return result.passed ? 0 : 1
     }
-    case 'atfix':
-      print(await atfix(root, issueNumber(arg), values.note ?? ''))
+    case 'launch': {
+      const agent = positionals[2]
+      if (!agent || !values.task)
+        throw new Refusal(`launch needs the agent and the task:\n${LAUNCH_USAGE}`)
+      print(await launch(root, issueNumber(arg), agent, values.task))
       return 0
+    }
+    case 'review': {
+      const number = issueNumber(arg)
+      const plan = await review(root, number)
+      print({
+        ...plan,
+        sealed: Object.values(plan.roles).includes('review'),
+        reads: verifierReads(root, requireJob(root, number), plan),
+      })
+      return 0
+    }
+    case 'ruling':
+      print(await ruling(root, issueNumber(arg)))
+      return 0
+    case 'atfix': {
+      const m = values.ruling === undefined ? undefined : Number(values.ruling)
+      if (m !== undefined && (!Number.isInteger(m) || m <= 0))
+        throw new Refusal('atfix --ruling needs the ruling number factory ruling printed.')
+      const options = m === undefined ? {} : { ruling: m }
+      print(await atfix(root, issueNumber(arg), values.note ?? '', options))
+      return 0
+    }
     case 'rewrite':
       print(await rewrite(root, issueNumber(arg), values.note ?? ''))
       return 0

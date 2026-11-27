@@ -7,6 +7,7 @@ import {
   handoffDir,
   latestAnswer,
   listJobs,
+  reviewPass,
   saveJob,
   stateDir,
   type Job,
@@ -16,6 +17,7 @@ import { removeSandboxes } from '../sandbox.ts'
 import { refuseWhileSealed } from '../seal.ts'
 import { commitAll, gh, git, uncommitted } from '../shell.ts'
 import { LABELS, record, Refusal, requireJob } from './common.ts'
+import { requireSameGuarantee } from './ruling.ts'
 import { moveLabel } from './start.ts'
 
 export function attempt(root: string, number: number): Job {
@@ -28,9 +30,59 @@ export function attempt(root: string, number: number): Job {
   return counted.job
 }
 
+/** How many words in a row a findings file shares with the build notes to count as copied. */
+export const COPIED_WORDS = 8
+
+const words = (text: string) => text.toLowerCase().split(/\s+/).filter(Boolean)
+
+/**
+ * The first run of at least `n` consecutive words `text` shares with `source`, extended as far as
+ * both go on alike; case and whitespace don't count. Null when they share no such run.
+ */
+export function sharedPhrase(text: string, source: string, n: number): string | null {
+  const ours = words(text)
+  const theirs = words(source)
+  const starts = new Map<string, number[]>()
+  for (let j = 0; j + n <= theirs.length; j++) {
+    const key = theirs.slice(j, j + n).join(' ')
+    starts.set(key, [...(starts.get(key) ?? []), j])
+  }
+  for (let i = 0; i + n <= ours.length; i++) {
+    const found = starts.get(ours.slice(i, i + n).join(' '))
+    if (!found) continue
+    const length = Math.max(
+      ...found.map((j) => {
+        let k = n
+        while (i + k < ours.length && j + k < theirs.length && ours[i + k] === theirs[j + k]) k++
+        return k
+      }),
+    )
+    return ours.slice(i, i + length).join(' ')
+  }
+  return null
+}
+
+/**
+ * Starts a new round with the pass's merged findings. Refused without them, and when they copy the
+ * build notes: findings carry the reviewers' evidence, not the build's reasoning handed back.
+ */
 export function round(root: string, number: number): Job {
   const job = requireJob(root, number)
   refuseWhileSealed(root, job, 'a new round')
+  const pass = reviewPass(job)
+  const findingsFile = join(handoffDir(job), 'reviews', `${pass}.findings.md`)
+  if (!existsSync(findingsFile)) {
+    throw new Refusal(`Write the merged findings of review pass ${pass} in ${findingsFile} first.`)
+  }
+  const notesFile = join(handoffDir(job), 'build-notes.md')
+  const copied =
+    existsSync(notesFile) &&
+    sharedPhrase(readFileSync(findingsFile, 'utf8'), readFileSync(notesFile, 'utf8'), COPIED_WORDS)
+  if (copied) {
+    throw new Refusal(
+      `reviews/${pass}.findings.md shares "${copied}" with build-notes.md. Write each finding in the reviewers' words, with their evidence (command, output, file:line), not the build notes'.`,
+    )
+  }
   const counted = countRound(job)
   if (!counted.ok) throw new Refusal(counted.reason)
   saveJob(root, counted.job)
@@ -88,26 +140,43 @@ const commitMessage = (
   ].join('\n\n')
 
 /**
- * Commits the test agent's same-guarantee fix to acceptance tests, and nothing else. The first
- * commit after the user's answer cites it.
+ * Commits the test agent's fix to acceptance tests, and nothing else, on one of two grounds: a fresh
+ * test reviewer's same-guarantee ruling on exactly this diff (`factory ruling`), or the user's
+ * answer to the latest Decision Request, which the first commit after it cites.
  */
-export async function atfix(root: string, number: number, note: string): Promise<Job> {
+export async function atfix(
+  root: string,
+  number: number,
+  note: string,
+  options: { ruling?: number } = {},
+): Promise<Job> {
   const job = requireJob(root, number)
   refuseWhileSealed(root, job, 'an acceptance-test fix')
   if (!note.trim()) throw new Refusal('Say what the fix changes: factory atfix <n> --note "…"')
   const cited = citation(job)?.answer.cited === false ? citation(job) : null
+  if (options.ruling === undefined && !cited) {
+    throw new Refusal(
+      `An acceptance-test fix needs a ruling that it keeps the guarantee. Run factory ruling ${number}, launch a fresh factory-test-reviewer (task ruling) to write the file it names, then: factory atfix ${number} --ruling <m> --note "…". A changed guarantee goes to the user: factory block ${number} <file>.`,
+    )
+  }
+  const ruled =
+    options.ruling === undefined
+      ? null
+      : { ruling: options.ruling, diff: await requireSameGuarantee(job, options.ruling) }
+  const subject = `test(#${number}): fix an acceptance test`
+  const message = commitMessage(subject, note, number, cited)
   const { sha, files } = await commitAcceptanceChange(
     job,
     'An acceptance-test fix',
-    commitMessage(`test(#${number}): fix an acceptance test`, note, number, cited),
+    ruled ? `${message}\nFactory-Ruling: ${ruled.ruling} (diff ${ruled.diff})` : message,
   )
   const updated: Job = {
     ...(cited ? markCited(job) : job),
     cliCommits: [...job.cliCommits, sha],
-    atfixes: [...job.atfixes, { sha, note, files }],
+    atfixes: [...job.atfixes, { sha, note, files, ...(ruled ? { ruling: ruled.ruling } : {}) }],
   }
   saveJob(root, updated)
-  record(root, number, 'atfix', { sha, note, files })
+  record(root, number, 'atfix', { sha, note, files, ...(ruled ? { ruling: ruled.ruling } : {}) })
   return updated
 }
 

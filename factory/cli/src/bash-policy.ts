@@ -24,11 +24,14 @@ import { bashReadVerdict } from './read-guard.ts'
 // is what keeps agents from running it.
 const FACTORY_ANSWER = /(?:\bfactory|main\.ts)(?:\s+-\S*)*\s+answer\b/
 
-// The seal is what keeps a reviewer's blind pass blind; an agent that could lift it would lift it.
-const FACTORY_ORCHESTRATOR_ONLY = /(?:\bfactory|main\.ts)(?:\s+-\S*)*\s+(?:seal|unseal|review)\b/
+// An agent runs only `factory check`, `red`, `sandbox` and `status`. The rest moves the
+// job: the seal keeps a reviewer's blind pass blind, and an agent that could lift it would lift it;
+// a ruling, a test fix or a review plan an agent ran for itself would be its own verdict.
+const FACTORY_ORCHESTRATOR_ONLY =
+  /(?:\bfactory|main\.ts)(?:\s+-\S*)*\s+(?:start|attempt|gate|round|atfix|rewrite|block|seal|unseal|review|launch|ruling|pr|clean)\b/
 
 const orchestratorOnly = deny(
-  'Only the orchestrator runs factory seal, unseal and review. Finish your own task and report it; the orchestrator unseals once every blind pass is written.',
+  'Only the orchestrator moves the job (factory seal, unseal, review, ruling, atfix, launch, round, pr and the rest); an agent runs factory check, red, sandbox and status. Finish your own task and report it.',
 )
 
 const isGh = (word: string) => /(?:^|\/)gh$/.test(word)
