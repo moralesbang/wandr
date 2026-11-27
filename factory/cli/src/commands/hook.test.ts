@@ -19,6 +19,7 @@ import { makeJob } from '../job-fixture.ts'
 import { readEvents } from '../events.ts'
 import { saveJob } from '../job.ts'
 import { hookGuard, hookLog } from './hook.ts'
+import { mainTranscript } from '../guard-fixture.ts'
 
 let root = ''
 let worktree = ''
@@ -34,6 +35,7 @@ const guard = (agent: string, path: string) =>
     root,
     JSON.stringify({
       session_id: 'job-session',
+      transcript_path: mainTranscript(root),
       hook_event_name: 'PreToolUse',
       agent_id: 'run-1',
       agent_type: agent,
@@ -123,6 +125,7 @@ const call = (tool: string, toolInput: Record<string, unknown>, agent?: string) 
     root,
     JSON.stringify({
       session_id: 'job-session',
+      transcript_path: mainTranscript(root),
       hook_event_name: 'PreToolUse',
       tool_name: tool,
       cwd: agent ? worktree : root,
@@ -163,6 +166,7 @@ describe('hook guard: fails closed inside a job', () => {
       root,
       JSON.stringify({
         session_id: 'another',
+        transcript_path: mainTranscript(root),
         hook_event_name: 'PreToolUse',
         tool_name: 'Bash',
         tool_input: { command: 'bun run factory answer 7 x' },
@@ -239,6 +243,7 @@ describe('hook log: agent ids', () => {
       root,
       JSON.stringify({
         session_id: 'job-session',
+        transcript_path: mainTranscript(root),
         hook_event_name: 'SubagentStart',
         agent_id: '../../../../escaped',
         agent_type: 'factory-evaluator',

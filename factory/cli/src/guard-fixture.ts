@@ -27,6 +27,28 @@ export const TEST = { agent_id: 'a1', agent_type: 'factory-test' }
 export const DIAG = { agent_id: 'd1', agent_type: 'factory-diagnose' }
 export const EXPLORE = { agent_id: 'x1', agent_type: 'Explore' }
 
+/** A main-session transcript whose latest assistant message ran opus at high effort. */
+export function mainTranscript(root: string, model = 'claude-opus-5-5', effort = 'high') {
+  const path = join(root, 'main-session.jsonl')
+  put(
+    path,
+    `${JSON.stringify({ type: 'user', message: { role: 'user' } })}\n${JSON.stringify({ type: 'assistant', effort, message: { id: 'm1', model, usage: {} } })}\n`,
+  )
+  return path
+}
+
+/** What `factory launch` does before an Agent call: logs the plan, returns what the call carries. */
+export function planLaunch(root: string, agent: string, model = 'opus', effort = 'medium') {
+  appendEvent(root, {
+    t: new Date().toISOString(),
+    job: 7,
+    source: 'cli',
+    kind: 'launch.planned',
+    detail: { agent, model, effort },
+  })
+  return { model, effort }
+}
+
 export type GuardJob = ReturnType<typeof guardJob>
 
 /** A job #7 in a temp root, its worktree laid out, optionally sealed for review pass rounds + 1. */
@@ -37,6 +59,12 @@ export function guardJob(
     rounds?: number
     job?: Partial<Job>
     roles?: string[]
+    /**
+     * `free` (the default) plans each factory launch the orchestrator makes and fills in its model
+     * and effort, as the skill does, so a test about something else isn't judged on the plan;
+     * `strict` leaves launches as the test wrote them.
+     */
+    launches?: 'free' | 'strict'
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), 'factory-guard-'))
@@ -73,22 +101,39 @@ export function guardJob(
   if (options.sealed !== false) {
     seal(root, 7, { pass: rounds + 1, roles: options.roles ?? ['evaluator', 'test-reviewer'] })
   }
+  const transcript = mainTranscript(root)
+  let calls = 0
+  /** Rewrites the main session's transcript: its latest assistant message as given. */
+  const runAs = (model: string, effort: string) => mainTranscript(root, model, effort)
   return {
     root,
     worktree,
+    transcript,
+    runAs,
     handoff,
     store: join(root, 'factory', '.jobs', '7', 'sealed'),
     state: join(root, 'factory', '.jobs', '7'),
     cleanup: () => rmSync(root, { recursive: true, force: true }),
     /** One guard call; null when allowed, else the denial's reason. */
     guard(who: Who, tool: string, input: object, cwd: string = worktree, session = SESSION) {
+      const factoryAgent = (input as { subagent_type?: unknown }).subagent_type
+      if (
+        !who &&
+        options.launches !== 'strict' &&
+        (tool === 'Agent' || tool === 'Task') &&
+        typeof factoryAgent === 'string' &&
+        factoryAgent.startsWith('factory-')
+      ) {
+        input = { ...planLaunch(root, factoryAgent), ...input }
+      }
       const out = hookGuard(
         root,
         JSON.stringify({
           session_id: session,
+          transcript_path: transcript,
           hook_event_name: 'PreToolUse',
           tool_name: tool,
-          tool_use_id: 'tu',
+          tool_use_id: `tu-${++calls}`,
           cwd,
           tool_input: input,
           ...who,

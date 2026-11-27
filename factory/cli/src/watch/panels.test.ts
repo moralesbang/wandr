@@ -379,13 +379,13 @@ describe('model and effort, planned against actual', () => {
     expect(modelCheck(view.runs.get('a-build') as never).status).toBe('unplanned')
   })
 
-  test('the orchestrator is judged against sonnet and medium', () => {
+  test('the orchestrator is judged against opus and high', () => {
     expect<unknown>(ORCHESTRATOR_PLAN).toEqual(ORCHESTRATOR)
-    const ok = play([
+    const ok = play([hook(5, 'usage', undefined, { detail: usage({ [OPUS]: 9 }, { high: 9 }) })])
+    expect(modelCheck(ok.runs.get('orchestrator') as never).status).toBe('ok')
+    const wrong = play([
       hook(5, 'usage', undefined, { detail: usage({ [SONNET]: 9 }, { medium: 9 }) }),
     ])
-    expect(modelCheck(ok.runs.get('orchestrator') as never).status).toBe('ok')
-    const wrong = play([hook(5, 'usage', undefined, { detail: usage({ [OPUS]: 9 }, { high: 9 }) })])
     expect(modelCheck(wrong.runs.get('orchestrator') as never).problems).toHaveLength(2)
   })
 })

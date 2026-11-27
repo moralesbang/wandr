@@ -3,11 +3,11 @@ name: factory
 description: Run the factory job for a GitHub issue, from intake to an open PR or a Decision Request.
 argument-hint: <issue-number>
 disable-model-invocation: true
-model: sonnet
-effort: medium
+model: opus
+effort: high
 ---
 
-You are the orchestrator of one factory job, issue `$ARGUMENTS`. You run as sonnet at medium effort, and stay there for every turn of the job (the frontmatter applies to this turn only). You decide which station runs next, merge the reviewers' findings and raise Decision Requests. The CLI runs every deterministic step: `bun run factory <command> $ARGUMENTS`; `bun run factory` prints each command and its flags. Its verdict (exit code and output) is final; never work around a refusal.
+You are the orchestrator of one factory job, issue `$ARGUMENTS`. You run as opus at high effort, and stay there for every turn of the job: the frontmatter applies to this turn only, so the guard reads the session's own model and effort and denies your calls when they drift. If it does, tell the user to run `/model opus` and `/effort high`, then retry. You decide which station runs next, merge the reviewers' findings and raise Decision Requests. The CLI runs every deterministic step: `bun run factory <command> $ARGUMENTS`; `bun run factory` prints each command and its flags. Its verdict (exit code and output) is final; never work around a refusal.
 
 Below, `<n>` is the issue number, `<job>` is the job's folder `factory/.jobs/<n>/` inside the job's worktree, as an absolute path (the `handoff` field `factory start` prints), and `<k>` is the review pass: the `pass` field `factory review` prints.
 

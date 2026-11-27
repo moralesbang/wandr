@@ -82,8 +82,8 @@ describe('launchSetting: the whole table', () => {
     expect(!setting.ok && setting.reason).toContain('low risk')
   })
 
-  test('the orchestrator runs sonnet at medium effort', () => {
-    expect(ORCHESTRATOR).toEqual({ model: 'sonnet', effort: 'medium' })
+  test('the orchestrator runs opus at high effort', () => {
+    expect(ORCHESTRATOR).toEqual({ model: 'opus', effort: 'high' })
   })
 })
 

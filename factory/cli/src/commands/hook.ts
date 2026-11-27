@@ -22,9 +22,10 @@ import {
 import { canonical } from '../paths.ts'
 import { changedBetween, workingTree } from '../shell.ts'
 import { bashPolicy } from '../bash-policy.ts'
-import type { Policy, Verdict } from '../policy.ts'
+import { allow, first, type Policy, type Verdict } from '../policy.ts'
 import { agentPolicy, messagePolicy, readPolicy } from '../read-guard.ts'
 import { writePolicy } from '../write-guard.ts'
+import { launchedAgent, launchMatchesPlan, orchestratorSetting } from '../orchestrator-guard.ts'
 
 const readText = (path: string) => {
   try {
@@ -242,10 +243,29 @@ function judge(mainRoot: string, input: HookInput, found: Job): string {
     : undefined
   const tool = input.tool_name ?? ''
   const entry = entryFor(input)
+  const context = { root, job, input, places, ...(agent ? { agent } : {}) }
   const verdict =
     unjudged(tool, entry, agent) ??
-    (entry ? entry.policy({ root, job, input, places, ...(agent ? { agent } : {}) }) : null)
-  if (!verdict || verdict.ok) return ''
+    first([
+      orchestratorSetting(context),
+      entry ? entry.policy(context) : allow,
+      launchMatchesPlan(context),
+    ])
+  if (!verdict || verdict.ok) {
+    const launched = agent ? null : launchedAgent(tool, input.tool_input)
+    // A launch the guard lets through uses its plan up: the next one needs a plan of its own.
+    if (launched) {
+      appendEvent(root, {
+        t: new Date().toISOString(),
+        job: job.number,
+        source: 'hook',
+        kind: 'launch.authorized',
+        ...(input.tool_use_id ? { toolUseId: input.tool_use_id } : {}),
+        detail: { agent: launched },
+      })
+    }
+    return ''
+  }
   const denied = deniedTarget(input, places)
   appendEvent(root, {
     t: new Date().toISOString(),

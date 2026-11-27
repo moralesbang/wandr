@@ -16,8 +16,11 @@ export type Model = 'sonnet' | 'opus'
 export type Effort = 'low' | 'medium' | 'high'
 type Setting = { model: Model; effort: Effort }
 
-/** The main session's own setting, for the skill's frontmatter; `factory launch` never plans it. */
-export const ORCHESTRATOR: Setting = { model: 'sonnet', effort: 'medium' }
+/**
+ * The main session's own setting: the skill's frontmatter states it and the guard enforces it
+ * (orchestrator-guard.ts); `factory launch` never plans it. The orchestrator's work is judgment.
+ */
+export const ORCHESTRATOR: Setting = { model: 'opus', effort: 'high' }
 
 const s = (model: Model, effort: Effort): Setting => ({ model, effort })
 const always = (setting: Setting) => ({ low: setting, normal: setting, high: setting })

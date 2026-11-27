@@ -22,6 +22,7 @@ import { saveJob, stateDir } from '../job.ts'
 import { seal, unseal } from '../seal.ts'
 import { annotate } from '../annotate.ts'
 import { hookGuard } from './hook.ts'
+import { mainTranscript, planLaunch } from '../guard-fixture.ts'
 
 const NOTES_LINE = 'Adding width and height attributes to the icon links did not help.'
 
@@ -73,6 +74,7 @@ const call = (
     root,
     JSON.stringify({
       session_id: 'job-session',
+      transcript_path: mainTranscript(root),
       hook_event_name: 'PreToolUse',
       tool_name: tool,
       tool_use_id: 'tu-1',
@@ -87,7 +89,12 @@ const call = (
 const bash = (who: Who, command: string, cwd?: string) => call(who, 'Bash', { command }, cwd)
 const read = (who: Who, path: string) => call(who, 'Read', { file_path: path })
 const launch = (prompt: string) =>
-  call(null, 'Agent', { subagent_type: 'factory-evaluator', description: 'review', prompt })
+  call(null, 'Agent', {
+    subagent_type: 'factory-evaluator',
+    description: 'review',
+    prompt,
+    ...planLaunch(root, 'factory-evaluator'),
+  })
 const message = (text: string) => call(null, 'SendMessage', { to: 'evaluator', message: text })
 const blindPassesWritten = () => {
   writeBlindPass(root, 7, 2, 'evaluator')
@@ -435,6 +442,7 @@ describe("replay: job #13's reviewers through the guard", () => {
           main,
           JSON.stringify({
             session_id: 'job-session',
+            transcript_path: mainTranscript(root),
             hook_event_name: 'PreToolUse',
             tool_name: 'Bash',
             cwd: tree,

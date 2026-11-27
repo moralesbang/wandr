@@ -7,6 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { hookGuard } from './commands/hook.ts'
+import { mainTranscript } from './guard-fixture.ts'
 import { makeJob } from './job-fixture.ts'
 import { saveJob } from './job.ts'
 
@@ -34,6 +35,7 @@ const decide = (
     root,
     JSON.stringify({
       session_id: 'job-session',
+      transcript_path: mainTranscript(root),
       hook_event_name: 'PreToolUse',
       tool_name: 'Bash',
       cwd,

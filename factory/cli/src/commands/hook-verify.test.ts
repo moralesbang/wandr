@@ -11,6 +11,7 @@ import { makeJob } from '../job-fixture.ts'
 import { stateDir, saveJob, type ReviewPlan } from '../job.ts'
 import { seal } from '../seal.ts'
 import { hookGuard } from './hook.ts'
+import { mainTranscript, planLaunch } from '../guard-fixture.ts'
 
 let root = ''
 let worktree = ''
@@ -67,6 +68,7 @@ const call = (who: Who, tool: string, toolInput: Record<string, unknown>): Decis
     root,
     JSON.stringify({
       session_id: 'job-session',
+      transcript_path: mainTranscript(root),
       hook_event_name: 'PreToolUse',
       tool_name: tool,
       tool_use_id: 'tu-1',
@@ -81,7 +83,12 @@ const read = (who: Who, path: string) => call(who, 'Read', { file_path: path })
 const bash = (who: Who, command: string) => call(who, 'Bash', { command })
 const write = (who: Who, path: string) => call(who, 'Write', { file_path: path, content: 'x' })
 const launch = (type: string, prompt: string) =>
-  call(null, 'Agent', { subagent_type: type, description: 'review', prompt })
+  call(null, 'Agent', {
+    subagent_type: type,
+    description: 'review',
+    prompt,
+    ...planLaunch(root, type),
+  })
 
 describe('the evaluator reviews blind while the test reviewer verifies (sealed for the evaluator)', () => {
   beforeEach(() => {

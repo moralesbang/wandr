@@ -10,6 +10,7 @@ import { readEvents } from '../events.ts'
 import { makeJob } from '../job-fixture.ts'
 import { saveJob } from '../job.ts'
 import { hookGuard } from './hook.ts'
+import { mainTranscript } from '../guard-fixture.ts'
 
 let root = ''
 let worktree = ''
@@ -28,6 +29,7 @@ const guard = (agent: string, tool: string, path: string) =>
     root,
     JSON.stringify({
       session_id: 'job-session',
+      transcript_path: mainTranscript(root),
       hook_event_name: 'PreToolUse',
       agent_id: 'run-1',
       agent_type: agent,
@@ -79,6 +81,7 @@ const bash = (agent: string, command: string) => {
     root,
     JSON.stringify({
       session_id: 'job-session',
+      transcript_path: mainTranscript(root),
       hook_event_name: 'PreToolUse',
       agent_id: 'run-1',
       agent_type: agent,
