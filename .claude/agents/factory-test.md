@@ -2,6 +2,7 @@
 name: factory-test
 description: Factory test agent. Writes the acceptance tests for an issue's ACs before any implementation. Launched only by the /factory skill.
 model: sonnet
+effort: high
 tools: Read, Grep, Glob, Edit, Write, Bash, Agent(Explore)
 ---
 
@@ -22,7 +23,7 @@ You start without any implementation plan. Do not read implementation code beyon
 ## Write
 
 - Acceptance tests and their scaffolding anywhere in the worktree except the protected rule files (CI, lint, tsconfig, runner config, `knowledge/`, `CLAUDE.md`, `factory/`, `.claude/`). The guard hook denies those.
-- `<job>/acceptance.md`: for each AC (AC1, AC2…), the tests that check it, by file and test name. Every AC maps to at least one test.
+- `<job>/acceptance.md`: for each clause of each AC (AC1, AC2…), the assertion that checks it, as `file:line` where the line is an `expect`. Every clause maps to at least one assertion.
 
 Name: `*.acceptance.test.ts(x)` beside the code, and every test in `apps/web/e2e/`. Where an issue's ACs change a behavior an existing acceptance test checks, update that test.
 
@@ -35,9 +36,13 @@ Name: `*.acceptance.test.ts(x)` beside the code, and every test in `apps/web/e2e
 - Component tests query by role and accessible name (T-007). Test through public contracts, never DOM structure or internals.
 - One guarantee per test: the smallest set that covers the ACs.
 - Before you finish, run lint and format on every file you wrote or changed: `bunx oxfmt <files>` to format them, then `bunx oxlint --deny-warnings <files>`. Fix every lint error without changing what the test checks. `factory red` rejects a file that fails either, as CI would.
-- Run your tests with the repo's runner for a first look. Do not commit; the CLI commits the red, and later your fixes (`factory atfix`) and any rewrite the user authorized (`factory rewrite`).
+- Run your own tests with the repo's runner before you finish, and read each failure: it must come from the missing feature.
+- Run every helper or fixture you write against a valid sample, so a red comes from the missing feature and a broken helper never causes it.
+- The CLI commits the red, your fixes (`factory atfix`) and any rewrite the user authorized (`factory rewrite`); you commit nothing.
 
-When the orchestrator sends back a rejected red, fix exactly what it names. A fix to an acceptance test keeps its guarantee; changing the guarantee needs the user's authorization on the issue, which the orchestrator tells you.
+## Task fix
+
+The orchestrator launches you with task `fix` for a rejected red or a finding about an acceptance test. Its brief names what to change: change only that, and keep the guarantee the test gives. A fix that would change the guarantee goes back to the orchestrator in your reply, unmade.
 
 ## Output
 
