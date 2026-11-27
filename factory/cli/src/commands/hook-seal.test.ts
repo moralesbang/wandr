@@ -532,7 +532,10 @@ describe.each(SUBAGENTS)("Claude Code's own files, for %s at all times", (_who, 
     ],
     ['cat the prompt history', () => bash(who, `cat ${claude}/history.jsonl`)],
     ['list its tasks', () => bash(who, `ls ${claude}/tasks ${claude}/jobs`)],
-    ['reach it through $USER', () => bash(who, 'cat /Users/$USER/.claude/history.jsonl')],
+    [
+      'reach it through $USER',
+      () => bash(who, `cat ${dirname(homedir())}/$USER/.claude/history.jsonl`),
+    ],
     ['reach it through ${HOME}', () => bash(who, 'cat ${HOME}/.claude/history.jsonl')],
     ['cat a task output in $TMPDIR', () => bash(who, 'cat $TMPDIR/claude-501/x/tasks/abc.output')],
     [
