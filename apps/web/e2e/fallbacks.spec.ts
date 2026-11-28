@@ -17,6 +17,21 @@ const ERROR_SCREEN_TIMEOUT = 20_000
 const spikeControls = (page: Page) => page.getByRole('region', { name: 'Spike controls' })
 const loadingMark = (page: Page) => page.getByRole('img', { name: 'Loading', exact: true })
 
+// The mark is the Contour icon: an image served from /favicon.svg that decoded.
+async function expectContourIcon(mark: Locator) {
+  await expect
+    .poll(() =>
+      mark.evaluate((el) => {
+        const img = el as HTMLImageElement
+        return {
+          path: new URL(img.currentSrc || img.src, location.href).pathname,
+          decoded: img.complete && img.naturalWidth > 0,
+        }
+      }),
+    )
+    .toEqual({ path: '/favicon.svg', decoded: true })
+}
+
 const scriptPath = (url: string) => new URL(url).pathname
 
 function deferred() {
@@ -244,6 +259,7 @@ test.describe('before the app runs', () => {
 
           const mark = loadingMark(page)
           await expect(mark).toBeVisible()
+          await expectContourIcon(mark)
           const box = await mark.boundingBox()
           expect(box?.width).toBeCloseTo(64, 0)
           expect(box?.height).toBeCloseTo(64, 0)
@@ -274,6 +290,7 @@ test.describe('before the app runs', () => {
     await page.goto('/spike/route-editor', { waitUntil: 'commit' })
     await held.requested
     await expect(loadingMark(page)).toBeVisible()
+    await expectContourIcon(loadingMark(page))
     await expect(spikeControls(page)).toHaveCount(0)
 
     held.release()
