@@ -12,9 +12,26 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>Wandr</title>
+    <noscript
+      ><style>
+        #boot-mark {
+          display: none !important;
+        }
+      </style></noscript
+    >
   </head>
   <body>
-    <div id="root"></div>
+    <noscript>
+      <main style="padding: 3rem 1rem; text-align: center">
+        <h1>Wandr needs JavaScript.</h1>
+        <p>Turn it on, then reload the page.</p>
+      </main>
+    </noscript>
+    <div id="root">
+      <div id="boot-mark" style="display: grid; min-height: 100vh; place-items: center">
+        <img src="/favicon.svg" alt="Loading" width="64" height="64" />
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
