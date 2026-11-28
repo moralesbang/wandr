@@ -91,6 +91,10 @@ export const RouteEditorSpike = () => {
       case 'move-point':
         setRoute((points) => movePoint(points, edit.pointId, edit.at))
         return
+      case 'delete-point':
+        setRoute((points) => deletePoint(points, edit.pointId))
+        setSelectedPointId(null)
+        return
       case 'insert-point':
         setRoute((points) =>
           insertPointAfter(points, edit.afterPointId, { id: newId(), ...edit.at }),
@@ -232,7 +236,7 @@ export const RouteEditorSpike = () => {
         )}
         <ol
           aria-label="Last gestures"
-          className="type-meta-lg flex flex-col gap-1 text-muted-foreground"
+          className="type-meta-lg flex min-h-[calc(6*1lh+5*0.25rem)] flex-col gap-1 text-muted-foreground"
         >
           {log.map(({ id, line }) => (
             <li key={id}>{line}</li>

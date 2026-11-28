@@ -13,7 +13,8 @@ export type GestureTarget =
   | { kind: 'point'; pointId: string }
   | { kind: 'handle'; afterPointId: string }
 
-export type Gesture = 'tap' | 'drag'
+/** `delete-key` is Delete or Backspace pressed with the target focused. */
+export type Gesture = 'tap' | 'drag' | 'delete-key'
 
 export type EditorAction =
   | { type: 'none' }
@@ -25,6 +26,7 @@ export type EditorAction =
   | { type: 'select-point'; pointId: string }
   | { type: 'move-point'; pointId: string }
   | { type: 'insert-point'; afterPointId: string }
+  | { type: 'delete-point'; pointId: string }
 
 const none: EditorAction = { type: 'none' }
 const pan: EditorAction = { type: 'pan' }
@@ -40,6 +42,13 @@ export const resolveGesture = (
   target: GestureTarget,
   gesture: Gesture,
 ): EditorAction => {
+  // Only a route point in the Route tool answers the key.
+  if (gesture === 'delete-key') {
+    return tool === 'route' && target.kind === 'point'
+      ? { type: 'delete-point', pointId: target.pointId }
+      : none
+  }
+
   switch (target.kind) {
     // Dragging the empty map always moves it, whatever the tool.
     case 'map':

@@ -8,6 +8,8 @@ export type MarkerPress = {
   /** Whether a drag that starts here edits. When false, the drag reaches the map and pans it. */
   edits: boolean
   onTap: () => void
+  /** Delete or Backspace on the focused marker. Returns whether it deleted, to keep the key's usual meaning when not. */
+  onDeleteKey?: () => boolean
   onDragStart?: () => void
   onDrag?: (at: LngLat) => void
   onDragEnd?: (at: LngLat) => void

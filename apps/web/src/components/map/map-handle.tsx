@@ -26,6 +26,10 @@ export const MapHandle = ({ at, label, press, layer, pressed, children }: MapHan
         type="button"
         aria-label={label}
         aria-pressed={pressed}
+        onKeyDown={(event) => {
+          if (event.key !== 'Delete' && event.key !== 'Backspace') return
+          if (press.onDeleteKey?.()) event.preventDefault()
+        }}
         className={cn(
           'flex size-touch items-center justify-center rounded-full',
           press.edits ? 'cursor-grab touch-none active:cursor-grabbing' : 'cursor-pointer',
