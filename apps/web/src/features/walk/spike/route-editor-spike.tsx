@@ -91,6 +91,10 @@ export const RouteEditorSpike = () => {
       case 'move-point':
         setRoute((points) => movePoint(points, edit.pointId, edit.at))
         return
+      case 'delete-point':
+        setRoute((points) => deletePoint(points, edit.pointId))
+        setSelectedPointId(null)
+        return
       case 'insert-point':
         setRoute((points) =>
           insertPointAfter(points, edit.afterPointId, { id: newId(), ...edit.at }),
