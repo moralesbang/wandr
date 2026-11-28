@@ -25,6 +25,7 @@ export type EditorAction =
   | { type: 'select-point'; pointId: string }
   | { type: 'move-point'; pointId: string }
   | { type: 'insert-point'; afterPointId: string }
+  | { type: 'delete-point'; pointId: string }
 
 const none: EditorAction = { type: 'none' }
 const pan: EditorAction = { type: 'pan' }
@@ -65,4 +66,18 @@ export const resolveGesture = (
       if (tool !== 'route' || gesture === 'tap') return none
       return { type: 'insert-point', afterPointId: target.afterPointId }
   }
+}
+
+/** Keys that remove a focused route point: many laptop keyboards have no Delete key. */
+export const DELETE_KEYS: readonly string[] = ['Delete', 'Backspace']
+
+/**
+ * What a key pressed on a focused thing on the map does. Only a route point in the Route tool
+ * reacts, to Delete or Backspace; anywhere else the key keeps its usual meaning.
+ */
+export const resolveKey = (tool: Tool, target: GestureTarget, key: string): EditorAction => {
+  if (tool === 'route' && target.kind === 'point' && DELETE_KEYS.includes(key)) {
+    return { type: 'delete-point', pointId: target.pointId }
+  }
+  return none
 }
