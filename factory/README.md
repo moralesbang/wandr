@@ -79,7 +79,7 @@ Yellow is the user, purple the orchestrator, blue the CLI's deterministic steps 
 
 | Actor | What it is | Decides |
 | --- | --- | --- |
-| **User** | You | The issue, its ACs and its Risk, every Decision Request (answered in the orchestrator's own question), any change to an acceptance guarantee, any exception to a gate, whether to clean or abandon a job (a yes to the CLI's question), accepting a changed factory under a job, the merge |
+| **User** | You | The issue, its ACs and its Risk, every Decision Request (answered in the orchestrator's own question), any change to an acceptance guarantee, any exception to a gate, whether to clean or abandon a job, accepting a changed factory under a job and whether to go on past each $5 the job costs (each a yes to the CLI's question), the merge |
 | **Orchestrator** | The `/factory` skill ([`SKILL.md`](../.claude/skills/factory/SKILL.md)), in the main session of one terminal: the user's only counterpart | Which station runs next, merging the reviewers' findings, when to raise a Decision Request and how to put it to the user |
 | **CLI** | [`cli/`](cli/), TypeScript on Bun | Nothing: it runs every deterministic step, plans each review pass, fixes each agent's model and effort, and refuses what breaks a rule. Its guard, a hook, judges every tool call a job makes, and a hook records what the user answers |
 | **Test agent** | [`factory-test.md`](../.claude/agents/factory-test.md) | How to test each AC through the public contracts |

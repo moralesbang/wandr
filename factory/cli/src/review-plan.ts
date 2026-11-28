@@ -59,24 +59,29 @@ export function planRoles(input: {
   return Object.fromEntries(roles.map((role) => [role, task(role)])) as PlannedRoles
 }
 
-/** The most `factory sandbox exec` commands one reviewer run may spend, by what it does and the risk. */
-export const SANDBOX_BUDGET: Record<'review' | 'verify' | 'ruling', Record<Risk, number>> = {
-  review: { low: 3, normal: 6, high: 12 },
-  verify: { low: 2, normal: 3, high: 6 },
+/**
+ * The minutes of wall-clock time a reviewer role may spend in `factory sandbox exec` in one review
+ * pass of a job, by what it does and the risk. Time, not a count of commands: a count is dodged by
+ * packing steps into one `sh -c`, and weighs a one-second curl like a two-minute Playwright run.
+ * `factory sandbox exec` enforces it (commands/sandbox.ts).
+ */
+export const SANDBOX_MINUTES: Record<'review' | 'verify' | 'ruling', Record<Risk, number>> = {
+  review: { low: 3, normal: 6, high: 15 },
+  verify: { low: 2, normal: 3, high: 8 },
   ruling: { low: 0, normal: 0, high: 0 },
 }
 
 /**
- * The sandbox budget of a reviewer run: its task in the pass under way, at the plan's risk. A run
- * the plan doesn't name (a ruling on an acceptance-test fix, asked between two passes) has none,
- * and a role whose approval carries runs nothing.
+ * The sandbox minutes of a reviewer role in the pass under way: its task, at the plan's risk. A
+ * run the plan doesn't name (a ruling on an acceptance-test fix, asked between two passes) has
+ * none, and a role whose approval carries runs nothing.
  */
-export function sandboxBudget(job: Pick<Job, 'reviews' | 'rounds'>, role: string): number {
+export function sandboxMinutes(job: Pick<Job, 'reviews' | 'rounds'>, role: string): number {
   const pass = job.rounds + 1
   const plan = job.reviews.find((planned) => planned.pass === pass)
   const task = plan?.roles[role as ReviewerRole]
   if (!plan || task === 'carry') return 0
-  return SANDBOX_BUDGET[task ?? 'ruling'][plan.risk]
+  return SANDBOX_MINUTES[task ?? 'ruling'][plan.risk]
 }
 
 /** The roles of a plan with the given task. */

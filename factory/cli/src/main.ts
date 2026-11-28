@@ -3,7 +3,12 @@
 import { parseArgs } from 'node:util'
 import { handoffDir, mainRoot } from './job.ts'
 import { check } from './commands/check.ts'
-import { Refusal, requireUnchangedFactory } from './commands/common.ts'
+import {
+  COST_ALARM_COMMANDS,
+  Refusal,
+  requireCostAcknowledged,
+  requireUnchangedFactory,
+} from './commands/common.ts'
 import { confirm, isConfirmAction } from './commands/confirm.ts'
 import { gate } from './commands/gate.ts'
 import { hookGuard, hookLog } from './commands/hook.ts'
@@ -49,9 +54,9 @@ ${RULING_USAGE}
   block <n> <file>           keep a Decision Request and block the job
   seal <n> --pass <k> --roles <r,...>  seal the build notes and earlier reports for a blind pass
   unseal <n>                 restore them once every sealed role wrote its blind pass
-  confirm <n> clean|abandon  the question to ask the user (AskUserQuestion) before clean; one yes covers one clean
+  confirm <n> clean|abandon|refreeze|cost  the question to ask the user (AskUserQuestion); one yes covers one step
   answer <n> "<text>"        the user's answer to a Decision Request, from their own prompt (the orchestrator asks with AskUserQuestion and a hook records it)
-  refreeze <n>               the user accepts the factory files as they are now for job <n> (only from the user's own prompt)
+  refreeze <n>               accept the factory files as they are now for job <n> (after the user's yes, or from their own prompt)
   pr <n>                     open the pull request
   status                     list the jobs
   watch [--port <port>]      serve the live page (factory start also opens it for the user)
@@ -82,6 +87,14 @@ const WHILE_CHANGED = new Set([
   'hook',
 ])
 
+/** What a confirmed yes unlocks, for the line `confirm` prints. */
+const NEXT = {
+  clean: (n?: string) => `\`factory clean ${n}\``,
+  abandon: (n?: string) => `\`factory clean ${n} --abandon\``,
+  refreeze: (n?: string) => `\`factory refreeze ${n}\``,
+  cost: () => 'the command that was refused',
+}
+
 async function main(argv: string[]): Promise<number> {
   // The sandbox splits its own arguments at `--`, so the command it runs keeps its flags.
   if (argv[0] === 'sandbox') {
@@ -108,6 +121,16 @@ async function main(argv: string[]): Promise<number> {
   // A job is judged by the factory it started with: every command on it refuses once that changed.
   if (command && !WHILE_CHANGED.has(command) && Number.isInteger(Number(arg)) && Number(arg) > 0) {
     requireUnchangedFactory(root, Number(arg))
+  }
+  // The cost alarm stops the orchestrator at its decision points: every agent launch, a review
+  // pass, a round and a build attempt. Deterministic steps and the PR itself never wait on it.
+  if (
+    command &&
+    COST_ALARM_COMMANDS.has(command) &&
+    Number.isInteger(Number(arg)) &&
+    Number(arg) > 0
+  ) {
+    requireCostAcknowledged(root, Number(arg))
   }
 
   switch (command) {
@@ -221,9 +244,9 @@ async function main(argv: string[]): Promise<number> {
     case 'confirm': {
       const action = positionals[2]
       if (!isConfirmAction(action))
-        throw new Refusal('confirm needs the step: confirm <n> clean|abandon')
+        throw new Refusal('confirm needs the step: confirm <n> clean|abandon|refreeze|cost')
       print(
-        `Pass this to AskUserQuestion exactly as printed. Run \`factory clean ${arg}${action === 'abandon' ? ' --abandon' : ''}\` only after the user answered yes.\n\n${JSON.stringify(confirm(root, issueNumber(arg), action), null, 2)}`,
+        `Pass this to AskUserQuestion exactly as printed. Run ${NEXT[action](arg)} only after the user answered yes.\n\n${JSON.stringify(confirm(root, issueNumber(arg), action), null, 2)}`,
       )
       return 0
     }

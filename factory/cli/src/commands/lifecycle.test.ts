@@ -281,16 +281,35 @@ describe('factory clean --abandon', () => {
     expect(done).toContain('No compose stack of its own.')
   })
 
-  // Value record (T-009). Guarantee: a job whose job.json no longer validates (a field another
-  // factory version wrote with a shape this one rejects, a half-written file) can still be
-  // abandoned, which is the job its user most needs to abandon. Defect caught: abandon dying on a
-  // ZodError and leaving the worktree, branch and state behind. No acceptance test gives it: FI-001
-  // is about who may run it. Level: unit, on the real git repo above.
+  // Value record (T-009). Guarantee: a job whose job.json no longer validates can still be
+  // abandoned, which is the job its user most needs to abandon. The case that happened: job #15's
+  // `routing` carried a `lane` key, and `RoutingProposal` is a `z.strictObject`, so the load died
+  // with `unrecognized_keys` and `clean --abandon` with it. Defect caught: abandon dying on a
+  // ZodError and leaving the worktree, branch and state behind. No acceptance test gives it:
+  // FI-001 is about who may run it. Level: unit, on the real git repo above.
+  const plan = {
+    scope: 'frontend',
+    complexity: 'small',
+    evidence: ['the issue names one file'],
+    expectedPaths: ['apps/web/src/main.tsx'],
+    behaviorChange: false,
+    uncertainty: [],
+    verification: ['the checks'],
+    workflow: 'standard',
+    risk: 'normal',
+    reasons: ['behavior changes'],
+    policyVersion: '1.4',
+    at: '2026-01-01T00:00:00.000Z',
+  }
   test.each([
     ['a field of the wrong type', (job: object) => JSON.stringify({ ...job, attempts: 'many' })],
     [
-      'a lane object this version has no shape for',
-      (job: object) => JSON.stringify({ ...job, state: { lane: 'factory' } }),
+      'a `lane` key inside `routing` (a strict object)',
+      (job: object) => JSON.stringify({ ...job, routing: { ...plan, lane: 'factory' } }),
+    ],
+    [
+      'a `lane` key inside `routingHistory`',
+      (job: object) => JSON.stringify({ ...job, routingHistory: [{ ...plan, lane: 'factory' }] }),
     ],
   ])('abandons a job whose job.json has %s, from what it can read', async (_why, corrupt) => {
     const file = join(stateDir(main, 7), 'job.json')

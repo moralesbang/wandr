@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { handoffDir, reviewPass, saveJob, type Job, type ReviewPlan } from '../job.ts'
 import { approves } from './pr.ts'
 import { refreshRouting, requireRouted } from './route.ts'
-import { planRoles, rolesWith, sandboxBudget, type PreviousPass } from '../review-plan.ts'
+import { planRoles, rolesWith, sandboxMinutes, type PreviousPass } from '../review-plan.ts'
 import { jobRisk } from '../risk.ts'
 import { loadSeal, refuseWhileSealed, seal, sealedStore } from '../seal.ts'
 import { git, lines } from '../shell.ts'
@@ -122,9 +122,9 @@ export async function reviewReport(root: string, number: number) {
   const job = requireJob(root, number)
   return {
     ...plan,
-    // The `sandbox exec` commands each reviewer run may spend; the guard denies the one past it.
-    sandboxBudget: Object.fromEntries(
-      Object.keys(plan.roles).map((role) => [role, sandboxBudget(job, role)]),
+    // The minutes each reviewer role may spend in `sandbox exec` this pass; the CLI refuses past it.
+    sandboxMinutes: Object.fromEntries(
+      Object.keys(plan.roles).map((role) => [role, sandboxMinutes(job, role)]),
     ),
     sealed: loadSeal(root, number) !== null,
     reads: verifierReads(root, job, plan),

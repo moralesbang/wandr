@@ -3,9 +3,11 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { readEvents } from '../events.ts'
 import { factoryFingerprint, fingerprintChanges } from '../freeze.ts'
-import { guardJob, put, type GuardJob } from '../guard-fixture.ts'
+import { guardJob, put, SESSION, type GuardJob } from '../guard-fixture.ts'
 import { loadJob, saveJob } from '../job.ts'
 import { requireUnchangedFactory } from './common.ts'
+import { confirm } from './confirm.ts'
+import { hookAnswer } from './hook-answer.ts'
 import { refreeze } from './refreeze.ts'
 import { start } from './start.ts'
 import { withDocker } from '../job-fixture.ts'
@@ -165,6 +167,21 @@ const fingerprinted = () => {
   return f
 }
 
+const EDITED = (root: string) => put(join(root, 'factory', 'cli', 'src', 'main.ts'), 'edited\n')
+
+/** The user's reply to the question `factory confirm` printed, as the PostToolUse hook gets it. */
+const reply = (f: GuardJob, question: string, answer: string) =>
+  hookAnswer(
+    f.root,
+    JSON.stringify({
+      session_id: SESSION,
+      hook_event_name: 'PostToolUse',
+      tool_name: 'AskUserQuestion',
+      tool_input: { questions: [{ question }] },
+      tool_response: { answers: { [question]: answer } },
+    }),
+  )
+
 describe('FI-027: a job is judged by the factory it started with', () => {
   test('the fingerprint is the content of the files that define how a job runs, uncommitted ones included', () => {
     const f = job()
@@ -236,12 +253,46 @@ describe('FI-027: a job is judged by the factory it started with', () => {
     )
   })
 
-  test('only the user accepts a changed factory, and the job is then judged by the new files', () => {
+  test('the orchestrator keeps its way out of a changed factory: ask the user, refreeze on their yes', () => {
     const f = fingerprinted()
-    put(join(f.root, 'factory', 'cli', 'src', 'main.ts'), 'edited\n')
-    expect(f.bash(null, 'bun run factory refreeze 7', f.root)).toContain('the user')
-    const accepted = refreeze(f.root, 7)
-    expect(accepted).toEqual(['factory/cli/src/main.ts (changed)'])
+    EDITED(f.root)
+    // Everything else is stopped, but the question and the commands around it run.
+    expect(f.bash(null, 'git status', f.root)).toContain('factory/cli/src/main.ts (changed)')
+    expect(f.bash(null, 'bun run factory confirm 7 refreeze', f.root)).toBeNull()
+    expect(f.bash(null, 'bun run factory status', f.root)).toBeNull()
+    expect(f.guard(null, 'AskUserQuestion', { questions: [] })).toBeNull()
+    expect(f.bash(null, 'bun run factory confirm 7 refreeze && git status', f.root)).toContain(
+      'changed',
+    )
+    expect(
+      f.bash({ agent_id: 'b1', agent_type: 'factory-build' }, 'bun run factory status'),
+    ).toContain('changed')
+  })
+
+  test('a refreeze needs the user’s yes to the CLI’s question naming the files, and one yes covers one', () => {
+    const f = fingerprinted()
+    EDITED(f.root)
+    expect(f.bash(null, 'bun run factory refreeze 7', f.root)).toContain(
+      'factory confirm 7 refreeze',
+    )
+    const question = confirm(f.root, 7, 'refreeze').questions[0]!
+    expect(question.question).toContain('factory/cli/src/main.ts (changed)')
+    reply(f, question.question, question.options[1]!.label)
+    expect(f.bash(null, 'bun run factory refreeze 7', f.root)).toContain('confirm')
+    const again = confirm(f.root, 7, 'refreeze').questions[0]!
+    reply(f, again.question, again.options[0]!.label)
+    expect(f.bash(null, 'bun run factory refreeze 7', f.root)).toBeNull()
+    expect(readEvents(f.root, 7).some((event) => event.kind === 'confirmation.used')).toBe(true)
+    expect(f.bash(null, 'bun run factory refreeze 7', f.root)).toContain('confirm')
+    expect(refreeze(f.root, 7)).toEqual(['factory/cli/src/main.ts (changed)'])
+    expect(f.bash(null, 'git status')).toBeNull()
+    expect(() => confirm(f.root, 7, 'refreeze')).toThrow('nothing to accept')
+  })
+
+  test('the user keeps `! bun run factory refreeze` (no hook fires), which the model cannot run unconfirmed', () => {
+    const f = fingerprinted()
+    EDITED(f.root)
+    expect(refreeze(f.root, 7)).toHaveLength(1)
     expect(f.bash(null, 'git status')).toBeNull()
   })
 

@@ -74,6 +74,7 @@ export function hookAnswer(root: string, stdin: string): void {
       const yes = confirming.answer === pending.yes
       record(root, job.number, yes ? 'confirmation.recorded' : 'confirmation.declined', {
         action: pending.action,
+        ...(pending.threshold === undefined ? {} : { threshold: pending.threshold }),
       })
       return
     }

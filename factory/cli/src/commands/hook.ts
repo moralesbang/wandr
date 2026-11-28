@@ -25,7 +25,7 @@ import { canonical } from '../paths.ts'
 import { changedBetween, workingTree } from '../shell.ts'
 import { bashPolicy } from '../bash-policy.ts'
 import { allow, deny, first, type Policy, type Verdict } from '../policy.ts'
-import { cleanCall, sandboxExecCount } from '../bash-policy.ts'
+import { confirmedCall, refreezeFlow } from '../bash-policy.ts'
 import { agentPolicy, messagePolicy, readPolicy } from '../read-guard.ts'
 import { writePolicy } from '../write-guard.ts'
 import {
@@ -310,7 +310,13 @@ function judge(mainRoot: string, input: HookInput, found: Job): string {
   const entry = entryFor(input)
   const context = { root, job, input, places, ...(agent ? { agent } : {}) }
   // The factory the job started with is the one that judges it: a change since refuses every call.
-  const changed = fingerprintVerdict(root, found)
+  // The orchestrator keeps its way out: asking the user about the change, and the refreeze they allow.
+  const command = input.tool_input?.command
+  const wayOut =
+    !agent &&
+    (tool === 'AskUserQuestion' ||
+      (typeof command === 'string' && tool === 'Bash' && refreezeFlow(command, context)))
+  const changed = wayOut ? allow : fingerprintVerdict(root, found)
   if (!changed.ok) {
     appendEvent(root, {
       t: new Date().toISOString(),
@@ -332,22 +338,8 @@ function judge(mainRoot: string, input: HookInput, found: Job): string {
       launchPolicy(context),
     ])
   if (!verdict || verdict.ok) {
-    const command = input.tool_input?.command
-    const cleaning = !agent && typeof command === 'string' ? cleanCall(command, context) : null
-    // Each `factory sandbox exec` the guard lets through spends one of the run's budget.
-    if (agent && typeof command === 'string') {
-      for (let i = 0; i < sandboxExecCount(command, context); i++) {
-        appendEvent(root, {
-          t: new Date().toISOString(),
-          job: job.number,
-          source: 'hook',
-          agent,
-          kind: 'sandbox.exec',
-          ...(input.tool_use_id ? { toolUseId: input.tool_use_id } : {}),
-        })
-      }
-    }
-    // A `factory clean` the guard lets through uses its confirmation up.
+    const cleaning = !agent && typeof command === 'string' ? confirmedCall(command, context) : null
+    // A `factory clean` or `refreeze` the guard lets through uses its confirmation up.
     if (cleaning) {
       appendEvent(root, {
         t: new Date().toISOString(),

@@ -51,7 +51,7 @@ import {
   type Verdict,
 } from './policy.ts'
 import { bashReadVerdict, routingReadOnly, sealedIn } from './read-guard.ts'
-import { reviewerRole, sandboxBudget } from './review-plan.ts'
+import { reviewerRole } from './review-plan.ts'
 import { REVIEWER_ROLES } from './job.ts'
 import { sandboxNames } from './sandbox-names.ts'
 import { loadSeal } from './seal.ts'
@@ -82,8 +82,7 @@ const AGENT_COMMANDS = new Set(['check', 'status'])
 const REVIEWER_COMMANDS = new Set(['status'])
 
 // `watch` serves the live page with a token the user opens, and the page shows what the sealed
-// names hide: `factory start` opens it in the user's browser without printing the token. `refreeze`
-// accepts a changed factory under a job: only the user decides to judge the job by new files.
+// names hide: `factory start` opens it in the user's browser without printing the token.
 const userOnly = (command: string) =>
   deny(
     `Only the user runs \`factory ${command}\`, from their own prompt: \`! bun run factory ${command}\`. ${
@@ -119,33 +118,65 @@ const FACTORY_CODE = /factory\/cli|cli\/src\/|src\/(?:commands|seal|job|main)\b/
 const GH_CODE = /['"`]gh['"`]/
 
 /**
- * A `factory clean` needs the user's yes: the confirmation `factory confirm` asked and the hook
- * recorded from their reply, which one `clean` uses up. The user's own `! bun run factory clean`
- * fires no hook and needs none. Which confirmation a clean needs: `--abandon` or not.
+ * A `factory clean` and a `factory refreeze` need the user's yes: the confirmation `factory confirm`
+ * asked and the hook recorded from their reply, which one command uses up. The user's own
+ * `! bun run factory …` fires no hook and needs none. Which confirmation: `--abandon` or not.
  */
-function cleanVerdict(factory: FactoryCall, context: GuardContext): Verdict {
+function confirmedVerdict(factory: FactoryCall, context: GuardContext): Verdict {
   const { job } = context
-  const action = factory.flags.includes('--abandon') ? 'abandon' : 'clean'
+  const action = confirmedAction(factory)
+  const command = factory.command ?? ''
   const number = factory.positionals[1]
-  if (context.agent) return orchestratorOnly('clean', context.agent.type)
+  if (!action) return allow
+  if (context.agent) return orchestratorOnly(command, context.agent.type)
   if (number !== String(job.number)) {
-    return deny(`Your job is #${job.number}; \`factory clean\` is for it alone.`)
+    return deny(`Your job is #${job.number}; \`factory ${command}\` is for it alone.`)
   }
   if (unusedConfirmations(readEvents(context.root, job.number), action) > 0) return allow
+  const what =
+    action === 'refreeze'
+      ? 'accepts the factory files as they are now, so the job is judged by them from here on. Show the user the changed files the CLI named and ask them'
+      : `${action === 'abandon' ? 'with --abandon ' : ''}removes the job's worktree, its branch and its state`
   return deny(
-    `\`factory clean\` ${action === 'abandon' ? 'with --abandon ' : ''}removes the job's worktree, its branch and its state, so it runs only after the user said yes to the CLI's question. Run \`bun run factory confirm ${job.number} ${action}\`, pass the \`questions\` it prints to AskUserQuestion exactly as printed, and run \`factory clean\` again once the user answered yes. One yes covers one clean.`,
+    `\`factory ${command}\` ${what}: it runs only after the user said yes to the CLI's question. Run \`bun run factory confirm ${job.number} ${action}\`, pass the \`questions\` it prints to AskUserQuestion exactly as printed, and run \`factory ${command}\` again once the user answered yes. One yes covers one ${command}.`,
   )
 }
 
-/** The action of the `factory clean` a command runs (the guard logs its confirmation used), or null. */
-export function cleanCall(command: string, context: GuardContext): 'clean' | 'abandon' | null {
+/** The confirmation a `factory clean` or `factory refreeze` call needs, or null for any other. */
+const confirmedAction = (factory: FactoryCall): 'clean' | 'abandon' | 'refreeze' | null =>
+  factory.command === 'refreeze'
+    ? 'refreeze'
+    : factory.command === 'clean'
+      ? factory.flags.includes('--abandon')
+        ? 'abandon'
+        : 'clean'
+      : null
+
+/** The confirmation the `factory clean` or `factory refreeze` a command runs uses up (logged), or null. */
+export function confirmedCall(
+  command: string,
+  context: GuardContext,
+): 'clean' | 'abandon' | 'refreeze' | null {
   for (const call of invocations(command, { ...bashWhere(context), home: homedir() })) {
     const factory = factoryCall(call)
-    if (factory?.command === 'clean') {
-      return factory.flags.includes('--abandon') ? 'abandon' : 'clean'
-    }
+    const action = factory ? confirmedAction(factory) : null
+    if (action) return action
   }
   return null
+}
+
+/** Factory commands the orchestrator may still run after the factory changed under its job: its way out. */
+const WHILE_CHANGED = new Set(['confirm', 'refreeze', 'status'])
+
+/** Whether a command is only the way out of a changed factory: confirm, refreeze, status. */
+export function refreezeFlow(command: string, context: GuardContext): boolean {
+  const calls = invocations(command, { ...bashWhere(context), home: homedir() })
+  const factory = calls.map(factoryCall).filter((call) => call !== null)
+  return (
+    factory.length > 0 &&
+    factory.length === calls.length &&
+    factory.every((call) => WHILE_CHANGED.has(call.command ?? ''))
+  )
 }
 
 /** The package scripts that run a whole suite when run from the repo root: turbo fans them out. */
@@ -174,16 +205,8 @@ function wholeSuite(argv: string[]): string | null {
   return null
 }
 
-/** How many `factory sandbox exec` calls a command makes: each spends one of the reviewer's budget. */
-export function sandboxExecCount(command: string, context: GuardContext): number {
-  return invocations(command, { ...bashWhere(context), home: homedir() }).filter(
-    (call) => factoryCall(call)?.sandbox?.action === 'exec',
-  ).length
-}
-
 /** The factory commands a call runs: `answer` and `hook` for no one, the rest by who calls. */
 function factoryVerdict(command: string, calls: Invocation[], context: GuardContext): Verdict {
-  let execs = 0
   // The command a reviewer's `sandbox exec` runs is judged apart (bash-words.ts invocations): no
   // whole suite, which `factory check` already ran at the gated HEAD.
   for (const call of calls) {
@@ -209,9 +232,9 @@ function factoryVerdict(command: string, calls: Invocation[], context: GuardCont
       return unreadable(`The factory command is ${sub}, taken from the shell`)
     if (sub === 'answer') return answerDenied
     if (sub === 'hook') return hookDenied
-    if (sub === 'watch' || sub === 'refreeze') return userOnly(sub)
-    if (sub === 'clean') {
-      const cleaning = cleanVerdict(factory, context)
+    if (sub === 'watch') return userOnly(sub)
+    if (sub === 'clean' || sub === 'refreeze') {
+      const cleaning = confirmedVerdict(factory, context)
       if (!cleaning.ok) return cleaning
       continue
     }
@@ -236,17 +259,6 @@ function factoryVerdict(command: string, calls: Invocation[], context: GuardCont
       }
       if (sandbox.number !== undefined && sandbox.number !== String(context.job.number)) {
         return deny(`Your job is #${context.job.number}; its sandbox is the only one you run.`)
-      }
-      if (sandbox.action === 'exec') {
-        const budget = sandboxBudget(context.job, role)
-        const used = readEvents(context.root, context.job.number).filter(
-          (event) => event.kind === 'sandbox.exec' && event.agent?.id === context.agent?.id,
-        ).length
-        if (used + ++execs > budget) {
-          return deny(
-            `Sandbox budget spent (${used} of ${budget} \`factory sandbox exec\` commands for this run): write your report with the evidence you have and list what you could not check as a finding.`,
-          )
-        }
       }
       continue
     }

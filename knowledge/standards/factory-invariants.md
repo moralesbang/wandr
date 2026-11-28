@@ -24,17 +24,17 @@ Every invariant below MUST be defended by at least one acceptance test, except o
 
 ### FI-001 — Only the user decides
 
-Only the user starts a job (`factory:ready`), answers a Decision Request, merges, or accepts a changed factory under a job: the guard denies `answer`, `watch` and `refreeze` to every tool call, and a command the user types with `!` fires no hook. The model never writes the user's reply (FI-028).
+Only the user starts a job (`factory:ready`), answers a Decision Request or merges: the guard denies `answer` and `watch` to every tool call, and a command the user types with `!` fires no hook. The model never writes the user's reply (FI-028).
 
-- **Mechanism:** `bash-policy.ts` (`answerDenied`, the user's commands), `commands/start.ts` (the label), `commands/answer.ts`, `commands/refreeze.ts`.
-- **Defended by:** `bash-policy.test.ts`, `commands/hook-launchers.test.ts`, `commands/answer.test.ts`, `commands/start.test.ts`, `commands/freeze.acceptance.test.ts` (`refreeze`).
+- **Mechanism:** `bash-policy.ts` (`answerDenied`, the user's commands), `commands/start.ts` (the label), `commands/answer.ts`.
+- **Defended by:** `bash-policy.test.ts`, `commands/hook-launchers.test.ts`, `commands/answer.test.ts`, `commands/start.test.ts`.
 
 ### FI-028 — The user's reply is the user's, whatever the channel
 
-A Decision Request's answer, and the yes that lets a job be cleaned or abandoned, reach the job state only as the user's own reply to the orchestrator's `AskUserQuestion`, recorded by the `PostToolUse` hook from `tool_response`, or from the user's own prompt (`! bun run factory answer`). The guard denies an `AskUserQuestion` call that carries `answers` or `annotations`; every agent but the orchestrator has no such tool. A `factory clean` runs only against a yes to the question `factory confirm` worded, one clean per yes. One answer authorizes one commit, as before (FI-007).
+A Decision Request's answer, and the yes that lets a job be cleaned, abandoned, refrozen (a changed factory accepted) or carried on past a cost threshold, reach the job only as the user's own reply to the orchestrator's `AskUserQuestion`, recorded by the `PostToolUse` hook from `tool_response`, or from the user's own prompt (`! bun run factory answer`). The guard denies an `AskUserQuestion` call that carries `answers` or `annotations`; every agent but the orchestrator has no such tool. A `factory clean` or `factory refreeze` runs only against a yes to the question `factory confirm` worded, one command per yes; a yes to the `cost` question acknowledges the threshold it names and no other. One answer authorizes one commit, as before (FI-007).
 
-- **Mechanism:** `commands/hook-answer.ts` (`repliesOf`, `hookAnswer`), `commands/answer.ts`, `commands/confirm.ts`, `commands/hook.ts` (`askPolicy`, `confirmation.used`), `bash-policy.ts` (`cleanVerdict`, `answerDenied`), `.claude/settings.json` (the hook).
-- **Defended by:** `commands/answer-channel.acceptance.test.ts`.
+- **Mechanism:** `commands/hook-answer.ts` (`repliesOf`, `hookAnswer`), `commands/answer.ts`, `commands/confirm.ts`, `commands/hook.ts` (`askPolicy`, `confirmation.used`), `bash-policy.ts` (`confirmedVerdict`, `answerDenied`), `cost.ts` (`acknowledgedThreshold`), `.claude/settings.json` (the hook).
+- **Defended by:** `commands/answer-channel.acceptance.test.ts`, `commands/freeze.acceptance.test.ts` (`refreeze`), `commands/cost-alarm.acceptance.test.ts` (`cost`).
 
 ### FI-002 — Only the CLI writes to GitHub
 
@@ -196,12 +196,19 @@ A review pass after the first is a `verify` when every non-test file changed sin
 - **Mechanism:** `review-plan.ts` (`planRoles`), `commands/review.ts`.
 - **Defended by:** `commands/review-budget.acceptance.test.ts`, `review-plan.test.ts`, `commands/review.test.ts`.
 
-### FI-031 — A reviewer run spends a bounded number of sandbox commands
+### FI-031 — A reviewer role spends a bounded time in the sandbox
 
-Each reviewer run has a budget of `factory sandbox exec` commands fixed by its task and the risk (`SANDBOX_BUDGET`); the guard counts them per run from the event log and denies the one past it, and denies a whole-suite run inside the sandbox. Each command is killed after 5 minutes.
+Each reviewer role has a budget of minutes in `factory sandbox exec` per job and review pass, fixed by its task and the risk (`SANDBOX_MINUTES`). The CLI, which runs the command, adds the seconds each exec spends (a relaunched reviewer inherits them, and a command packing many steps counts its whole time), logs each duration, runs every exec with the time left as its timeout and refuses the next once the budget is spent. The guard denies a whole-suite run inside the sandbox.
 
-- **Mechanism:** `review-plan.ts` (`SANDBOX_BUDGET`, `sandboxBudget`), `bash-policy.ts` (`factoryVerdict`, `wholeSuite`), `commands/hook.ts` (`sandbox.exec`), `sandbox.ts` (`runInSandbox`).
+- **Mechanism:** `review-plan.ts` (`SANDBOX_MINUTES`, `sandboxMinutes`), `commands/sandbox.ts` (`sandboxCommand`, `sandboxSecondsSpent`), `sandbox.ts` (`runInSandbox`), `bash-policy.ts` (`wholeSuite`).
 - **Defended by:** `commands/review-budget.acceptance.test.ts`, `commands/hook-sandbox.test.ts`.
+
+### FI-032 — The user is asked each further $5 a job costs
+
+When a job's cost (the sum of each run's latest `usage` event, as the PR's cost table counts it) passes `COST_STEP_USD`, and again at each further multiple, the orchestrator's decision points (`launch`, `review`, `round`, `attempt`) refuse with the amount and each agent's share until the user said yes to continue, through the orchestrator's question. A yes acknowledges that threshold only. An alarm, not a cut: nothing stops a job on its own.
+
+- **Mechanism:** `cost.ts` (`costAlarm`, `COST_STEP_USD`), `commands/common.ts` (`requireCostAcknowledged`, `COST_ALARM_COMMANDS`), `main.ts`, `commands/confirm.ts`.
+- **Defended by:** `commands/cost-alarm.acceptance.test.ts`.
 
 ### FI-025 — Inside a job the orchestrator launches only the factory's agents and Explore
 
@@ -235,7 +242,7 @@ While any job is `building` or `blocked`, no Claude Code session of the repo, bo
 
 ### FI-027 — A job is judged by the factory it started with
 
-`factory start` records a hash of each of those files, uncommitted changes included. While the job is active every CLI command on it and every guard verdict of its session compares the current files with the record and refuses on a mismatch, naming the files. A job resumed with no record gets one. Only the user accepts the new files (`refreeze`).
+`factory start` records a hash of each of those files, uncommitted changes included. While the job is active every CLI command on it and every guard verdict of its session compares the current files with the record and refuses on a mismatch, naming the files. A job resumed with no record gets one. The new files are accepted only by the user's yes (FI-028) or their own `! bun run factory refreeze`; the orchestrator keeps its way out (`confirm`, `status`, `refreeze`, a question) while the job is stopped.
 
 - **Mechanism:** `freeze.ts` (`factoryFingerprint`, `fingerprintVerdict`), `commands/common.ts` (`requireUnchangedFactory`), `main.ts`, `commands/start.ts`, `commands/hook.ts`.
 - **Defended by:** `commands/freeze.acceptance.test.ts`.

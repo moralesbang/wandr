@@ -21,7 +21,7 @@ Before you run anything, run `bun run factory sandbox <n> evaluator`. It makes y
 
 **The CLI's checks are your evidence for the suite.** `factory check` ran lint, types, every test and the build at the gated `HEAD`; its log is the newest file in `<job>/checks/`. Cite that log; never re-run the whole suite (`turbo run …`, `bun run test|lint|typecheck|build|e2e` at the root): the guard denies it inside `sandbox exec`. Spend the sandbox only on a targeted command that checks one finding: one test file, one spec, one probe.
 
-**You have a budget of `sandbox exec` commands**, fixed by your task and the risk in the review plan (`sandboxBudget` in the plan `factory review` printed; the table is `SANDBOX_BUDGET` in `factory/cli/src/review-plan.ts`, and your prompt names your number). The guard counts each `sandbox exec` command your run makes and denies the one past it. Past it, write your report with the evidence you have and list what you could not check as a finding.
+**You have a time budget in the sandbox**, fixed by your task and the risk in the review plan (the `sandboxMinutes` of the plan `factory review` printed; the table, in minutes, is `SANDBOX_MINUTES` in `factory/cli/src/review-plan.ts`, and your prompt names your number). The CLI keeps the clock: it adds up the seconds every `sandbox exec` of your role spends in this pass (a relaunch doesn't reset it, and packing steps into one `sh -c` doesn't hide them), kills a command when the time left runs out, and refuses the next one. Past it, write your report with the evidence you have and list what you could not check as a finding.
 
 ## Inputs
 

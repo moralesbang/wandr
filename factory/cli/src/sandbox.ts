@@ -84,9 +84,6 @@ const parseDotenv = (text: string) =>
       .map((match) => [match[1] as string, match[2] as string]),
   )
 
-/** How long one `factory sandbox exec` command may run: a full build plus a Playwright run fits. */
-export const SANDBOX_EXEC_TIMEOUT_MS = 5 * 60 * 1000
-
 /**
  * Runs `argv` in the sandbox's checkout with its environment, its output on this process's. No
  * shell stands in between: each argument reaches the program exactly as given.
@@ -94,7 +91,7 @@ export const SANDBOX_EXEC_TIMEOUT_MS = 5 * 60 * 1000
 export async function runInSandbox(
   sandbox: Sandbox,
   argv: string[],
-  timeoutMs: number = SANDBOX_EXEC_TIMEOUT_MS,
+  timeoutMs?: number,
 ): Promise<number> {
   const child = Bun.spawn(argv, {
     cwd: sandbox.path,
@@ -103,17 +100,20 @@ export async function runInSandbox(
     stdout: 'inherit',
     stderr: 'inherit',
   })
-  // A command that outlives its limit is killed, so a hung build can't hold a reviewer for an hour.
+  // A command that outlives the time left in the reviewer's budget is killed there.
   let timedOut = false
-  const timer = setTimeout(() => {
-    timedOut = true
-    child.kill('SIGKILL')
-  }, timeoutMs)
+  const timer =
+    timeoutMs === undefined
+      ? undefined
+      : setTimeout(() => {
+          timedOut = true
+          child.kill('SIGKILL')
+        }, timeoutMs)
   try {
     const code = await child.exited
-    if (timedOut) {
+    if (timedOut && timeoutMs !== undefined) {
       console.error(
-        `factory sandbox exec: killed after ${Math.round(timeoutMs / 1000)}s. Run something smaller.`,
+        `factory sandbox exec: killed after ${Math.round(timeoutMs / 1000)}s, the time left in the sandbox budget.`,
       )
       return 124
     }

@@ -362,8 +362,8 @@ export async function abandon(root: string, number: number): Promise<string[]> {
 
 /** Removes a merged job's worktree (its handoff folder with it), branch and state folder. */
 /**
- * What an abandon can still do for a job whose job.json doesn't parse (an unknown key from another
- * factory version, a half-written file): it needs only the job's number and its folder, and takes
+ * What an abandon can still do for a job whose job.json doesn't parse (a key its strict schema
+ * rejects, like the `lane` job #15 had inside `routing`, or a half-written file): it needs only the job's number and its folder, and takes
  * the worktree path and the branch from whatever job.json still says, or from the checkout itself.
  * No schema validation, no PR check it can't make: each step runs on its own and the result says
  * what it removed and what it couldn't. Plain `clean` and every other command stay strict.

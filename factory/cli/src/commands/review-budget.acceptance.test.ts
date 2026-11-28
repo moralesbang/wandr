@@ -1,15 +1,19 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { EVAL, guardJob, TR, type GuardJob } from '../guard-fixture.ts'
+import { join } from 'node:path'
+import { readEvents } from '../events.ts'
+import { EVAL, guardJob, type GuardJob } from '../guard-fixture.ts'
 import type { Risk } from '../job.ts'
 import {
   planRoles,
-  SANDBOX_BUDGET,
-  sandboxBudget,
+  SANDBOX_MINUTES,
+  sandboxMinutes,
   type PlannedRoles,
   type PreviousPass,
 } from '../review-plan.ts'
 import { runInSandbox, type Sandbox } from '../sandbox.ts'
+import { sandboxCommand, type ExecDeps } from './sandbox.ts'
 
 let fixture: GuardJob | undefined
 afterEach(() => fixture?.cleanup())
@@ -81,29 +85,57 @@ describe('FI-030: a pass after a fix reviews the fix, not everything', () => {
   })
 })
 
-const exec = (n: number) =>
-  `bun run factory sandbox exec 7 evaluator -- bun test apps/web/src/a${n}.test.ts`
+/** A sandbox record for the role, as `factory sandbox` leaves it. */
+function sandboxFor(f: GuardJob, role: string) {
+  const sandbox: Sandbox = {
+    role,
+    path: tmpdir(),
+    port: 3101,
+    database: 'd',
+    bucket: 'b',
+    databaseUrl: 'postgres://x',
+    createdAt: 'x',
+  }
+  mkdirSync(join(f.state, 'sandbox'), { recursive: true })
+  writeFileSync(join(f.state, 'sandbox', `${role}.json`), JSON.stringify(sandbox))
+}
 
-describe('FI-031: a reviewer run spends a bounded number of sandbox commands', () => {
+/** A clock and a runner: each command takes the seconds given, and is cut at the limit it is handed. */
+function clock() {
+  let now = 0
+  const limits: number[] = []
+  const takes: number[] = []
+  const deps: ExecDeps = {
+    now: () => now,
+    run: async (_sandbox, _argv, limit) => {
+      limits.push(limit)
+      const wants = (takes.shift() ?? 1) * 1000
+      now += Math.min(wants, limit)
+      return wants > limit ? 124 : 0
+    },
+  }
+  return { deps, limits, takes }
+}
+
+const exec = (f: GuardJob, role = 'evaluator', deps?: ExecDeps) =>
+  sandboxCommand(f.root, ['exec', '7', role, '--', 'bun', 'test'], deps)
+
+describe('FI-031: a reviewer role spends a bounded time in the sandbox, per job and pass', () => {
   test.each([
     ['review', 'low', 3],
     ['review', 'normal', 6],
-    ['review', 'high', 12],
+    ['review', 'high', 15],
     ['verify', 'low', 2],
     ['verify', 'normal', 3],
-    ['verify', 'high', 6],
+    ['verify', 'high', 8],
     ['ruling', 'low', 0],
     ['ruling', 'normal', 0],
     ['ruling', 'high', 0],
-  ] as const)('%s at %s risk may spend %i', (task, risk, budget) => {
-    expect(SANDBOX_BUDGET[task][risk as Risk]).toBe(budget)
+  ] as const)('%s at %s risk gets %i minutes', (task, risk, minutes) => {
+    expect(SANDBOX_MINUTES[task][risk as Risk]).toBe(minutes)
   })
 
-  test('the plan names the budget: review, verify, a carry that runs nothing, and a ruling that has none', () => {
-    const f = (fixture = guardJob({
-      plan: { evaluator: 'verify', 'test-reviewer': 'review' },
-      sealed: false,
-    }))
+  test('the plan names the minutes: review, verify, a carry that runs nothing, a ruling that has none', () => {
     const job = {
       reviews: [
         {
@@ -114,67 +146,78 @@ describe('FI-031: a reviewer run spends a bounded number of sandbox commands', (
       ],
       rounds: 1,
     }
-    expect(sandboxBudget(job as never, 'evaluator')).toBe(3)
-    expect(sandboxBudget(job as never, 'test-reviewer')).toBe(6)
-    expect(sandboxBudget({ ...job, rounds: 2 } as never, 'test-reviewer')).toBe(0)
-    expect(
-      sandboxBudget(
-        { reviews: [{ ...job.reviews[0], roles: { evaluator: 'carry' } }], rounds: 1 } as never,
-        'evaluator',
-      ),
-    ).toBe(0)
-    expect(f.root).toBeTruthy()
+    expect(sandboxMinutes(job as never, 'evaluator')).toBe(3)
+    expect(sandboxMinutes(job as never, 'test-reviewer')).toBe(6)
+    expect(sandboxMinutes({ ...job, rounds: 2 } as never, 'test-reviewer')).toBe(0)
+    const carried = { reviews: [{ ...job.reviews[0], roles: { evaluator: 'carry' } }], rounds: 1 }
+    expect(sandboxMinutes(carried as never, 'evaluator')).toBe(0)
   })
 
-  test('the command past the budget is denied with what to do, and the count is per run', () => {
-    const f = (fixture = guardJob({
-      plan: { evaluator: 'verify', 'test-reviewer': 'review' },
-      sealed: false,
-    }))
-    for (let n = 1; n <= 3; n++) expect(f.bash(EVAL, exec(n))).toBeNull()
-    const reason = f.bash(EVAL, exec(4))
-    expect(reason).toContain('budget')
-    expect(reason).toContain(
-      'write your report with the evidence you have and list what you could not check as a finding',
-    )
-    expect(f.bash({ ...EVAL, agent_id: 'e2' }, exec(1))).toBeNull()
-    // The test reviewer's own budget (review at normal: 6) is its own.
-    for (let n = 1; n <= 6; n++)
-      expect(
-        f.bash(TR, `bun run factory sandbox exec 7 test-reviewer -- bun test a${n}`),
-      ).toBeNull()
-    expect(f.bash(TR, 'bun run factory sandbox exec 7 test-reviewer -- bun test a7')).toContain(
-      'budget',
-    )
-  })
-
-  test('one command with two execs spends two, and a denied command spends none', () => {
-    const f = (fixture = guardJob({
-      plan: { evaluator: 'verify', 'test-reviewer': 'review' },
-      sealed: false,
-    }))
-    expect(f.bash(EVAL, `${exec(1)} && ${exec(2)}`)).toBeNull()
-    expect(f.bash(EVAL, `${exec(3)} && ${exec(4)}`)).toContain('budget')
-    expect(f.bash(EVAL, exec(5))).toBeNull()
-    expect(f.bash(EVAL, exec(6))).toContain('budget')
-  })
-
-  test('a ruling run, asked between two passes when nothing is planned, has no sandbox commands', () => {
-    // Round 1 was recorded, so pass 2 is under way and has no plan yet.
+  test('each exec runs with the time left as its limit, and its duration goes in the log', async () => {
     const f = (fixture = guardJob({
       plan: { evaluator: 'review', 'test-reviewer': 'review' },
       sealed: false,
     }))
-    f.cleanup()
-    const between = (fixture = guardJob({
+    sandboxFor(f, 'evaluator')
+    const { deps, limits, takes } = clock()
+    takes.push(100, 30)
+    await exec(f, 'evaluator', deps)
+    await exec(f, 'evaluator', deps)
+    expect(limits).toEqual([360_000, 260_000])
+    const logged = readEvents(f.root, 7).filter((event) => event.kind === 'sandbox.exec')
+    expect(logged.map((event) => event.source)).toEqual(['cli', 'cli'])
+    expect(logged.map((event) => event.detail)).toEqual([
+      { role: 'evaluator', pass: 2, seconds: 100, exit: 0 },
+      { role: 'evaluator', pass: 2, seconds: 30, exit: 0 },
+    ])
+  })
+
+  test('one command that packs many steps is cut at the time left, and the next is refused', async () => {
+    const f = (fixture = guardJob({
+      plan: { evaluator: 'review', 'test-reviewer': 'review' },
       sealed: false,
-      rounds: 1,
-      plan: undefined,
-      job: { reviews: [] },
     }))
-    expect(
-      between.bash(TR, 'bun run factory sandbox exec 7 test-reviewer -- bun test a'),
-    ).toContain('budget')
+    sandboxFor(f, 'evaluator')
+    const { deps, limits, takes } = clock()
+    takes.push(900)
+    expect(await exec(f, 'evaluator', deps)).toBe(124)
+    const refused = await exec(f, 'evaluator', deps).catch((error: unknown) => error)
+    expect((refused as Error).message).toContain(
+      'write your report with the evidence you have and list what you could not check as a finding',
+    )
+    expect(limits).toEqual([360_000])
+  })
+
+  test('the clock is per role and per pass, and a relaunched run inherits what was spent', async () => {
+    const f = (fixture = guardJob({
+      plan: { evaluator: 'review', 'test-reviewer': 'review' },
+      sealed: false,
+    }))
+    sandboxFor(f, 'evaluator')
+    sandboxFor(f, 'test-reviewer')
+    // Spent in the previous pass: no part of this pass's budget.
+    f.log({
+      source: 'cli',
+      kind: 'sandbox.exec',
+      detail: { role: 'evaluator', pass: 1, seconds: 340 },
+    })
+    const { deps, limits, takes } = clock()
+    takes.push(60, 10)
+    await exec(f, 'evaluator', deps)
+    await exec(f, 'test-reviewer', deps)
+    expect(limits).toEqual([360_000, 360_000])
+    // A new run of the evaluator (no state of its own) starts from the 60 seconds already spent.
+    await exec(f, 'evaluator', deps)
+    expect(limits[2]).toBe(300_000)
+  })
+
+  test('a ruling, asked when nothing is planned for the pass, has no time at all', async () => {
+    const f = (fixture = guardJob({ sealed: false, rounds: 1, job: { reviews: [] } }))
+    sandboxFor(f, 'test-reviewer')
+    const { deps, limits } = clock()
+    const refused = await exec(f, 'test-reviewer', deps).catch((error: unknown) => error)
+    expect((refused as Error).message).toContain('budget')
+    expect(limits).toEqual([])
   })
 
   test.each([
