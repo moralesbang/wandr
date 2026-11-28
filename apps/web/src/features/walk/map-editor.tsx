@@ -1,5 +1,5 @@
 import type { RoutePoint } from '@wandr/sharing'
-import { type ReactNode, useRef, useState } from 'react'
+import { type KeyboardEvent, type ReactNode, useRef, useState } from 'react'
 import type { MapLayerMouseEvent } from 'react-map-gl/maplibre'
 import { BaseMap, type BaseMapProps } from '@/components/map/base-map'
 import { FindMarker } from '@/components/map/find-marker'
@@ -13,6 +13,7 @@ import {
   type Gesture,
   type GestureTarget,
   resolveGesture,
+  resolveKey,
   type Tool,
 } from './resolve-gesture'
 import { insertPointAfter, midpoints, movePoint } from './route-edits'
@@ -28,6 +29,7 @@ export type EditorEdit =
   | { type: 'select-point'; pointId: string }
   | { type: 'move-point'; pointId: string; at: LngLat }
   | { type: 'insert-point'; afterPointId: string; at: LngLat }
+  | { type: 'delete-point'; pointId: string }
 
 export type MapEditorProps = {
   tool: Tool
@@ -129,6 +131,13 @@ export const MapEditor = ({
     },
   })
 
+  const onPointKey = (event: KeyboardEvent<HTMLButtonElement>, pointId: string) => {
+    const action = resolveKey(tool, { kind: 'point', pointId }, event.key)
+    if (action.type !== 'delete-point') return
+    event.preventDefault()
+    onEdit(action)
+  }
+
   const onMapClick = (event: MapLayerMouseEvent) => {
     applyTap(resolve({ kind: 'map' }, 'tap'), { lng: event.lngLat.lng, lat: event.lngLat.lat })
   }
@@ -168,6 +177,7 @@ export const MapEditor = ({
             at={point}
             label={`Point ${index + 1}`}
             press={pressOn({ kind: 'point', pointId: point.id })}
+            onKeyDown={(event) => onPointKey(event, point.id)}
             layer={layer.point}
             selected={point.id === selectedPointId}
             dragging={drag?.type === 'move-point' && drag.pointId === point.id}
