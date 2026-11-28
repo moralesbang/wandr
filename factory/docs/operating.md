@@ -55,7 +55,7 @@ A finished job replays from its log: add `&job=<n>&speed=<x>` to the URL `watch`
 
 ## The post-mortem
 
-`/postmortem <n>`, in a session bound to no job, explains a job's friction and proposes the factory's next versions ([the skill](../../.claude/skills/postmortem/SKILL.md)). It places each piece of unexpected friction in its layer (the rules, the skill, the agents or the deterministic part), judges whether the job's records were enough to tell, and has a blind agent rule on the job's pace. The user hears the explanation first and the plan only after confirming they understood it, because a plan built on a cause they don't share is a plan they can't judge. It reads from the job's state, which a clean keeps, the handoff folder, which a clean removes, and the session transcripts: run it before `factory clean` to read everything.
+`/postmortem <n>`, in a session bound to no job, explains a job's friction and proposes the factory's next versions ([the skill](../../.claude/skills/postmortem/SKILL.md)). It places each piece of unexpected friction in its layer (the rules, the skill, the agents or the deterministic part), judges whether the job's records were enough to tell, has a blind agent rule on the job's pace, and another audit the factory against current practice, Claude Code first, for what to keep, edit, remove or add. The user hears the explanation first and the plan only after confirming they understood it, because a plan built on a cause they don't share is a plan they can't judge. It reads from the job's state, which a clean keeps, the handoff folder, which a clean removes, and the session transcripts: run it before `factory clean` to read everything.
 
 ## Where things live
 
@@ -67,6 +67,7 @@ A finished job replays from its log: add `&job=<n>&speed=<x>` to the URL `watch`
   skills/postmortem/SKILL.md         the post-mortem of a job
   agents/factory-*.md                the five agents
   agents/postmortem-timing.md        the post-mortem's blind pace judge
+  agents/postmortem-audit.md         the post-mortem's blind factory auditor
   worktrees/<n>-<slug>/              the job's worktree, on feat/<n>-<slug>
     factory/.jobs/<n>/               gitignored: the job's folder, what agents hand each other
       issue.md                       the issue and its ACs, written by factory start
@@ -98,6 +99,7 @@ factory/
       pr-body.md, pr-comment.md      what factory pr posted
       postmortem.md                  the post-mortem's report and its plan
       postmortem-timing.md           the pace verdict, written blind to the report
+      postmortem-audit.md            the factory audit, written blind to the report
 ```
 
 A job's files live in two places, and the split follows who writes them:
