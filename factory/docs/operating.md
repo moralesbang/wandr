@@ -53,6 +53,10 @@ The `SubagentStop` and `Stop` hooks read each run's transcript, deduplicate by m
 
 A finished job replays from its log: add `&job=<n>&speed=<x>` to the URL `watch` printed; quiet stretches are skipped.
 
+## The post-mortem
+
+`/postmortem <n>`, in a session bound to no job, explains a job's friction and proposes the factory's next versions ([the skill](../../.claude/skills/postmortem/SKILL.md)). It places each piece of unexpected friction in its layer (the rules, the skill, the agents or the deterministic part), judges whether the job's records were enough to tell, and has a blind agent rule on the job's pace. The user hears the explanation first and the plan only after confirming they understood it, because a plan built on a cause they don't share is a plan they can't judge. It reads from the job's state, which a clean keeps, the handoff folder, which a clean removes, and the session transcripts: run it before `factory clean` to read everything.
+
 ## Where things live
 
 ```
@@ -60,7 +64,9 @@ A finished job replays from its log: add `&job=<n>&speed=<x>` to the URL `watch`
 .claude/
   settings.json                      the hooks
   skills/factory/SKILL.md            the orchestrator
+  skills/postmortem/SKILL.md         the post-mortem of a job
   agents/factory-*.md                the five agents
+  agents/postmortem-timing.md        the post-mortem's blind pace judge
   worktrees/<n>-<slug>/              the job's worktree, on feat/<n>-<slug>
     factory/.jobs/<n>/               gitignored: the job's folder, what agents hand each other
       issue.md                       the issue and its ACs, written by factory start
@@ -79,7 +85,7 @@ A finished job replays from its log: add `&job=<n>&speed=<x>` to the URL `watch`
 factory/
   README.md, docs/                   these docs
   cli/                               the CLI, a Bun workspace, tested with bun test
-  versions/                          one record per version
+  versions/                          one record per version, and what a version number says
   .jobs/                             gitignored: the jobs' state, in the main checkout
     checks.lock                      the machine-wide lock on the local checks
     watch-token, hook-errors.log     the live page's token, and what the hooks failed on
@@ -90,6 +96,8 @@ factory/
       sandbox/                       each sandbox's record (port, database, bucket) and log
       install.log, red/, runs/       the CLI's own logs and the hooks' per-run snapshots
       pr-body.md, pr-comment.md      what factory pr posted
+      postmortem.md                  the post-mortem's report and its plan
+      postmortem-timing.md           the pace verdict, written blind to the report
 ```
 
 A job's files live in two places, and the split follows who writes them:
