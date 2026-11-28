@@ -2,6 +2,7 @@
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { realDocker } from './docker.ts'
 import { appendEvent, eventsFromHook } from './events.ts'
 import { handoffDir, loadJob, saveJob, type Job } from './job.ts'
 import { fileHash } from './seal.ts'
@@ -19,6 +20,7 @@ export const makeJob = (overrides: Partial<Job> = {}): Job => ({
   worktree: '/repo/.claude/worktrees/7-add-a-thing',
   session: 'session-1',
   state: 'building',
+  factoryFingerprint: null,
   base: 'abc1234',
   redCommit: null,
   cliCommits: [],
@@ -136,3 +138,19 @@ export function freezeBlindPass(root: string, number: number, rel: string): void
     blindPasses: { ...job.blindPasses, [rel]: fileHash(join(handoffDir(job), rel)) },
   })
 }
+
+/** The preflight's Docker as a machine with a running daemon has it: `start` needs none in a test. */
+export const withDocker = { docker: { ...realDocker(), run: async () => 0 } }
+
+/** Pass 1 planned as a full review: a reviewer's sandbox budget comes from its plan. */
+export const fullReviewPlan = (risk: 'low' | 'normal' | 'high' = 'normal') => ({
+  pass: 1,
+  head: 'h',
+  since: null,
+  changed: [],
+  risk,
+  routingRevision: 0,
+  raisedBy: [],
+  roles: { evaluator: 'review' as const, 'test-reviewer': 'review' as const },
+  at: '2026-01-01T00:00:00Z',
+})

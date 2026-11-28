@@ -12,6 +12,7 @@ import {
   type Places,
 } from '../events.ts'
 import {
+  listJobs,
   locateSession,
   handoffDir,
   hookErrorsLog,
@@ -19,10 +20,12 @@ import {
   stateDir,
   type Job,
 } from '../job.ts'
+import { activeJobs, fingerprintVerdict, freezeVerdict } from '../freeze.ts'
 import { canonical } from '../paths.ts'
 import { changedBetween, workingTree } from '../shell.ts'
 import { bashPolicy } from '../bash-policy.ts'
-import { allow, first, type Policy, type Verdict } from '../policy.ts'
+import { allow, deny, first, type Policy, type Verdict } from '../policy.ts'
+import { confirmedCall, refreezeFlow } from '../bash-policy.ts'
 import { agentPolicy, messagePolicy, readPolicy } from '../read-guard.ts'
 import { writePolicy } from '../write-guard.ts'
 import {
@@ -51,6 +54,8 @@ function find(root: string, stdin: string): Found | null {
   const located = locateSession(root, input.session_id)
   return located ? { input, ...located } : null
 }
+
+const parseInput = (stdin: string) => HookInput.parse(JSON.parse(stdin))
 
 const logError = (root: string, hook: string, error: unknown) => {
   try {
@@ -127,10 +132,19 @@ const POLICIES: Record<string, Entry> = {
 
 /**
  * The tools a subagent of a job may call: the ones the guard judges, and a few that touch no file
- * (a todo list, loading a deferred tool's schema, stopping its own background task). Any other
- * tool, an MCP server's included, reads or reaches what the guard can't judge.
+ * (a todo list, loading a deferred tool's schema, stopping its own background task, handing back
+ * its report). Any other tool, an MCP server's included, reads or reaches what the guard can't
+ * judge. `SubagentHandback` carries the agent's final report text to the orchestrator and nothing
+ * else: that text always reached the orchestrator, as the agent's last message, and a reviewer
+ * can't quote what it can't read (the read guard denies it), so the guard doesn't judge its content.
  */
-const SUBAGENT_TOOLS = new Set([...Object.keys(POLICIES), 'TodoWrite', 'ToolSearch', 'TaskStop'])
+const SUBAGENT_TOOLS = new Set([
+  ...Object.keys(POLICIES),
+  'TodoWrite',
+  'ToolSearch',
+  'TaskStop',
+  'SubagentHandback',
+])
 
 /**
  * What the orchestrator calls besides the above: the tools that move it between worktrees, ask the
@@ -182,33 +196,79 @@ const denial = (reason: string) =>
     },
   })
 
+/** The denial of a call that would change the factory under an active job, logged in each job's log. */
+function frozenDenial(root: string, input: HookInput, reason: string): string {
+  for (const job of activeJobs(listJobs(root))) {
+    appendEvent(root, {
+      t: new Date().toISOString(),
+      job: job.number,
+      source: 'hook',
+      kind: 'freeze.denied',
+      ...(input.tool_use_id ? { toolUseId: input.tool_use_id } : {}),
+      detail: {
+        tool: input.tool_name,
+        session: input.session_id,
+        reason,
+        ...deniedTarget(input, { worktree: root, handoffDir: root }).detail,
+      },
+    })
+  }
+  return denial(reason)
+}
+
 /**
  * The synchronous PreToolUse guard: asks the tool's policy, logs a denial and prints the decision
- * on stdout; prints nothing to let the call through. Outside a factory job it lets everything
- * through. Inside one it fails closed: a call it can't judge, for any error, is denied.
+ * on stdout; prints nothing to let the call through. Two rules apply, one to every session of the
+ * repo and one to a job's own. While any job is active no session, bound to a job or not, changes
+ * the factory in the main checkout (freeze.ts); an error in that check fails closed only for a
+ * session bound to a job, so an unrelated session is never locked out by a broken guard. Inside a
+ * job the guard fails closed: a call it can't judge, for any error, is denied.
  */
 export function hookGuard(mainRoot: string, stdin: string): string {
-  let found: Found | null
+  let input: HookInput
+  let located: ReturnType<typeof locateSession>
   try {
-    found = find(mainRoot, stdin)
+    input = parseInput(stdin)
+    located = locateSession(mainRoot, input.session_id)
   } catch (error) {
     logError(mainRoot, 'guard', error)
     return ''
   }
-  if (!found) return ''
-  if ('unreadable' in found) {
+  try {
+    const frozen = freezeVerdict(canonical(mainRoot), input, listJobs(mainRoot))
+    if (!frozen.ok) return frozenDenial(mainRoot, input, frozen.reason)
+  } catch (error) {
+    logError(mainRoot, 'guard', error)
+    if (located) {
+      return denial(
+        `The factory guard failed on this call (the error is in ${hookErrorsLog(mainRoot)}), and during a job a call it can't judge is denied. Try it another way, or report the failure in your reply.`,
+      )
+    }
+  }
+  if (!located) return ''
+  if ('unreadable' in located) {
     return denial(
-      `The factory guard can't read job #${found.unreadable}'s state (its job.json doesn't parse; the error is in ${hookErrorsLog(mainRoot)}), and during a job a call it can't judge is denied. Tell the user in your reply; they fix or restore factory/.jobs/${found.unreadable}/job.json.`,
+      `The factory guard can't read job #${located.unreadable}'s state (its job.json doesn't parse; the error is in ${hookErrorsLog(mainRoot)}), and during a job a call it can't judge is denied. Tell the user in your reply; they fix or restore factory/.jobs/${located.unreadable}/job.json.`,
     )
   }
   try {
-    return judge(mainRoot, found.input, found.job)
+    return judge(mainRoot, input, located.job)
   } catch (error) {
     logError(mainRoot, 'guard', error)
     return denial(
       `The factory guard failed on this call (the error is in ${hookErrorsLog(mainRoot)}), and during a job a call it can't judge is denied. Try it another way, or report the failure in your reply.`,
     )
   }
+}
+
+/** `AskUserQuestion` carries the user's reply in `answers` and `annotations`: never in a call. */
+const askPolicy: Policy = ({ input }) => {
+  const given = input.tool_input ?? {}
+  return 'answers' in given || 'annotations' in given
+    ? deny(
+        "An AskUserQuestion call carries only the questions: the user's reply is recorded by a hook from what the user answers, and a call that arrives with `answers` or `annotations` would answer for them. Ask the question without them.",
+      )
+    : allow
 }
 
 /**
@@ -249,14 +309,47 @@ function judge(mainRoot: string, input: HookInput, found: Job): string {
   const tool = input.tool_name ?? ''
   const entry = entryFor(input)
   const context = { root, job, input, places, ...(agent ? { agent } : {}) }
+  // The factory the job started with is the one that judges it: a change since refuses every call.
+  // The orchestrator keeps its way out: asking the user about the change, and the refreeze they allow.
+  const command = input.tool_input?.command
+  const wayOut =
+    !agent &&
+    (tool === 'AskUserQuestion' ||
+      (typeof command === 'string' && tool === 'Bash' && refreezeFlow(command, context)))
+  const changed = wayOut ? allow : fingerprintVerdict(root, found)
+  if (!changed.ok) {
+    appendEvent(root, {
+      t: new Date().toISOString(),
+      job: job.number,
+      source: 'hook',
+      ...(agent ? { agent } : {}),
+      kind: 'factory.changed',
+      ...(input.tool_use_id ? { toolUseId: input.tool_use_id } : {}),
+      detail: { tool, reason: changed.reason },
+    })
+    return denial(changed.reason)
+  }
   const verdict =
     unjudged(tool, entry, agent) ??
     first([
       orchestratorSetting(context),
+      tool === 'AskUserQuestion' ? askPolicy(context) : allow,
       entry ? entry.policy(context) : allow,
       launchPolicy(context),
     ])
   if (!verdict || verdict.ok) {
+    const cleaning = !agent && typeof command === 'string' ? confirmedCall(command, context) : null
+    // A `factory clean` or `refreeze` the guard lets through uses its confirmation up.
+    if (cleaning) {
+      appendEvent(root, {
+        t: new Date().toISOString(),
+        job: job.number,
+        source: 'hook',
+        kind: 'confirmation.used',
+        ...(input.tool_use_id ? { toolUseId: input.tool_use_id } : {}),
+        detail: { action: cleaning },
+      })
+    }
     const launched = agent ? null : launchedAgent(tool, input.tool_input)
     // A launch the guard lets through uses its plan up: the next one needs a plan of its own.
     if (launched) {

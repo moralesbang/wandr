@@ -95,21 +95,21 @@ export function guardJob(
   const worktree = join(root, '.claude', 'worktrees', '7-add-a-thing')
   const handoff = join(worktree, 'factory', '.jobs', '7')
   const rounds = options.rounds ?? 1
-  const reviews = options.plan
-    ? [
-        {
-          pass: rounds + 1,
-          head: 'h',
-          since: 'g',
-          changed: [],
-          risk: 'normal' as const,
-          routingRevision: 0,
-          raisedBy: [],
-          roles: options.plan as never,
-          at: 'x',
-        },
-      ]
-    : []
+  // The pass under way is planned as a full review by default: a reviewer's `sandbox exec` budget
+  // comes from its plan, and a run with none is a ruling's, which has no budget.
+  const reviews = [
+    {
+      pass: rounds + 1,
+      head: 'h',
+      since: 'g',
+      changed: [],
+      risk: 'normal' as const,
+      routingRevision: 0,
+      raisedBy: [],
+      roles: (options.plan ?? { evaluator: 'review', 'test-reviewer': 'review' }) as never,
+      at: 'x',
+    },
+  ]
   saveJob(root, makeJob({ worktree, session: SESSION, rounds, reviews, ...options.job }))
   put(join(handoff, 'issue.md'), '# Add a thing (#7)\n')
   put(join(handoff, 'gate.json'), '{}\n')

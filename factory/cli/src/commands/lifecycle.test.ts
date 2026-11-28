@@ -281,6 +281,73 @@ describe('factory clean --abandon', () => {
     expect(done).toContain('No compose stack of its own.')
   })
 
+  // Value record (T-009). Guarantee: a job whose job.json no longer validates can still be
+  // abandoned, which is the job its user most needs to abandon. The case that happened: job #15's
+  // `routing` carried a `lane` key, and `RoutingProposal` is a `z.strictObject`, so the load died
+  // with `unrecognized_keys` and `clean --abandon` with it. Defect caught: abandon dying on a
+  // ZodError and leaving the worktree, branch and state behind. No acceptance test gives it:
+  // FI-001 is about who may run it. Level: unit, on the real git repo above.
+  const plan = {
+    scope: 'frontend',
+    complexity: 'small',
+    evidence: ['the issue names one file'],
+    expectedPaths: ['apps/web/src/main.tsx'],
+    behaviorChange: false,
+    uncertainty: [],
+    verification: ['the checks'],
+    workflow: 'standard',
+    risk: 'normal',
+    reasons: ['behavior changes'],
+    policyVersion: '1.4',
+    at: '2026-01-01T00:00:00.000Z',
+  }
+  test.each([
+    ['a field of the wrong type', (job: object) => JSON.stringify({ ...job, attempts: 'many' })],
+    [
+      'a `lane` key inside `routing` (a strict object)',
+      (job: object) => JSON.stringify({ ...job, routing: { ...plan, lane: 'factory' } }),
+    ],
+    [
+      'a `lane` key inside `routingHistory`',
+      (job: object) => JSON.stringify({ ...job, routingHistory: [{ ...plan, lane: 'factory' }] }),
+    ],
+  ])('abandons a job whose job.json has %s, from what it can read', async (_why, corrupt) => {
+    const file = join(stateDir(main, 7), 'job.json')
+    writeFileSync(file, corrupt(JSON.parse(readFileSync(file, 'utf8'))))
+    expect(() => loadJob(main, 7)).toThrow()
+    const done = await abandon(main, 7)
+    expect(done[0]).toContain("job.json can't be read")
+    expect(existsSync(worktree)).toBe(false)
+    expect(await localBranch()).toBe('')
+    expect(await remoteBranch()).toBe('')
+    expect(existsSync(stateDir(main, 7))).toBe(false)
+    expect(log()).toContain('gh issue edit 7 --add-label factory:ready')
+  })
+
+  test('abandons a job whose job.json is not JSON by finding its worktree, and says what it removed', async () => {
+    writeFileSync(join(stateDir(main, 7), 'job.json'), '{ half')
+    const done = await abandon(main, 7)
+    expect(existsSync(worktree)).toBe(false)
+    expect(await localBranch()).toBe('')
+    expect(existsSync(stateDir(main, 7))).toBe(false)
+    expect(done.join('\n')).toContain('Removed the worktree')
+  })
+
+  test('says what it could not do when nothing names the branch, and stops at an open PR', async () => {
+    writeFileSync(join(stateDir(main, 7), 'job.json'), '[]')
+    await git(main, 'worktree', 'remove', '--force', worktree)
+    const done = await abandon(main, 7)
+    expect(done.join('\n')).toContain("Couldn't do the PR check: no branch is known")
+    expect(done.join('\n')).toContain("Couldn't do the worktree")
+    expect(existsSync(stateDir(main, 7))).toBe(false)
+    mkdirSync(stateDir(main, 7), { recursive: true })
+    writeFileSync(join(stateDir(main, 7), 'job.json'), `{"branch":"${BRANCH}", "attempts": "x"}`)
+    process.env.FAKE_PRS = '[{"url":"https://example.com/pull/9","state":"OPEN"}]'
+    const stopped = await abandon(main, 7)
+    expect(stopped.join('\n')).toContain('https://example.com/pull/9')
+    expect(existsSync(stateDir(main, 7))).toBe(true)
+  })
+
   test('never takes down the shared stack', async () => {
     process.env.FAKE_CONTAINERS = 'abc123'
     await git(main, 'worktree', 'remove', '--force', worktree)

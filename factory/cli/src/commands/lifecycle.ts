@@ -1,6 +1,6 @@
 import { requireRouted } from './route.ts'
 import { $ } from 'bun'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import {
   countAttempt,
@@ -8,6 +8,7 @@ import {
   handoffDir,
   latestAnswer,
   listJobs,
+  loadJob,
   reviewPass,
   saveJob,
   stateDir,
@@ -303,7 +304,13 @@ const exitsZero = async (command: ReturnType<typeof $>) =>
  * plain clean). Returns each step's outcome.
  */
 export async function abandon(root: string, number: number): Promise<string[]> {
-  const job = requireJob(root, number)
+  let job: Job | null = null
+  try {
+    job = loadJob(root, number)
+  } catch (error) {
+    return abandonUnreadable(root, number, error)
+  }
+  if (!job) return abandonUnreadable(root, number, 'there is no job.json')
   // Only the user runs clean (the guard denies it from any tool call), so a blocked job is theirs
   // to discard without answering first.
   const prs = JSON.parse(
@@ -354,6 +361,110 @@ export async function abandon(root: string, number: number): Promise<string[]> {
 }
 
 /** Removes a merged job's worktree (its handoff folder with it), branch and state folder. */
+/**
+ * What an abandon can still do for a job whose job.json doesn't parse (a key its strict schema
+ * rejects, like the `lane` job #15 had inside `routing`, or a half-written file): it needs only the job's number and its folder, and takes
+ * the worktree path and the branch from whatever job.json still says, or from the checkout itself.
+ * No schema validation, no PR check it can't make: each step runs on its own and the result says
+ * what it removed and what it couldn't. Plain `clean` and every other command stay strict.
+ */
+async function abandonUnreadable(root: string, number: number, why: unknown): Promise<string[]> {
+  const done: string[] = [
+    `Job #${number}'s job.json can't be read (${String(why).split('\n')[0]}), so the abandon works from what is left.`,
+  ]
+  const couldnt: string[] = []
+  const step = async (what: string, run: () => Promise<string | void>) => {
+    try {
+      const said = await run()
+      if (said) done.push(said)
+    } catch (error) {
+      couldnt.push(`${what}: ${String(error).split('\n')[0]}`)
+    }
+  }
+  let raw: { branch?: unknown; worktree?: unknown; state?: unknown } = {}
+  try {
+    raw = JSON.parse(readFileSync(join(stateDir(root, number), 'job.json'), 'utf8'))
+  } catch {
+    // Unparsable: fall back to the checkout.
+  }
+  const worktrees = join(root, '.claude', 'worktrees')
+  const found = existsSync(worktrees)
+    ? readdirSync(worktrees).find((name) => name.startsWith(`${number}-`))
+    : undefined
+  const worktree =
+    typeof raw.worktree === 'string' ? raw.worktree : found ? join(worktrees, found) : null
+  let branch = typeof raw.branch === 'string' ? raw.branch : null
+  if (!branch && worktree && existsSync(worktree)) {
+    await step('reading the branch', async () => {
+      branch = await git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD')
+    })
+  }
+  if (!existsSync(stateDir(root, number)) && !worktree) {
+    throw new Refusal(`No job for issue #${number}: no state folder and no worktree to discard.`)
+  }
+  const label = branch as string | null
+  if (label) {
+    await step('checking the branch for a PR', async () => {
+      const prs = JSON.parse(
+        await gh('pr', 'list', '--head', label, '--state', 'all', '--json', 'url,state'),
+      ) as { url: string; state: string }[]
+      const open = prs.find((pr) => pr.state === 'OPEN' || pr.state === 'MERGED')
+      if (open) {
+        throw new Refusal(
+          `Job #${number}'s branch has a ${open.state} PR, ${open.url}: close it by hand (or clean a merged one once job.json reads), then abandon.`,
+        )
+      }
+    })
+    if (couldnt.some((line) => line.includes('PR')))
+      return [...done, ...couldnt.map((l) => `Stopped: ${l}`)]
+  } else {
+    couldnt.push('the PR check: no branch is known')
+  }
+  if (worktree) {
+    await step('the compose stack', () => downWorktreeStack(root, worktree))
+    await step('the sandboxes', async () => {
+      const removed = await removeSandboxes(root, { number, worktree } as Job)
+      return removed.length ? removed.join(' ') : 'No sandboxes.'
+    })
+    if (existsSync(worktree)) {
+      await step('removing the worktree', async () => {
+        await git(root, 'worktree', 'remove', '--force', worktree)
+        return `Removed the worktree ${worktree}.`
+      })
+    } else {
+      done.push(`The worktree ${worktree} is already gone.`)
+    }
+    await step('pruning worktrees', async () => {
+      await git(root, 'worktree', 'prune')
+    })
+  } else {
+    couldnt.push('the worktree: none is known and none matches')
+  }
+  if (label) {
+    await step('deleting the local branch', async () => {
+      if (await exitsZero($`git -C ${root} show-ref --verify --quiet refs/heads/${label}`)) {
+        await git(root, 'branch', '-D', label)
+        return `Deleted the branch ${label}.`
+      }
+    })
+    await step('deleting the remote branch', async () => {
+      if (await git(root, 'ls-remote', '--heads', 'origin', label)) {
+        await git(root, 'push', '--quiet', 'origin', '--delete', label)
+        return `Deleted the remote branch origin/${label}.`
+      }
+    })
+  }
+  await step("deleting the job's state", async () => {
+    rmSync(stateDir(root, number), { recursive: true, force: true })
+    return `Deleted the job's state, ${stateDir(root, number)}.`
+  })
+  await step('moving the label', async () => {
+    await moveLabel(number, LABELS.ready)
+    return `Issue #${number} is back to ${LABELS.ready}.`
+  })
+  return [...done, ...couldnt.map((line) => `Couldn't do ${line}`)]
+}
+
 export async function clean(root: string, number: number): Promise<void> {
   const job = requireJob(root, number)
   const state = job.pr

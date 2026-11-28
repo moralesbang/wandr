@@ -1,6 +1,7 @@
 import { refreshRouting, requireRouted } from './route.ts'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { ensureDocker, type DockerDeps } from '../docker.ts'
 import { readCiSteps, shellOf, withChecksLock } from '../checks.ts'
 import { handoffDir, saveJob, type Job } from '../job.ts'
 import { runLogged, workingTree } from '../shell.ts'
@@ -10,10 +11,16 @@ import { record, refuseWhileBlocked } from './common.ts'
  * Runs CI's steps in the job's worktree, in order, stopping at the first that fails. The log goes
  * to the handoff folder's checks/, where the build agent and the reviewers read it.
  */
-export async function check(root: string, number: number): Promise<Job> {
+export async function check(
+  root: string,
+  number: number,
+  deps: { docker?: DockerDeps } = {},
+): Promise<Job> {
   const job = await refreshRouting(root, number)
   refuseWhileBlocked(job, 'the checks')
   requireRouted(job, 'the checks')
+  // The e2e steps and the services need Docker: fail now, not 13 minutes in.
+  await ensureDocker(deps.docker)
   const dir = join(handoffDir(job), 'checks')
   mkdirSync(dir, { recursive: true })
   const log = join(dir, `${new Date().toISOString().replaceAll(':', '-')}.log`)

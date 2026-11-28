@@ -4,6 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { loadJob } from '../job.ts'
+import { withDocker } from '../job-fixture.ts'
 import { BUILD, EVAL, EXPLORE, guardJob, type GuardJob } from '../guard-fixture.ts'
 import { start } from './start.ts'
 
@@ -17,7 +18,7 @@ describe('B1: a tool call cannot rebind the job session', () => {
   test('denies `factory start --session <other>` and the job keeps its session', async () => {
     expect(j.bash(null, 'bun run factory start 7 --session decoy', j.root)).toContain('session')
     // What the allowed command used to do: the job followed the decoy and the guard went dark.
-    await start(j.root, 7, 'job-session')
+    await start(j.root, 7, 'job-session', withDocker)
     expect(loadJob(j.root, 7)?.session).toBe('job-session')
   })
 

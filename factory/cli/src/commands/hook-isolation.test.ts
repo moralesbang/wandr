@@ -143,7 +143,7 @@ describe('G2: a reviewer runs tests and servers only through factory sandbox exe
   })
 
   test('lets a reviewer run its type check, lint and format through the sandbox', () => {
-    for (const command of ['bunx oxlint apps/web/src', 'bun run typecheck']) {
+    for (const command of ['bunx oxlint apps/web/src', 'bun run --cwd apps/web typecheck']) {
       expect(j.bash(EVAL, command)).toContain('sandbox exec')
       expect(j.bash(EVAL, `bun run factory sandbox exec 7 evaluator -- ${command}`)).toBeNull()
     }

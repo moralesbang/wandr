@@ -4,7 +4,7 @@ import { readEvents, type FactoryEvent } from '../events.ts'
 import { wroteInJob } from '../runs.ts'
 import { parseCriteria } from '../issue.ts'
 import { refreshRouting, requireRouted } from './route.ts'
-import type { RunUsage } from '../usage.ts'
+import { latestUsage } from '../cost.ts'
 import {
   handoffDir,
   reviewPass,
@@ -84,13 +84,7 @@ const cost = (total: number, unpriced: string[]) =>
  * since a resumed subagent logs its total again. Null when the log holds no usage.
  */
 export function usageTable(events: FactoryEvent[]): string | null {
-  const runs = new Map<string, { label: string; usage: RunUsage }>()
-  for (const event of events) {
-    if (event.kind !== 'usage' || !event.detail) continue
-    const id = event.agent?.id ?? 'orchestrator'
-    const label = event.agent ? `${event.agent.type} (${id.slice(0, 7)})` : 'orchestrator'
-    runs.set(id, { label, usage: event.detail as RunUsage })
-  }
+  const runs = latestUsage(events)
   if (!runs.size) return null
   const rows = [...runs.values()].map(
     ({ label, usage }) =>
