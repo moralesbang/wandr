@@ -5,6 +5,7 @@ import {
   type Gesture,
   type GestureTarget,
   resolveGesture,
+  resolveKey,
   type Tool,
 } from './resolve-gesture'
 
@@ -153,4 +154,26 @@ describe('dragEdits', () => {
       expect(dragEdits(tool, target)).toBe(edits)
     },
   )
+})
+
+describe('resolveKey', () => {
+  test.each(['Delete', 'Backspace'])('route tool: %s on a point deletes it', (key) => {
+    expect(resolveKey('route', point, key)).toEqual({ type: 'delete-point', pointId: 'p1' })
+  })
+
+  test.each<Tool>(['view', 'add-find'])(
+    '%s tool: Delete and Backspace on a point do nothing',
+    (tool) => {
+      expect(resolveKey(tool, point, 'Delete')).toEqual({ type: 'none' })
+      expect(resolveKey(tool, point, 'Backspace')).toEqual({ type: 'none' })
+    },
+  )
+
+  test.each([map, find, handle])('route tool: Delete on a $kind does nothing', (target) => {
+    expect(resolveKey('route', target, 'Delete')).toEqual({ type: 'none' })
+  })
+
+  test('route tool: other keys on a point do nothing', () => {
+    expect(resolveKey('route', point, 'Enter')).toEqual({ type: 'none' })
+  })
 })
