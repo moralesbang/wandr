@@ -23,7 +23,11 @@ const number = (value: string | undefined) => {
  * parser: everything after `--` belongs to the command run in the sandbox. Resolves to the exit
  * code, the command's own for `exec`.
  */
-export async function sandboxCommand(root: string, args: string[]): Promise<number> {
+export async function sandboxCommand(
+  root: string,
+  args: string[],
+  timeoutMs?: number,
+): Promise<number> {
   const split = args.indexOf('--')
   const head = split === -1 ? args : args.slice(0, split)
   const argv = split === -1 ? [] : args.slice(split + 1)
@@ -38,7 +42,7 @@ export async function sandboxCommand(root: string, args: string[]): Promise<numb
         `Job #${job.number} has no ${role} sandbox. Run: factory sandbox ${job.number} ${role}`,
       )
     }
-    return runInSandbox(sandbox, argv)
+    return runInSandbox(sandbox, argv, timeoutMs)
   }
 
   if (head[0] === 'rm') {

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { installFakeGh, makeJob } from '../job-fixture.ts'
+import { installFakeGh, makeJob, withDocker } from '../job-fixture.ts'
 import { loadJob, saveJob } from '../job.ts'
 import { Refusal } from './common.ts'
 import { describeAnswer, start } from './start.ts'
@@ -28,15 +28,30 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
+// Value record (T-009). Guarantee: `start` stops on a Docker that isn't there before it touches
+// the job, GitHub or the checkout. Defect caught: 13 minutes lost in job #15 to a Docker that
+// wasn't running. The FI-029 acceptance test covers the preflight itself, not that `start` calls it
+// first. Level: unit.
+describe('factory start without Docker', () => {
+  test('refuses before it reads the job, and changes nothing', async () => {
+    const before = loadJob(root, 7)
+    const docker = { ...withDocker.docker, run: async () => 1, platform: 'linux' }
+    const error = await start(root, 7, 'session-2', { docker }).catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(Refusal)
+    expect((error as Refusal).message).toContain('Docker')
+    expect(loadJob(root, 7)).toEqual(before)
+  })
+})
+
 describe('factory start on an existing job', () => {
   test('copies the handoff files that exist only in the main checkout into the worktree', async () => {
-    await start(root, 7, 'session-2')
+    await start(root, 7, 'session-2', withDocker)
     expect(readFileSync(join(handoff, 'issue.md'), 'utf8')).toBe('# Add a thing (#7)\n')
     expect(readFileSync(join(handoff, 'reviews', '1.evaluator.blind.md'), 'utf8')).toBe('blind\n')
   })
 
   test('leaves the state in the main checkout', async () => {
-    await start(root, 7, 'session-2')
+    await start(root, 7, 'session-2', withDocker)
     expect(existsSync(join(handoff, 'job.json'))).toBe(false)
     expect(existsSync(join(handoff, 'events.jsonl'))).toBe(false)
     expect(existsSync(join(main, 'job.json'))).toBe(true)
@@ -46,7 +61,7 @@ describe('factory start on an existing job', () => {
     mkdirSync(handoff, { recursive: true })
     writeFileSync(join(main, 'acceptance.md'), 'stale\n')
     writeFileSync(join(handoff, 'acceptance.md'), 'current\n')
-    await start(root, 7, 'session-2')
+    await start(root, 7, 'session-2', withDocker)
     expect(readFileSync(join(handoff, 'acceptance.md'), 'utf8')).toBe('current\n')
   })
 })
@@ -67,7 +82,7 @@ describe('factory start on a blocked job', () => {
 
   test('is refused while the latest Decision Request has no answer, and stays blocked', async () => {
     blocked({ decisionRequests: [DR] })
-    const error = await refusal(start(root, 7, 'session-2'))
+    const error = await refusal(start(root, 7, 'session-2', withDocker))
     expect(error).toBeInstanceOf(Refusal)
     expect((error as Refusal).message).toContain('factory answer')
     expect(loadJob(root, 7)?.state).toBe('blocked')
@@ -79,13 +94,13 @@ describe('factory start on a blocked job', () => {
       decisionRequests: [DR, { ...DR, file: 'decision-requests/2.md' }],
       answers: [{ ...ANSWER, cited: true }],
     })
-    expect(await refusal(start(root, 7, 'session-2'))).toBeInstanceOf(Refusal)
+    expect(await refusal(start(root, 7, 'session-2', withDocker))).toBeInstanceOf(Refusal)
     expect(loadJob(root, 7)?.state).toBe('blocked')
   })
 
   test('takes the job back to building once the latest request is answered', async () => {
     blocked({ decisionRequests: [DR], answers: [ANSWER] })
-    const job = await start(root, 7, 'session-2')
+    const job = await start(root, 7, 'session-2', withDocker)
     expect(job.state).toBe('building')
     expect(loadJob(root, 7)?.state).toBe('building')
     expect(fake.calls()).toContain('--add-label factory:building')

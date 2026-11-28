@@ -12,6 +12,7 @@ import { join } from 'node:path'
 import { Annotator } from '../annotate.ts'
 import type { FactoryEvent } from '../events.ts'
 import { jobsDir, writeAtomic } from '../job.ts'
+import { isAlive, readWatchInfo, recordWatch } from './background.ts'
 import { jobFrame } from './extras.ts'
 
 type Tail = { offset: number; annotator: Annotator; job: string }
@@ -176,7 +177,16 @@ export function serveWatch(root: string, port: number) {
 }
 
 export async function watch(root: string, port: number): Promise<void> {
+  // `factory start` may already run the page in the background: give the user its URL instead of
+  // fighting it for the port.
+  const running = readWatchInfo(root)
+  if (running && isAlive(running.pid) && existsSync(watchTokenFile(root))) {
+    const token = readFileSync(watchTokenFile(root), 'utf8').trim()
+    console.log(`factory watch: http://localhost:${running.port}/?token=${token}`)
+    return
+  }
   const { url } = serveWatch(root, port)
+  recordWatch(root, port)
   console.log(`factory watch: ${url}`)
   await new Promise(() => {})
 }

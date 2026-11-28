@@ -45,7 +45,7 @@ describe('B3: interpreter operands are reads for a sealed reviewer', () => {
   test('lets an interpreter read the repo and its own sandbox, through `sandbox exec`', () => {
     expect(j.bash(EVAL, exec(`perl -pe '' apps/web/src/main.ts`))).toBeNull()
     expect(j.bash(EVAL, exec(`python3 -c 'print(1)'`))).toBeNull()
-    expect(j.bash(EVAL, exec('bun run typecheck'))).toBeNull()
+    expect(j.bash(EVAL, exec('bun run --cwd apps/web typecheck'))).toBeNull()
     expect(j.bash(EVAL, exec(`node -e 'console.log(1)'`))).toBeNull()
     // Outside it a reviewer runs no interpreter: G3's allowlist.
     expect(j.bash(EVAL, `python3 -c 'print(1)'`)).toContain('sandbox exec')

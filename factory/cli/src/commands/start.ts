@@ -1,5 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { ensureDocker, type DockerDeps } from '../docker.ts'
+import { changedMessage, factoryChanges, factoryFingerprint } from '../freeze.ts'
 import { parseCriteria, parseRisk, slugify } from '../issue.ts'
 import {
   canStartAnother,
@@ -65,7 +67,17 @@ const viewIssue = async (number: number) =>
 const writeIssue = (handoff: string, issue: Issue) =>
   writeFileSync(join(handoff, 'issue.md'), `# ${issue.title} (#${issue.number})\n\n${issue.body}\n`)
 
-export async function start(root: string, number: number, session: string): Promise<Job> {
+/** What `start` touches outside the repo, replaceable in a test. */
+export type StartDeps = { docker?: DockerDeps }
+
+export async function start(
+  root: string,
+  number: number,
+  session: string,
+  deps: StartDeps = {},
+): Promise<Job> {
+  // Before anything else: a job that can't run its checks or its sandboxes shouldn't start.
+  await ensureDocker(deps.docker)
   const existing = loadJob(root, number)
   if (existing) return resume(root, existing, session)
 
@@ -107,6 +119,7 @@ export async function start(root: string, number: number, session: string): Prom
   mkdirSync(handoff, { recursive: true })
   writeIssue(handoff, issue)
   const job: Job = {
+    factoryFingerprint: factoryFingerprint(root),
     number,
     title: issue.title,
     risk: risk.risk,
@@ -161,17 +174,25 @@ async function resume(root: string, job: Job, session: string): Promise<Job> {
   if (!existsSync(job.worktree)) {
     throw new Refusal(`Job #${job.number}'s worktree is gone: ${job.worktree}`)
   }
+  // A job is judged by the factory it started with: a change since then stops it. A job started
+  // before the fingerprint gets one now.
+  const changes = factoryChanges(root, job)
+  if (changes.length > 0) throw new Refusal(changedMessage(job.number, changes))
   const migrated = migrateHandoff(root, job)
   if (migrated.length) record(root, job.number, 'job.migrated', { files: migrated })
   if (!existsSync(join(handoffDir(job), 'issue.md'))) {
     writeIssue(handoffDir(job), await viewIssue(job.number))
   }
-  let resumed = { ...job, session }
+  let resumed = {
+    ...job,
+    session,
+    factoryFingerprint: job.factoryFingerprint ?? factoryFingerprint(root),
+  }
   if (job.state === 'blocked') {
     // Only the user's own `factory answer` unblocks a job; a chat reply or a comment proves nothing.
     if (job.decisionRequests.length > 0 && !latestAnswer(job)) {
       throw new Refusal(
-        `Job #${job.number} is blocked: Decision Request ${job.decisionRequests.length} has no answer. Ask the user to answer it with: ! bun run factory answer ${job.number} "<answer>"`,
+        `Job #${job.number} is blocked: Decision Request ${job.decisionRequests.length} has no answer. Ask the user with AskUserQuestion (a hook records their reply), or they answer with: ! bun run factory answer ${job.number} "<answer>"`,
       )
     }
     resumed = { ...resumed, state: 'building' }
@@ -189,5 +210,6 @@ async function resume(root: string, job: Job, session: string): Promise<Job> {
 export function describeAnswer(job: Job): string | null {
   const answer = latestAnswer(job)
   if (!answer || answer.cited) return null
-  return `The user answered Decision Request ${answer.request} (${answer.at}):\n\n${answer.text}`
+  const asked = answer.question ? `\n\nQuestion: ${answer.question}` : ''
+  return `The user answered Decision Request ${answer.request} (${answer.at}):${asked}\n\n${answer.text}`
 }

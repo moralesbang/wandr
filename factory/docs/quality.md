@@ -49,6 +49,14 @@ In every runner a thrown error, a timeout, a load error, a skipped test, a passi
 
 **Outer loop: one round.** The reviewers the risk needs report findings, the fixes are made, a review pass checks them. Every finding carries its evidence: the command, its output, `file:line`.
 
+**A review is proportional to what changed and to the risk.** `factory review` plans each pass ([`review-plan.ts`](../cli/src/review-plan.ts)):
+
+- The first pass is a full blind `review` by every reviewer the risk needs.
+- A later pass is a `verify` (the previous findings against the new diff, no blind pass) when every non-test file changed since the previous pass's `HEAD` is named, as `path` or `path:line`, in that pass's merged findings and the risk didn't rise; the evaluator verifies a product fix and carries its approval only past a change of tests. Anything else is a full blind `review` again. Job #15's pass 2 changed the one file its first finding cited, plus three tests, and ran two full blind reviews.
+- **The CLI's checks are the evidence for the suite.** A reviewer cites the `factory check` log for the gated `HEAD` and runs in its sandbox only targeted commands (one test file, one spec, one mutation); the guard denies a whole-suite run there.
+- **A reviewer run has a budget of `sandbox exec` commands**, fixed by its task and the risk (`SANDBOX_BUDGET` in the file above; the plan prints each reviewer's number). The guard counts them per run from the event log and denies the one past it: the reviewer writes its report with the evidence it has and lists what it couldn't check as a finding. A ruling has none. Each command is killed after 5 minutes.
+- **Mutation checks** are the test reviewer's, out of the same budget: none at low risk, at most 2 at normal (aimed at the ACs whose assertions look weakest), as many as needed at high.
+
 The budgets block, never extend. Each refusal leads to a Decision Request.
 
 | Budget | Counts | Past it |
@@ -93,8 +101,8 @@ When acceptance-test fixes are a round's only findings, the round still counts, 
 
 ## Decision Requests
 
-Whenever a job needs the user (an escalation, a spent budget, a changed guarantee), the orchestrator writes a request that stands alone: Context, Evidence, Alternatives, Recommendation, Impact, Risks. `factory block` keeps it in `<job>/decision-requests/`, labels the issue `factory:blocked`, and the orchestrator shows it in the terminal. Nothing is posted on the issue. A request is never raised between `review` and `unseal`.
+Whenever a job needs the user (an escalation, a spent budget, a changed guarantee), the orchestrator writes a request that stands alone: Context, Evidence, Alternatives, Recommendation, Impact, Risks. `factory block` keeps it in `<job>/decision-requests/`, labels the issue `factory:blocked`, and the orchestrator puts it to the user as a question (below). Nothing is posted on the issue. A request is never raised between `review` and `unseal`.
 
-- **Only the user answers**, with `! bun run factory answer <n> "<text>"` ([why the guard makes it theirs](isolation.md#the-guard)); `/factory <n>` then resumes the job and prints the answer.
+- **The orchestrator asks, and only the user answers.** After `factory block` it calls `AskUserQuestion` with the request's question, one option per Alternative and its recommendation first; the user can always write their own answer. A `PostToolUse` hook records the reply from the call's result into the job state and the event log, and the orchestrator resumes in the same session with `factory start`. The guard denies a call that carries `answers` or `annotations`, so the model can't answer for the user ([why](isolation.md#the-guard)); `! bun run factory answer <n> "<text>"` from the user's own prompt still works.
 - **A blocked job doesn't move.** Every command that moves it refuses, and `start` refuses until the latest request has an answer.
 - **One answer authorizes one commit**: a `rewrite`, or an `atfix` when the request was raised on a changed-guarantee ruling. The commit quotes the answer, carries the trailer `Authorized-By: factory answer …`, and uses it up. An answer to any other request authorizes no test change.

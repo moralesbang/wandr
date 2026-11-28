@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { handoffDir, reviewPass, saveJob, type Job, type ReviewPlan } from '../job.ts'
 import { approves } from './pr.ts'
 import { refreshRouting, requireRouted } from './route.ts'
-import { planRoles, rolesWith, type PreviousPass } from '../review-plan.ts'
+import { planRoles, rolesWith, sandboxBudget, type PreviousPass } from '../review-plan.ts'
 import { jobRisk } from '../risk.ts'
 import { loadSeal, refuseWhileSealed, seal, sealedStore } from '../seal.ts'
 import { git, lines } from '../shell.ts'
@@ -22,8 +22,21 @@ function evaluatorApproved(job: Job, plan: ReviewPlan): boolean {
   return existsSync(report) && approves(readFileSync(report, 'utf8'))
 }
 
+/** The merged findings the round after a pass wrote, if it wrote them. */
+function findingsOf(job: Job, plan: ReviewPlan): string | null {
+  const file = join(handoffDir(job), 'reviews', `${plan.pass}.findings.md`)
+  return existsSync(file) ? readFileSync(file, 'utf8') : null
+}
+
 const previousPass = (job: Job, plan: ReviewPlan | undefined): PreviousPass | null =>
-  plan ? { roles: plan.roles, evaluatorApproved: evaluatorApproved(job, plan) } : null
+  plan
+    ? {
+        roles: plan.roles,
+        risk: plan.risk,
+        findings: findingsOf(job, plan),
+        evaluatorApproved: evaluatorApproved(job, plan),
+      }
+    : null
 
 export async function review(root: string, number: number): Promise<ReviewPlan> {
   const job = await refreshRouting(root, number)
@@ -106,9 +119,14 @@ function verifierReads(root: string, job: Job, plan: ReviewPlan): Record<string,
  */
 export async function reviewReport(root: string, number: number) {
   const plan = await review(root, number)
+  const job = requireJob(root, number)
   return {
     ...plan,
+    // The `sandbox exec` commands each reviewer run may spend; the guard denies the one past it.
+    sandboxBudget: Object.fromEntries(
+      Object.keys(plan.roles).map((role) => [role, sandboxBudget(job, role)]),
+    ),
     sealed: loadSeal(root, number) !== null,
-    reads: verifierReads(root, requireJob(root, number), plan),
+    reads: verifierReads(root, job, plan),
   }
 }

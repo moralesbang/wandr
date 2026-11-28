@@ -6,10 +6,14 @@ import { effectiveRisk } from './risk.ts'
 
 const both = (evaluator: string): PreviousPass => ({
   roles: { evaluator: 'review', 'test-reviewer': 'review' },
+  risk: 'normal',
+  findings: null,
   evaluatorApproved: evaluator === 'approve',
 })
 const testReviewerOnly: PreviousPass = {
   roles: { 'test-reviewer': 'review' },
+  risk: 'low',
+  findings: null,
   evaluatorApproved: false,
 }
 
@@ -65,6 +69,8 @@ describe('replay: job #13', () => {
       risk,
       previous: {
         roles: { evaluator: 'review', 'test-reviewer': 'review' },
+        risk: 'normal',
+        findings: null,
         evaluatorApproved: first!.verdicts!.evaluator === 'approve',
       },
       changed: second!.changedSincePrevious!,

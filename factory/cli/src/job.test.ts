@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -23,6 +24,7 @@ import {
   saveJob,
 } from './job.ts'
 import { makeJob } from './job-fixture.ts'
+import { git } from './shell.ts'
 
 let root = ''
 beforeEach(() => {
@@ -131,6 +133,31 @@ describe('mainRoot', () => {
 
   test('from the main checkout it is the repo root', () => {
     expect(mainRoot('/Users/x/wandr/factory/cli/src')).toBe('/Users/x/wandr')
+  })
+})
+
+// Value record (T-009). Guarantee: a hook run from the copy in any other worktree (a session started
+// there has $CLAUDE_PROJECT_DIR = that worktree) still finds the main checkout's jobs, which the
+// freeze rule needs. Defect caught: a worktree outside .claude/worktrees taking itself for the main
+// checkout and seeing no active job. No acceptance test gives it. Level: a real git repo.
+describe('mainRoot from a worktree outside .claude/worktrees', () => {
+  test('is the main checkout, found through git', async () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'factory-mainroot-')))
+    try {
+      const main = join(base, 'main')
+      const other = join(base, 'elsewhere')
+      await git(base, 'init', '--quiet', main)
+      await git(main, 'config', 'user.email', 't@example.com')
+      await git(main, 'config', 'user.name', 'T')
+      await git(main, 'commit', '--quiet', '--allow-empty', '-m', 'first')
+      await git(main, 'worktree', 'add', '--quiet', '-b', 'side', other)
+      mkdirSync(join(other, 'factory', 'cli', 'src'), { recursive: true })
+      expect(mainRoot(join(other, 'factory', 'cli', 'src'))).toBe(main)
+      mkdirSync(join(main, 'factory', 'cli', 'src'), { recursive: true })
+      expect(mainRoot(join(main, 'factory', 'cli', 'src'))).toBe(main)
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
   })
 })
 

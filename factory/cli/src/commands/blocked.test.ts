@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launch } from '../launch.ts'
-import { installFakeGh, makeJob } from '../job-fixture.ts'
+import { installFakeGh, makeJob, withDocker } from '../job-fixture.ts'
 import { handoffDir, loadJob, saveJob } from '../job.ts'
 import { git } from '../shell.ts'
 import { answer } from './answer.ts'
@@ -91,7 +91,7 @@ describe('a blocked job', () => {
 /** The user answers from their own prompt, and the orchestrator resumes the job. */
 const answered = async () => {
   answer(root, 7, 'Yes, change it.')
-  await start(root, 7, 's2')
+  await start(root, 7, 's2', withDocker)
 }
 
 describe('an answer authorizes one commit', () => {

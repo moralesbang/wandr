@@ -24,10 +24,17 @@ Every invariant below MUST be defended by at least one acceptance test, except o
 
 ### FI-001 — Only the user decides
 
-Only the user starts a job (`factory:ready`), answers a Decision Request, merges, cleans a job or watches it: the guard denies `answer`, `clean` and `watch` to every tool call, and a command the user types with `!` fires no hook.
+Only the user starts a job (`factory:ready`), answers a Decision Request, merges, or accepts a changed factory under a job: the guard denies `answer`, `watch` and `refreeze` to every tool call, and a command the user types with `!` fires no hook. The model never writes the user's reply (FI-028).
 
-- **Mechanism:** `bash-policy.ts` (`answerDenied`, the user's commands), `commands/start.ts` (the label), `commands/answer.ts`.
-- **Defended by:** `bash-policy.test.ts`, `commands/hook-launchers.test.ts`, `commands/answer.test.ts`, `commands/start.test.ts`.
+- **Mechanism:** `bash-policy.ts` (`answerDenied`, the user's commands), `commands/start.ts` (the label), `commands/answer.ts`, `commands/refreeze.ts`.
+- **Defended by:** `bash-policy.test.ts`, `commands/hook-launchers.test.ts`, `commands/answer.test.ts`, `commands/start.test.ts`, `commands/freeze.acceptance.test.ts` (`refreeze`).
+
+### FI-028 — The user's reply is the user's, whatever the channel
+
+A Decision Request's answer, and the yes that lets a job be cleaned or abandoned, reach the job state only as the user's own reply to the orchestrator's `AskUserQuestion`, recorded by the `PostToolUse` hook from `tool_response`, or from the user's own prompt (`! bun run factory answer`). The guard denies an `AskUserQuestion` call that carries `answers` or `annotations`; every agent but the orchestrator has no such tool. A `factory clean` runs only against a yes to the question `factory confirm` worded, one clean per yes. One answer authorizes one commit, as before (FI-007).
+
+- **Mechanism:** `commands/hook-answer.ts` (`repliesOf`, `hookAnswer`), `commands/answer.ts`, `commands/confirm.ts`, `commands/hook.ts` (`askPolicy`, `confirmation.used`), `bash-policy.ts` (`cleanVerdict`, `answerDenied`), `.claude/settings.json` (the hook).
+- **Defended by:** `commands/answer-channel.acceptance.test.ts`.
 
 ### FI-002 — Only the CLI writes to GitHub
 
@@ -119,10 +126,10 @@ No agent reads or writes the main checkout, the job's state, Claude Code's own f
 
 ### FI-013 — The guard fails closed inside a job
 
-Inside a job, a call the guard can't judge is denied: an error, a tool with no policy (every MCP tool), a command whose program or factory subcommand it can't read from the text (`env -S`, a `$VAR`, a shell fed its code on stdin, `bun -e` loading the CLI), a git setting that would run a command later, a `claude` session, and a job whose state no longer parses.
+Inside a job, a call the guard can't judge is denied: an error, a tool with no policy (every MCP tool; an agent's `SubagentHandback`, which carries only its report, is the one allowed), a command whose program or factory subcommand it can't read from the text (`env -S`, a `$VAR`, a shell fed its code on stdin, `bun -e` loading the CLI), a git setting that would run a command later, a `claude` session, and a job whose state no longer parses.
 
 - **Mechanism:** `commands/hook.ts`, `bash-policy.ts`.
-- **Defended by:** `commands/hook.test.ts`, `commands/hook-shells.test.ts`, `commands/hook-launchers.test.ts`, `commands/hook-operands.test.ts`, `commands/hook-isolation.test.ts`.
+- **Defended by:** `commands/hook.test.ts`, `commands/hook-shells.test.ts`, `commands/hook-launchers.test.ts`, `commands/hook-operands.test.ts`, `commands/hook-isolation.test.ts`, `commands/hook-handback.test.ts`.
 
 ## Gates
 
@@ -175,6 +182,27 @@ Every subagent of a job may launch one kind of subagent: `Explore`, with `model:
 - **Mechanism:** `orchestrator-guard.ts` (`launchPolicy`), `commands/hook.ts`.
 - **Defended by:** `commands/hook-orchestrator.acceptance.test.ts`.
 
+### FI-029 — Docker is up before a job starts or its checks run
+
+`factory start` and `factory check` begin with `docker info`. On a Mac with Docker Desktop installed they open it and wait up to about 90 seconds; elsewhere, and in CI, they only check. Either way a Docker that isn't there refuses with what to do.
+
+- **Mechanism:** `docker.ts` (`ensureDocker`), `commands/start.ts`, `commands/check.ts`.
+- **Defended by:** `docker.acceptance.test.ts`, `commands/start.test.ts`.
+
+### FI-030 — A pass after a fix reviews the fix
+
+A review pass after the first is a `verify` when every non-test file changed since the previous pass is named in that pass's merged findings and the risk didn't rise; anything else is a full blind review. A change of tests alone keeps its rules (the evaluator's approval carries).
+
+- **Mechanism:** `review-plan.ts` (`planRoles`), `commands/review.ts`.
+- **Defended by:** `commands/review-budget.acceptance.test.ts`, `review-plan.test.ts`, `commands/review.test.ts`.
+
+### FI-031 — A reviewer run spends a bounded number of sandbox commands
+
+Each reviewer run has a budget of `factory sandbox exec` commands fixed by its task and the risk (`SANDBOX_BUDGET`); the guard counts them per run from the event log and denies the one past it, and denies a whole-suite run inside the sandbox. Each command is killed after 5 minutes.
+
+- **Mechanism:** `review-plan.ts` (`SANDBOX_BUDGET`, `sandboxBudget`), `bash-policy.ts` (`factoryVerdict`, `wholeSuite`), `commands/hook.ts` (`sandbox.exec`), `sandbox.ts` (`runInSandbox`).
+- **Defended by:** `commands/review-budget.acceptance.test.ts`, `commands/hook-sandbox.test.ts`.
+
 ### FI-025 — Inside a job the orchestrator launches only the factory's agents and Explore
 
 While a job's session is bound to it (from `factory start --session` until its folder is cleaned, in any state, `pr_open` included), the orchestrator's Agent calls are the factory's agents, each with its plan (FI-019), and `Explore` on Haiku. Any other type, `general-purpose` included, is denied, so unrelated work can't ride on a job's session.
@@ -198,6 +226,20 @@ A job's state and event log are written only by the CLI and Claude Code's hooks,
 - **Mechanism:** `annotate.ts`, `watch/state.ts`, `watch/server.ts`.
 - **Defended by:** `annotate.test.ts`, `watch/state.test.ts`, `watch/panels.test.ts`, `watch/server.test.ts`.
 
+### FI-026 — The factory is frozen in the main checkout while a job is active
+
+While any job is `building` or `blocked`, no Claude Code session of the repo, bound to a job or not, writes the files that define how a job runs (`FACTORY_FILES`: the CLI, the skill, the factory agents, `.claude/settings.json`, the root `package.json` and `bun.lock`) in the main checkout or moves that checkout's HEAD or working tree. Work in another worktree is free, and a session bound to no job gets no other verdict and never fails closed.
+
+- **Mechanism:** `freeze.ts` (`freezeVerdict`), `paths.ts` (`FACTORY_FILES`), `commands/hook.ts` (`hookGuard`), `job.ts` (`mainRoot`: the main checkout from any worktree).
+- **Defended by:** `commands/freeze.acceptance.test.ts`, `job.test.ts` (`mainRoot`).
+
+### FI-027 — A job is judged by the factory it started with
+
+`factory start` records a hash of each of those files, uncommitted changes included. While the job is active every CLI command on it and every guard verdict of its session compares the current files with the record and refuses on a mismatch, naming the files. A job resumed with no record gets one. Only the user accepts the new files (`refreeze`).
+
+- **Mechanism:** `freeze.ts` (`factoryFingerprint`, `fingerprintVerdict`), `commands/common.ts` (`requireUnchangedFactory`), `main.ts`, `commands/start.ts`, `commands/hook.ts`.
+- **Defended by:** `commands/freeze.acceptance.test.ts`.
+
 ### FI-022 — The factory under change never judges itself
 
 A job that changes the factory is judged by the main checkout's CLI, hooks and agents, never by the copy it edits. *Not enforced yet: the factory lane adds it.*
@@ -218,5 +260,6 @@ Refusals that defend no invariant above. Each is kept for now; the user judges w
 | `start` on a job whose PR is open or whose worktree is gone | `commands/start.ts` | Operational |
 | `pr` without `summary.md` or `acceptance.md`; a light job's report without one evidence line per AC | `commands/pr.ts` | Record |
 | `seal` while sealed, for a pass not under way, or for a role that isn't a reviewer; `unseal` when not sealed, onto a file written while sealed, or with unrecorded files in the store | `seal.ts` | Consistency of the seal's own state |
-| `clean` of an unmerged PR; `clean --abandon` with an open or merged PR | `commands/lifecycle.ts` | Protects work the user hasn't closed |
+| `clean` of an unmerged PR; `clean --abandon` with an open or merged PR (also when `job.json` can't be read, from the branch it can find) | `commands/lifecycle.ts` | Protects work the user hasn't closed |
+| `confirm` without `clean` or `abandon`; a stale `watch.json` | `main.ts`, `watch/background.ts` | Usage |
 | `bun install` or a sandbox migration failed; no `.env.test` to reach a sandbox's services | `commands/start.ts`, `sandbox.ts` | Environment |

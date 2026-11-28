@@ -10,18 +10,20 @@ stateDiagram-v2
     [*] --> ready: user adds factory:ready
     ready --> building: factory start
     building --> blocked: factory block (Decision Request)
-    blocked --> building: user answers, /factory 42 again
+    blocked --> building: user answers the question, factory start
     building --> pr_open: factory pr
     pr_open --> [*]: user merges, factory clean
     building --> ready: factory clean --abandon
     blocked --> ready: factory clean --abandon
 ```
 
-Each state is the issue's label: `factory:ready` (set by the user), `factory:building`, `factory:blocked` and `factory:pr-open`. Up to 3 jobs run at a time, one terminal each; `/factory <n>` on a blocked, answered job resumes it.
+Each state is the issue's label: `factory:ready` (set by the user), `factory:building`, `factory:blocked` and `factory:pr-open`. Up to 3 jobs run at a time, one terminal each. A job is active while it is `building` or `blocked`, and the factory's own files are frozen in the main checkout meanwhile ([isolation](isolation.md#the-frozen-factory)). The orchestrator is the user's only counterpart: a blocked job resumes in the same session once the user answered its question, and `/factory <n>` resumes one in a new session.
 
-**The user's commands.** `answer`, `clean` (either form) and `watch` run only from the user's own prompt, `! bun run factory <command>`.
+**What the user says, and how.** Answers to a Decision Request and the yes to a clean or an abandon come through the orchestrator's `AskUserQuestion`, and a hook records them ([why they are the user's](isolation.md#the-guard)). Typed with `!` from the user's own prompt, `factory answer`, `factory clean` (either form), `factory watch` and `factory refreeze` (accept the factory files as they are now, for a job whose factory changed) always work; the model can't run `answer`, `watch` or `refreeze`.
 
-**Abandoning a job** that shouldn't go on, because the factory needs a fix or the issue needs rewriting, is `factory clean <n> --abandon`. In order: it records `job.abandoned` in the log (the last event `factory watch` shows), takes down any compose stack the worktree started on its own (never the shared `wandr` stack), removes the sandboxes and the worktree, deletes the branch locally and on `origin`, deletes the job's state, and moves the label back to `factory:ready`. It refuses while the branch has an open PR, which you close by hand, and when the PR merged, which is plain `clean`.
+**Docker is the CLI's to bring up.** `factory start` and `factory check` begin with `docker info`. On a Mac with Docker Desktop installed and Docker down they run `open -a Docker` and poll for about 90 seconds, then refuse with what to do ("Docker didn't start; open Docker Desktop, accept any prompt it shows, and retry"). On Linux and in CI they only check. The timeout and the commands are injectable ([`docker.ts`](../cli/src/docker.ts)).
+
+**Abandoning a job** that shouldn't go on, because the factory needs a fix or the issue needs rewriting, is `factory clean <n> --abandon`, after the user's yes. It works even when the job's `job.json` can't be read (an unknown key from another factory version, a half-written file): it needs only the job number and takes the worktree and branch from what is left, or from the checkout, then says what it removed and what it couldn't. In order: it records `job.abandoned` in the log (the last event `factory watch` shows), takes down any compose stack the worktree started on its own (never the shared `wandr` stack), removes the sandboxes and the worktree, deletes the branch locally and on `origin`, deletes the job's state, and moves the label back to `factory:ready`. It refuses while the branch has an open PR, which you close by hand, and when the PR merged, which is plain `clean`.
 
 **Knowing a job ended.** An open PR reaches you as a GitHub notification; a Decision Request appears in the orchestrator's terminal; the label shows where the job stands; `factory watch` shows it live.
 
@@ -35,7 +37,7 @@ The `SubagentStop` and `Stop` hooks read each run's transcript, deduplicate by m
 
 ## Watching a job
 
-`bun run factory watch` serves one page that shows every running job live, with no reload. Its purpose is to make the factory checkable: to spot an agent doing something you don't want, reading more than it should, or seeing work it should be blind to.
+`factory start` starts the server in the background and opens this page in the user's browser, printing nothing of its URL: the orchestrator that ran `start` never sees the token. `bun run factory watch` from the user's prompt prints the URL of the running server (or serves one). The page shows every running job live, with no reload. Its purpose is to make the factory checkable: to spot an agent doing something you don't want, reading more than it should, or seeing work it should be blind to.
 
 **The event log.** Every job appends to `factory/.jobs/<n>/events.jsonl` in the main checkout, written only by the CLI and the hooks, never by an agent: the main checkout is outside the worktree agents are confined to.
 
@@ -45,7 +47,7 @@ The `SubagentStop` and `Stop` hooks read each run's transcript, deduplicate by m
 - The orchestrator's `Agent` call carries each agent's prompt, and its result the new agent's ID, which ties the prompt to the run. `InstructionsLoaded` shows each `CLAUDE.md` an agent loads.
 - Files a `Bash` command changes are attributed from git: when an agent stops, the hook records what changed in the worktree during its run. Only one agent writes at a time, so the attribution is exact.
 
-**The token.** The page shows everything, the sealed names and the user's answers included. So `watch` makes a random token at start, keeps it in the main checkout's state folder (`watch-token`, mode 0600), and prints a URL that carries it. Every route answers only a request with that token; an agent that reaches the port gets nothing. A restart makes a new token.
+**The token.** The page shows everything, the sealed names and the user's answers included. So the server makes a random token at start, keeps it in the main checkout's state folder (`watch-token`, mode 0600), and prints a URL that carries it. Every route answers only a request with that token; an agent that reaches the port gets nothing. A restart makes a new token.
 
 **The page** is one HTML file with inline CSS, SVG and JavaScript and no build step; `watch` also serves [`cli/src/watch/state.ts`](../cli/src/watch/state.ts), the event-to-state logic the page shares with its tests. It shows the flow of the [overview diagram](../README.md#the-flow), each station lit as it runs and failed in red when rejected, with brackets marking where the orchestrator is; a live feed; a timeline with one lane per agent run; each run's context (its prompt, instructions, reads, writes and denials); the risk and what raised it, each pass's review plan, the seal, the rulings, and any model or effort that drifts from what `launch` planned (the guard denies a launch or an orchestrator that drifts, so this shows runs that bypassed a launch, such as a subagent's own); each run's cost and the job's total; and, in red, isolation breaches against `visibility.ts` and every denial.
 

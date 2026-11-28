@@ -130,10 +130,10 @@ describe('G3: what a reviewer runs outside the sandbox', () => {
   })
 
   test('lets the same commands through `sandbox exec`, whatever they are', () => {
-    for (const command of [
+    for (const [command, who] of [
       'bun test',
       'bunx playwright test',
-      'bun run build',
+      'bun run --cwd apps/web build',
       'python3 probe.py',
       'node script.js',
       'curl -s localhost:$PORT/health',
@@ -143,8 +143,9 @@ describe('G3: what a reviewer runs outside the sandbox', () => {
       'bash probe.sh',
       'make test',
       'tar xf x.tar',
-    ]) {
-      expect(j.bash(EVAL, `bun run factory sandbox exec 7 evaluator -- ${command}`)).toBeNull()
+    ].map((typed, run) => [typed, { ...EVAL, agent_id: `e-${run}` }] as const)) {
+      // One run each: the sandbox budget counts per run, and this is about what a sandbox runs.
+      expect(j.bash(who, `bun run factory sandbox exec 7 evaluator -- ${command}`)).toBeNull()
     }
   })
 

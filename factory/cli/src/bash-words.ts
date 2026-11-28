@@ -640,8 +640,15 @@ function gitCommandWrites(git: GitCommand): NamedPath[] {
   })
 }
 
-/** Every path one program names, each with what it does to it. */
+/**
+ * Every path one program names, each with what it does to it. `/dev/null` is never one: writing it
+ * discards the bytes, whichever program does it (`curl -o /dev/null`, `tee`, `cp x /dev/null`).
+ */
 export function invocationPaths(invocation: Invocation): NamedPath[] {
+  return namedPaths(invocation).filter((named) => named.path !== '/dev/null')
+}
+
+function namedPaths(invocation: Invocation): NamedPath[] {
   const { words, cwd } = invocation
   const found: NamedPath[] = []
   const program = words[0] ?? ''
@@ -1103,7 +1110,9 @@ export function commandPaths(command: string, at: Where): NamedPath[] {
   const calls = invocations(command, at)
   return [
     ...calls.flatMap(invocationPaths),
-    ...calls.flatMap((call) => scriptWrites(call, at.home)),
+    ...calls
+      .flatMap((call) => scriptWrites(call, at.home))
+      .filter((named) => named.path !== '/dev/null'),
   ]
 }
 
@@ -1116,11 +1125,13 @@ type SandboxCall = {
 }
 
 /** A factory CLI invocation, read as main.ts's own parser would. */
-type FactoryCall = {
+export type FactoryCall = {
   /** The command: the first positional. A `$`-word means the shell supplies it. */
   command: string | undefined
   positionals: string[]
   values: Record<string, string>
+  /** The flags that take no value, as written: `--abandon`. */
+  flags: string[]
   /** xargs supplies the arguments, so they can't be read. */
   viaXargs: boolean
   sandbox?: SandboxCall
@@ -1231,12 +1242,14 @@ function factoryCallAt(invocation: Invocation): FactoryCall | null {
       command: 'sandbox',
       positionals: ['sandbox', ...head],
       values: {},
+      flags: [],
       viaXargs,
       sandbox: { action, number, role, argv },
     }
   }
   const positionals: string[] = []
   const values: Record<string, string> = {}
+  const flags: string[] = []
   for (let i = 0; i < args.length; i++) {
     const word = args[i]!
     if (word === '--') {
@@ -1253,8 +1266,11 @@ function factoryCallAt(invocation: Invocation): FactoryCall | null {
       values[word] = args[++i] ?? ''
       continue
     }
-    if (word.startsWith('-') && word !== '-') continue
+    if (word.startsWith('-') && word !== '-') {
+      flags.push(word)
+      continue
+    }
     positionals.push(word)
   }
-  return { command: positionals[0], positionals, values, viaXargs }
+  return { command: positionals[0], positionals, values, flags, viaXargs }
 }

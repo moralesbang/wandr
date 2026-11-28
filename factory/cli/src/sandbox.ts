@@ -84,11 +84,18 @@ const parseDotenv = (text: string) =>
       .map((match) => [match[1] as string, match[2] as string]),
   )
 
+/** How long one `factory sandbox exec` command may run: a full build plus a Playwright run fits. */
+export const SANDBOX_EXEC_TIMEOUT_MS = 5 * 60 * 1000
+
 /**
  * Runs `argv` in the sandbox's checkout with its environment, its output on this process's. No
  * shell stands in between: each argument reaches the program exactly as given.
  */
-export async function runInSandbox(sandbox: Sandbox, argv: string[]): Promise<number> {
+export async function runInSandbox(
+  sandbox: Sandbox,
+  argv: string[],
+  timeoutMs: number = SANDBOX_EXEC_TIMEOUT_MS,
+): Promise<number> {
   const child = Bun.spawn(argv, {
     cwd: sandbox.path,
     env: { ...process.env, ...sandboxEnv(sandbox) },
@@ -96,7 +103,24 @@ export async function runInSandbox(sandbox: Sandbox, argv: string[]): Promise<nu
     stdout: 'inherit',
     stderr: 'inherit',
   })
-  return child.exited
+  // A command that outlives its limit is killed, so a hung build can't hold a reviewer for an hour.
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    child.kill('SIGKILL')
+  }, timeoutMs)
+  try {
+    const code = await child.exited
+    if (timedOut) {
+      console.error(
+        `factory sandbox exec: killed after ${Math.round(timeoutMs / 1000)}s. Run something smaller.`,
+      )
+      return 124
+    }
+    return code
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /** The shared services, as the job's own test settings reach them. */

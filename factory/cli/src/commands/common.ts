@@ -1,4 +1,5 @@
 import { appendEvent, cliEvent } from '../events.ts'
+import { changedMessage, factoryChanges } from '../freeze.ts'
 import { loadJob, unlessBlocked, type Job } from '../job.ts'
 import { patchId } from '../shell.ts'
 
@@ -9,6 +10,17 @@ export function requireJob(root: string, number: number): Job {
   const job = loadJob(root, number)
   if (!job) throw new Refusal(`No job for issue #${number}. Run: bun run factory start ${number}`)
   return job
+}
+
+/**
+ * Refuses a command on a job whose factory files (the CLI, the skill, the agents, the hooks)
+ * changed since `factory start` recorded them: a job is judged by the factory it started with.
+ */
+export function requireUnchangedFactory(root: string, number: number): void {
+  const job = loadJob(root, number)
+  if (!job) return
+  const changes = factoryChanges(root, job)
+  if (changes.length > 0) throw new Refusal(changedMessage(number, changes))
 }
 
 /** Refuses a step that would move a job blocked on a Decision Request (job.ts unlessBlocked). */

@@ -13,9 +13,10 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { z } from 'zod'
 import { JOBS_FOLDER, jobFolder } from './paths.ts'
 import { RoutingPlan } from './routing.ts'
@@ -79,6 +80,12 @@ export const Job = z.object({
   worktree: z.string(),
   session: z.string(),
   state: z.enum(['building', 'blocked', 'pr_open']),
+  /**
+   * The content hash of each file that defines how a job runs (paths.ts FACTORY_FILES) in the main
+   * checkout, as `factory start` found them. While the job is active every command and every guard
+   * verdict compares the current files with it (freeze.ts); null on a job started before it.
+   */
+  factoryFingerprint: z.record(z.string(), z.string()).nullable().default(null),
   base: z.string(),
   /** The latest red commit. */
   redCommit: z.string().nullable(),
@@ -122,7 +129,7 @@ export const Job = z.object({
   ),
   /**
    * The user's answers, written only by `factory answer`, which the user runs from their own
-   * prompt. `request` is the 1-based position in decisionRequests; `cited` is set once a commit
+   * prompt, or by the PostToolUse hook from the user's reply to AskUserQuestion. `request` is the 1-based position in decisionRequests; `cited` is set once a commit
    * carries the answer as its authorization.
    */
   answers: z
@@ -131,6 +138,8 @@ export const Job = z.object({
         request: z.number().int().positive(),
         at: z.string(),
         text: z.string(),
+        /** The question the user answered, when the answer came through AskUserQuestion. */
+        question: z.string().optional(),
         cited: z.boolean().default(false),
       }),
     )
@@ -149,13 +158,29 @@ export const Job = z.object({
 export type Job = z.infer<typeof Job>
 
 /**
- * The main checkout's root. The CLI may run from the main checkout or from a job's worktree
- * (.claude/worktrees/<n>-<slug>); job state always lives in the main checkout.
+ * The main checkout's root. The CLI may run from the main checkout, from a job's worktree
+ * (.claude/worktrees/<n>-<slug>) or, as a hook, from the copy in any other worktree a Claude Code
+ * session started in (`$CLAUDE_PROJECT_DIR` is that worktree's root): job state always lives in the
+ * main checkout. A worktree under .claude/worktrees names it by its path; any other worktree has a
+ * `.git` file instead of a folder, and git's common directory leads to the main checkout.
  */
 export function mainRoot(from: string = import.meta.dir): string {
   const marker = '/.claude/worktrees/'
   const at = from.indexOf(marker)
-  return at === -1 ? resolve(from, '../../..') : from.slice(0, at)
+  if (at !== -1) return from.slice(0, at)
+  const repo = resolve(from, '../../..')
+  try {
+    if (!statSync(join(repo, '.git')).isFile()) return repo
+    const common = Bun.spawnSync(
+      ['git', '-C', repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+      { stderr: 'ignore' },
+    )
+      .stdout.toString()
+      .trim()
+    return common && basename(common) === '.git' ? dirname(common) : repo
+  } catch {
+    return repo
+  }
 }
 
 /** Every job's state folder, in the main checkout; also holds the checks lock. */
@@ -363,7 +388,7 @@ export function unlessBlocked(job: Pick<Job, 'number' | 'state'>, step: string):
   return job.state === 'blocked'
     ? {
         ok: false,
-        reason: `Job #${job.number} is blocked on a Decision Request, so ${step} can't run. The user answers with \`! bun run factory answer ${job.number} "<text>"\`; then \`bun run factory start ${job.number}\` resumes it.`,
+        reason: `Job #${job.number} is blocked on a Decision Request, so ${step} can't run. The user answers the orchestrator's question (or runs \`! bun run factory answer ${job.number} "<text>"\`); then \`bun run factory start ${job.number}\` resumes it.`,
       }
     : { ok: true }
 }
@@ -374,6 +399,10 @@ export const latestAnswer = (job: Pick<Job, 'decisionRequests' | 'answers'>) =>
 
 /** The review pass now under way: 1 before any round with findings, then one more per round. */
 export const reviewPass = (job: Pick<Job, 'rounds'>) => job.rounds + 1
+
+/** A job is active while it builds or waits for its answer; an open PR ends it. */
+export const isActive = (job: Pick<Job, 'state'>) =>
+  job.state === 'building' || job.state === 'blocked'
 
 /** Refuses a new job when MAX_JOBS are already building. */
 export function canStartAnother(

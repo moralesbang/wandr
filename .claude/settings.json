@@ -22,6 +22,15 @@
     ],
     "PostToolUse": [
       {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun \"$CLAUDE_PROJECT_DIR/factory/cli/src/main.ts\" hook answer"
+          }
+        ]
+      },
+      {
         "hooks": [
           {
             "type": "command",

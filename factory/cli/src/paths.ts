@@ -69,6 +69,38 @@ export const RULE_PATHS = [
 ] as const
 
 /**
+ * The files that define how a job runs, in the main checkout: the CLI, the orchestrator's skill,
+ * the agents, the hooks and the root scripts the CLI runs through (`bun run factory`, the install
+ * and the checks). The job state under `factory/.jobs/` is not one. While a job is active they are
+ * frozen (freeze.ts): a change under a running job would change how the job is judged.
+ */
+export const FACTORY_FILES = [
+  'factory/cli/**',
+  '.claude/skills/factory/**',
+  '.claude/agents/factory-*.md',
+  '.claude/settings.json',
+  'package.json',
+  'bun.lock',
+] as const
+
+/**
+ * The folders and files FACTORY_FILES live in, for a write that takes a whole folder (`rm -rf`,
+ * `mv`) with a factory file below it.
+ */
+export const FACTORY_ROOTS = [
+  'factory/cli',
+  '.claude/skills/factory',
+  '.claude/agents',
+  '.claude/settings.json',
+  'package.json',
+  'bun.lock',
+] as const
+
+/** Whether a repo-relative path is one of FACTORY_FILES (an installed dependency is not). */
+export const isFactoryFile = (path: string): boolean =>
+  !path.split('/').includes('node_modules') && match(FACTORY_FILES, path)
+
+/**
  * The folders the protected paths live in, for a write to a folder that holds them (`rm -rf`,
  * `mv`, `tar x`, a copy into one): each has a protected path directly under it. The acceptance
  * tests beside their code (`*.acceptance.test.ts`) are not listed: only the gate sees those.

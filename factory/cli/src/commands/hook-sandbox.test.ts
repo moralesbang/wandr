@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { readEvents } from '../events.ts'
-import { makeJob } from '../job-fixture.ts'
+import { fullReviewPlan, makeJob } from '../job-fixture.ts'
 import { saveJob } from '../job.ts'
 import { hookGuard } from './hook.ts'
 import { mainTranscript } from '../guard-fixture.ts'
@@ -17,7 +17,7 @@ let worktree = ''
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'factory-guard-sandbox-'))
   worktree = join(root, '.claude', 'worktrees', '7-add-a-thing')
-  saveJob(root, makeJob({ worktree, session: 'job-session' }))
+  saveJob(root, makeJob({ worktree, session: 'job-session', reviews: [fullReviewPlan()] }))
 })
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 

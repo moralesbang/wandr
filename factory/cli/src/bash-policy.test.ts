@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { hookGuard } from './commands/hook.ts'
 import { mainTranscript } from './guard-fixture.ts'
-import { makeJob } from './job-fixture.ts'
+import { fullReviewPlan, makeJob } from './job-fixture.ts'
 import { saveJob } from './job.ts'
 
 let root = ''
@@ -16,7 +16,10 @@ let worktree = ''
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'factory-bash-'))
   worktree = join(root, '.claude', 'worktrees', '7-add-a-thing')
-  saveJob(root, makeJob({ number: 13, worktree, session: 'job-session' }))
+  saveJob(
+    root,
+    makeJob({ number: 13, worktree, session: 'job-session', reviews: [fullReviewPlan()] }),
+  )
 })
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
@@ -230,16 +233,17 @@ describe('factory commands, read as main.ts reads its arguments', () => {
     expect(decide(command, undefined)).toBeNull()
   })
 
-  // `watch` and `clean` are the user's, from their own prompt: the guard denies them to everyone.
+  // `watch` and `refreeze` are the user's, from their own prompt; `clean` needs the user's yes.
   test.each([
     'bun run factory watch --port 4999',
+    'bun run factory refreeze 13',
     'bun run factory clean 13',
     'bun run factory clean 13 --abandon',
-  ])('denies everyone %s: only the user runs it', (command) => {
+  ])('denies everyone %s without the user', (command) => {
     for (const agent of [undefined, 'factory-build']) {
       const decision = decide(command, agent)
       expect(decision?.permissionDecision).toBe('deny')
-      expect(decision?.permissionDecisionReason).toContain('the user')
+      if (agent === undefined) expect(decision?.permissionDecisionReason).toContain('the user')
     }
   })
 
@@ -370,7 +374,7 @@ describe("an agent's Bash writes stay in its column", () => {
     ['factory-test', 'mkdir -p apps/web/e2e && touch apps/web/e2e/new.spec.ts'],
     [
       'factory-evaluator',
-      'bun run factory sandbox exec 13 evaluator -- bun run build > build.log 2>&1',
+      'bun run factory sandbox exec 13 evaluator -- bun run --cwd apps/web build > build.log 2>&1',
     ],
     ['factory-evaluator', 'cd factory/.jobs/13/sandbox/evaluator && git commit -qam probe'],
   ])('lets %s write its own column: %s', (agent, command) => {
