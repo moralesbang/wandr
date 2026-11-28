@@ -68,10 +68,10 @@ A job starts only on an open issue whose ACs are numbered AC1, AC2… in order a
 
 ### FI-005 — An agent can't change what judges it
 
-No build agent writes an acceptance test or a rule path (`RULE_PATHS`); no test agent writes a rule path; no agent commits a change to one past the gate.
+No build agent writes an acceptance test or a rule path (`RULE_PATHS`); no test agent writes a rule path; no agent commits a change to one past the gate. A TypeScript config is one by its content (`compilerOptions`, or an `extends` naming a tsconfig), whatever the file is named, and the test and build agents typecheck only against a protected tsconfig.
 
-- **Mechanism:** `visibility.ts` (`classifyWrite`), `paths.ts`, `bash-policy.ts` (protected writes in Bash), `commands/gate.ts` (protected paths), `commands/red.ts` (a red with a rule change).
-- **Defended by:** `visibility.test.ts`, `commands/hook-protected.test.ts`, `bash-policy.test.ts`, `paths.test.ts`, `commands/gate.test.ts`.
+- **Mechanism:** `visibility.ts` (`classifyWrite`), `paths.ts` (`isTsConfigText`), `write-guard.ts` (a config by its content), `bash-policy.ts` (protected writes in Bash, `typescriptVerdict`: a config's content and `tsc -p` of a file that is no tsconfig), `commands/gate.ts` (protected paths), `commands/red.ts` (a red with a rule change).
+- **Defended by:** `visibility.test.ts`, `commands/hook-protected.test.ts`, `bash-policy.test.ts`, `paths.test.ts`, `commands/gate.test.ts`, `commands/hook-ts-config.acceptance.test.ts`.
 
 ### FI-006 — Acceptance tests are red before implementation
 
@@ -122,14 +122,14 @@ Each reviewer runs servers, builds and tests only in its own sandbox, with its o
 No agent reads or writes the main checkout, the job's state, Claude Code's own files or `/proc`; every path is judged where it leads, symlinks resolved.
 
 - **Mechanism:** `read-guard.ts`, `write-guard.ts`, `visibility.ts`, `paths.ts` (`canonical`).
-- **Defended by:** `visibility.test.ts`, `commands/hook.test.ts`, `bash-policy.test.ts`.
+- **Defended by:** `visibility.test.ts`, `commands/hook.test.ts`, `commands/hook-outside.test.ts`, `bash-policy.test.ts`.
 
 ### FI-013 — The guard fails closed inside a job
 
 Inside a job, a call the guard can't judge is denied: an error, a tool with no policy (every MCP tool; an agent's `SubagentHandback`, which carries only its report, is the one allowed), a command whose program or factory subcommand it can't read from the text (`env -S`, a `$VAR`, a shell fed its code on stdin, `bun -e` loading the CLI), a git setting that would run a command later, a `claude` session, and a job whose state no longer parses.
 
-- **Mechanism:** `commands/hook.ts`, `bash-policy.ts`.
-- **Defended by:** `commands/hook.test.ts`, `commands/hook-shells.test.ts`, `commands/hook-launchers.test.ts`, `commands/hook-operands.test.ts`, `commands/hook-isolation.test.ts`, `commands/hook-handback.test.ts`.
+- **Mechanism:** `commands/hook.ts`, `bash-policy.ts`, `bash-words.ts` (a shell's heredoc body is read as shell commands; an interpreter's is data, the call is the interpreter's).
+- **Defended by:** `commands/hook.test.ts`, `commands/hook-heredoc.acceptance.test.ts`, `commands/hook-shells.test.ts`, `commands/hook-launchers.test.ts`, `commands/hook-operands.test.ts`, `commands/hook-isolation.test.ts`, `commands/hook-handback.test.ts`.
 
 ## Gates
 

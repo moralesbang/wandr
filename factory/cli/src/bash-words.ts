@@ -16,10 +16,14 @@ const SUBSTITUTION = '$SUBST'
 
 /** A heredoc's opening: `<<EOF`, `<<-'EOF'`; not a here-string, `<<<`. */
 const HEREDOC = /(?<!<)<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/
-/** Programs that run a heredoc's body as a script: its lines are commands, not text. */
-const RUNS_HEREDOC = /(?:^|[\s;&|(])(?:bash|sh|zsh|python3?|node|bun|perl|ruby)\b[^;&|]*<</
+/**
+ * Shells run a heredoc's body as commands, so its lines are read as commands. An interpreter
+ * (python, node, bun, perl, ruby) runs it as its own language: the body is data, and the call is
+ * the interpreter's.
+ */
+const RUNS_HEREDOC = /(?:^|[\s;&|(])(?:bash|sh|zsh)\b[^;&|]*<</
 
-/** Drops heredoc bodies, the text a command reads, unless a shell or an interpreter runs it. */
+/** Drops heredoc bodies, the text a command reads, unless a shell runs it. */
 function withoutHeredocs(command: string): string {
   const kept: string[] = []
   let delimiter: string | null = null

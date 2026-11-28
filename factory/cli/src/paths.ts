@@ -157,6 +157,30 @@ export function protectedFromBuild(path: string): string | null {
   return isAcceptanceTest(path) ? 'Acceptance tests' : ruleProtecting(path)
 }
 
+/** The text of a TypeScript config: `compilerOptions`, or an `extends` naming a tsconfig. */
+const TS_CONFIG_TEXT = /"compilerOptions"|"extends"\s*:\s*"[^"]*tsconfig[^"]*"/
+
+/**
+ * Whether text written to a path makes it a TypeScript config whatever its name: a `.json` file
+ * with that content, which `tsc -p` would take as a project. The protection is by what it is.
+ */
+export function isTsConfigText(path: string, text: string): boolean {
+  return path.endsWith('.json') && TS_CONFIG_TEXT.test(text)
+}
+
+/** The denial of a write of a TypeScript config by its content, in the style of a protected path's. */
+export function tsConfigDenial(agent: string, path: string): string {
+  return `${path} is protected (TypeScript): its content is a TypeScript config, whatever the file is named. ${agent === 'factory-build' ? 'Stop and escalate to the orchestrator' : 'Raise it with the orchestrator'} instead of changing it.`
+}
+
+/**
+ * Whether a path is a TypeScript config the protected paths cover by name: `tsconfig*.json`, or
+ * anything under `packages/tsconfig`.
+ */
+export function isProtectedTsConfig(path: string): boolean {
+  return /(?:^|\/)tsconfig[^/]*\.json$/.test(path) || /(?:^|\/)packages\/tsconfig\//.test(path)
+}
+
 /** Any test file, of either kind. */
 export function isTestFile(path: string): boolean {
   return /\.(test|spec)\.tsx?$/.test(path) || isAcceptanceTest(path)

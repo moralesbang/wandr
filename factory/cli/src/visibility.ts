@@ -5,6 +5,7 @@
 // inside its worktree), `repo` (the rest of the worktree) or `outside` (anything else, the main
 // checkout and its copy of the job's folder included).
 
+import { join } from 'node:path'
 import { isAcceptanceTest, protectedFromBuild, ruleProtecting } from './paths.ts'
 import { reviewerRole, verifierMayRead } from './review-plan.ts'
 
@@ -211,11 +212,21 @@ type WriteVerdict = { ok: true } | { ok: false; reason: string }
 
 const deny = (reason: string): WriteVerdict => ({ ok: false, reason })
 
-/** What each agent may write: the "May write" column of factory/README.md. */
-export function classifyWrite(agent: string, target: Target): WriteVerdict {
+/** The worktree folder where the test and build agents keep scratch output; gitignored. */
+export const SCRATCH_DIR = '.scratch'
+
+/**
+ * What each agent may write: the "May write" column of factory/README.md. `worktree` lets the
+ * denial of a write outside it name the scratch folder the test and build agents write to instead.
+ */
+export function classifyWrite(agent: string, target: Target, worktree?: string): WriteVerdict {
   if (target.area === 'outside') {
+    const scratch =
+      worktree && (agent === 'factory-test' || agent === 'factory-build')
+        ? ` Scratch output goes in ${join(worktree, SCRATCH_DIR)}/.`
+        : ''
     return deny(
-      `Write outside the job's worktree and folder: ${target.path}. Work in the worktree.`,
+      `Write outside the job's worktree and folder: ${target.path}. Work in the worktree.${scratch}`,
     )
   }
   switch (agent) {

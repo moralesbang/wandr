@@ -10,10 +10,10 @@
 // Every path is judged where it leads (paths.ts canonical), so a symlink writes nothing its target
 // wouldn't.
 
-import { relative } from 'node:path'
+import { join, relative } from 'node:path'
 import { locate } from './events.ts'
 import { jobsDir, reviewPass } from './job.ts'
-import { canonical, isWithin } from './paths.ts'
+import { canonical, isTsConfigText, isWithin, tsConfigDenial } from './paths.ts'
 import { allow, bashWhere, deny, type GuardContext, type Policy, type Verdict } from './policy.ts'
 import { routingReadOnly, sealedIn } from './read-guard.ts'
 import { plannedTask, reviewerRole } from './review-plan.ts'
@@ -46,6 +46,14 @@ export function writeVerdict(path: string, context: GuardContext): Verdict {
       (rel === 'routing-proposal.json' ||
         rel === 'research.md' ||
         /^decision-requests\/[^/]+\.md$/.test(rel))
+    if (!researchHandoff && isWithin(absolute, join(bashWhere(context).home, '.claude')))
+      return deny(
+        `${absolute} is one of Claude Code's own files (~/.claude: its settings, its agents). No agent writes them during a job; raise the change with the user.`,
+      )
+    if (!researchHandoff && !isWithin(absolute, job.worktree))
+      return deny(
+        `${absolute} is outside the job's worktree, ${job.worktree}. Before executable routing the orchestrator writes only routing-proposal.json, research.md or a Decision Request in the job folder.`,
+      )
     if (!researchHandoff)
       return deny(
         'Before executable routing, the repo is read-only. The orchestrator writes only routing-proposal.json, research.md or a Decision Request in the job folder.',
@@ -84,7 +92,7 @@ export function writeVerdict(path: string, context: GuardContext): Verdict {
     )
   }
   if (!agent) return allow
-  return classifyWrite(agent.type, locate(absolute, places))
+  return classifyWrite(agent.type, locate(absolute, places), job.worktree)
 }
 
 /** What an Edit, Write, MultiEdit or NotebookEdit puts in the file. */
@@ -96,11 +104,19 @@ const writtenText = (input: Record<string, unknown>) => {
     .join('\n')
 }
 
+/** The agents whose writes a TypeScript config's content protects: they may not change the typecheck. */
+const TS_CONFIG_WRITERS = new Set(['factory-test', 'factory-build'])
+
 export const writePolicy: Policy = (context) => {
   const input = context.input.tool_input ?? {}
   const path = input.file_path ?? input.notebook_path
   if (typeof path !== 'string') return allow
   const verdict = writeVerdict(path, context)
+  if (context.agent && verdict.ok && TS_CONFIG_WRITERS.has(context.agent.type)) {
+    const absolute = canonical(path, bashWhere(context).cwd)
+    if (isTsConfigText(path, writtenText(input)))
+      return deny(tsConfigDenial(context.agent.type, absolute))
+  }
   if (!verdict.ok || context.agent) return verdict
   const { root, job } = context
   const sealed = loadSeal(root, job.number)

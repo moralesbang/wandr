@@ -26,7 +26,7 @@ English only, and only these: primary sources and practitioners who build with a
 | Kind | Sources |
 | --- | --- |
 | Claude Code and Anthropic, the authority on what Claude Code does today | `code.claude.com/docs`, `docs.claude.com`, `anthropic.com/engineering`, `claude.com/blog`, `github.com/anthropics` (the Claude Code changelog, the official skills and plugins) |
-| Agent builders' engineering writing | `cognition.ai/blog`, `ampcode.com`, `github.blog`, `humanlayer.dev` and `github.com/humanlayer/12-factor-agents`, `manus.im/blog` |
+| Agent builders' engineering writing | `cognition.ai/blog` and `cognition.com/blog` (where it redirects), `ampcode.com`, `github.blog`, `humanlayer.dev` and `github.com/humanlayer/12-factor-agents`, `manus.im/blog` |
 | Practitioners | `simonwillison.net`, `martinfowler.com` (Birgitta Böckeler's writing on AI-assisted development), `thoughtworks.com/radar`, `addyosmani.com`, `lucumr.pocoo.org`, `mitchellh.com`, `ghuntley.com`, `harper.blog`, `steipete.me`, `blog.fsck.com`, `registerspill.thorstenball.com`, `tidyfirst.substack.com`, `hamel.dev`, `eugeneyan.com`, `dbreunig.com` |
 | Newsletters and communities | `latent.space`, `newsletter.pragmaticengineer.com` |
 

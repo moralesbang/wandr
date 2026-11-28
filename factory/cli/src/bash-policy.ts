@@ -40,7 +40,14 @@ import {
 import { readEvents } from './events.ts'
 import { unusedConfirmations } from './commands/confirm.ts'
 import { jobsDir } from './job.ts'
-import { canonical, isWithin, PROTECTED_DIRS } from './paths.ts'
+import {
+  canonical,
+  isProtectedTsConfig,
+  isTsConfigText,
+  isWithin,
+  PROTECTED_DIRS,
+  tsConfigDenial,
+} from './paths.ts'
 import {
   allow,
   bashWhere,
@@ -713,6 +720,8 @@ const AWK_OUTPUT = /(?:print|printf)\b[^;}\n]*>|system\s*\(|\|\s*["']|\|&/
 
 /** Why a reviewer's command may not run outside `sandbox exec`, or null when it may. */
 function outsideExec(call: Invocation, own: string): string | null {
+  // A call that only assigns variables runs no program; a bare `env` is the one that prints them.
+  if (!call.words[0] && !call.prefixes.includes('env')) return null
   const program = basename(call.words[0] ?? 'env')
   if (!REVIEWER_PROGRAMS.has(program)) return `\`${program}\``
   const args = call.words.slice(1)
@@ -938,6 +947,44 @@ function writesVerdict(command: string, context: GuardContext): Verdict {
   return first(written.map((named) => writeVerdict(named.path, context)))
 }
 
+const TSC_WRAPPERS = new Set(['bunx', 'npx', 'pnpx', 'bun', 'x', 'exec', 'dlx'])
+
+/** The project a `tsc` call names with `-p` or `--project`, or null when it names none. */
+function tscProject(call: Invocation): string | null {
+  const at = call.words.findIndex((word) => basename(word) === 'tsc')
+  if (at < 0 || !call.words.slice(0, at).every((word) => TSC_WRAPPERS.has(basename(word))))
+    return null
+  const args = call.words.slice(at + 1)
+  for (const [i, arg] of args.entries()) {
+    if (arg === '-p' || arg === '--project') return args[i + 1] ?? null
+    const joined = /^(?:-p|--project)=(.+)$/.exec(arg)
+    if (joined) return joined[1] ?? null
+  }
+  return null
+}
+
+/**
+ * The test and build agents typecheck only against a protected tsconfig or a folder: tsc takes any
+ * file as a project, and one with another name is a config an agent wrote to judge itself by (FI-005).
+ */
+function typescriptVerdict(command: string, calls: Invocation[], context: GuardContext): Verdict {
+  const { agent } = context
+  if (!agent || !(agent.type === 'factory-test' || agent.type === 'factory-build')) return allow
+  const { cwd } = bashWhere(context)
+  for (const call of calls) {
+    const project = tscProject(call)
+    if (project !== null && !isProtectedTsConfig(project) && !isDirectory(canonical(project, cwd)))
+      return deny(
+        `\`tsc -p ${project}\`: a TypeScript project must be a protected tsconfig (tsconfig*.json), or an existing folder (its own tsconfig.json is the project). Any other file as a project is one you wrote to judge your own work. Raise it with the orchestrator instead.`,
+      )
+  }
+  const written = commandPaths(command, bashWhere(context)).filter((named) => named.write)
+  const config = written.find((named) => isTsConfigText(named.path, command))
+  return config
+    ? deny(tsConfigDenial(agent.type, canonical(config.path, bashWhere(context).cwd)))
+    : allow
+}
+
 /** Reuse the read-only program policy for intake/research; no runners or git mutations. */
 function researchVerdict(calls: Invocation[], context: GuardContext): Verdict {
   if (!routingReadOnly(context.job)) return allow
@@ -976,6 +1023,7 @@ export const bashPolicy: Policy = (context) => {
       yield servicesVerdict(calls, command, context)
       yield gitVerdict(calls, context)
       yield stateVerdict(calls, command, context)
+      yield typescriptVerdict(command, calls, context)
       yield writesVerdict(command, context)
       yield bashReadVerdict(command, context)
       // Last: a path a command names has its own, more specific refusal.
