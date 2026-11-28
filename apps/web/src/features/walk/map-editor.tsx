@@ -28,6 +28,7 @@ export type EditorEdit =
   | { type: 'select-point'; pointId: string }
   | { type: 'move-point'; pointId: string; at: LngLat }
   | { type: 'insert-point'; afterPointId: string; at: LngLat }
+  | { type: 'delete-point'; pointId: string }
 
 export type MapEditorProps = {
   tool: Tool
@@ -114,6 +115,12 @@ export const MapEditor = ({
   const pressOn = (target: GestureTarget): MarkerPress => ({
     edits: dragEdits(tool, target),
     onTap: () => applyTap(resolve(target, 'tap')),
+    onDeleteKey: () => {
+      const action = resolve(target, 'delete-key')
+      if (action.type !== 'delete-point') return false
+      onEdit(action)
+      return true
+    },
     onDragStart: () => {
       const action = resolve(target, 'drag')
       dragAction.current = isDrag(action) ? action : null
