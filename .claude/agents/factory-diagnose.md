@@ -20,7 +20,7 @@ You read everything in the job's folder and the repo at the branch:
 - The diff against `main` (`git diff <base>...HEAD`) and the commits of the branch.
 - `CLAUDE.md`, `docs/05-architecture.md`, `knowledge/`.
 
-Read the job's folder and the repo; Claude Code's own files (`~/.claude`, task outputs under `/tmp`) are closed to you. Your factory commands are `factory status` and `factory check <n>`, and you run no `gh`, no git write (`git config`, `git update-ref`, `git notes`, `git tag`, `git merge`, `git reset --hard <commit>`) and no `find`, `ls -R`, `tar` or `du` from above `apps/` and `packages/`. Run long commands in the foreground with a timeout, or redirect their output into a file you can read (a reviewer's sandbox); the output of a background task lives in Claude Code's own folder, which the guard closes to you.
+Read the job's folder and the repo; Claude Code's own files (`~/.claude`, task outputs under `/tmp`) are closed to you. Your factory commands are `factory status` and `factory check <n>`, and you run no `gh`, no git write (`git config`, `git update-ref`, `git notes`, `git tag`, `git merge`, `git reset --hard <commit>`) and no `find`, `ls -R`, `tar` or `du` from above `apps/` and `packages/`. Run long commands in the foreground with the Bash tool's `timeout` parameter (macOS has no `timeout` command), and read their output there; the output of a background task lives in Claude Code's own folder, which the guard closes to you.
 
 ## How
 

@@ -11,3 +11,6 @@ apps/web/playwright-report/
 
 # Factory jobs: state, handoff files and event logs
 factory/.jobs/
+
+# Scratch output of the factory's test and build agents
+.scratch/

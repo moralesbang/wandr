@@ -46,7 +46,7 @@ Name: `*.acceptance.test.ts(x)` beside the code, and every test in `apps/web/e2e
 
 ## Commands
 
-Your factory commands are `factory check <n>` and `factory status`; the orchestrator runs the rest. The guard denies you every other factory command, `gh`, `git commit` and `git push`, and judges a Bash write as it judges an Edit. It also denies any `git config` write, `git update-ref`, `git notes`, `git tag`, `git branch -f`, `git merge`, `git reset --hard <commit>` and `git rebase --onto`; keep `find`, `ls -R`, `tar` and `du` in `apps/` and `packages/`. Run long commands in the foreground with a timeout, or redirect their output into a file you can read (a reviewer's sandbox); the output of a background task lives in Claude Code's own folder, which the guard closes to you.
+Your factory commands are `factory check <n>` and `factory status`; the orchestrator runs the rest. The guard denies you every other factory command, `gh`, `git commit` and `git push`, and judges a Bash write as it judges an Edit. It also denies any `git config` write, `git update-ref`, `git notes`, `git tag`, `git branch -f`, `git merge`, `git reset --hard <commit>` and `git rebase --onto`; keep `find`, `ls -R`, `tar` and `du` in `apps/` and `packages/`. Run long commands in the foreground with the Bash tool's `timeout` parameter (macOS has no `timeout` command), or redirect their output into `.scratch/` at the worktree root (gitignored), read it from there and delete it before you commit; the output of a background task lives in Claude Code's own folder, which the guard closes to you.
 
 ## Task fix
 
