@@ -84,14 +84,58 @@ const parseDotenv = (text: string) =>
       .map((match) => [match[1] as string, match[2] as string]),
   )
 
+/** How long a process group gets to end on SIGTERM before it is sent SIGKILL. */
+export const KILL_GRACE_MS = 3000
+
+const groupAlive = (pgid: number) => {
+  try {
+    process.kill(-pgid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Ends every process of a group: SIGTERM, then SIGKILL after the grace period for what is left.
+ * Nothing is done when the group is already empty.
+ */
+async function endGroup(pgid: number, graceMs: number): Promise<void> {
+  if (!groupAlive(pgid)) return
+  try {
+    process.kill(-pgid, 'SIGTERM')
+  } catch {
+    return
+  }
+  const until = Date.now() + graceMs
+  while (groupAlive(pgid) && Date.now() < until) await Bun.sleep(25)
+  if (groupAlive(pgid)) {
+    try {
+      process.kill(-pgid, 'SIGKILL')
+    } catch {
+      // Gone between the check and the kill.
+    }
+  }
+}
+
 /**
  * Runs `argv` in the sandbox's checkout with its environment, its output on this process's. No
  * shell stands in between: each argument reaches the program exactly as given.
+ *
+ * The command runs in a process group of its own (`detached` makes it a session leader, so its pid
+ * is the group's id), never this process's: a timeout ends the whole group, and so does the end of
+ * the command when it left children behind. A server started in the background by `sh -c '… & …'`
+ * or Playwright's webServer would otherwise keep the sandbox's port and fail the next exec with
+ * "port in use". Nothing in a reviewer's flow needs a server across execs: Playwright's config
+ * never reuses a server on E2E_PORT, and a server is started and used inside one exec. Output goes
+ * straight to this process's own descriptors, so none of it is lost to the kill. A terminal's
+ * Ctrl-C reaches only this process, so SIGINT and SIGTERM are passed on to the group.
  */
 export async function runInSandbox(
   sandbox: Sandbox,
   argv: string[],
   timeoutMs?: number,
+  graceMs: number = KILL_GRACE_MS,
 ): Promise<number> {
   const child = Bun.spawn(argv, {
     cwd: sandbox.path,
@@ -99,18 +143,25 @@ export async function runInSandbox(
     stdin: 'inherit',
     stdout: 'inherit',
     stderr: 'inherit',
+    detached: true,
   })
-  // A command that outlives the time left in the reviewer's budget is killed there.
+  const pgid = child.pid
+  // A command that outlives the time left in the reviewer's budget is ended there, group and all.
   let timedOut = false
   const timer =
     timeoutMs === undefined
       ? undefined
       : setTimeout(() => {
           timedOut = true
-          child.kill('SIGKILL')
+          void endGroup(pgid, graceMs)
         }, timeoutMs)
+  const forward = () => void endGroup(pgid, graceMs)
+  process.once('SIGINT', forward)
+  process.once('SIGTERM', forward)
   try {
     const code = await child.exited
+    // The command ended, but a background child may not have: a reviewer leaves nothing behind.
+    await endGroup(pgid, graceMs)
     if (timedOut && timeoutMs !== undefined) {
       console.error(
         `factory sandbox exec: killed after ${Math.round(timeoutMs / 1000)}s, the time left in the sandbox budget.`,
@@ -120,6 +171,8 @@ export async function runInSandbox(
     return code
   } finally {
     clearTimeout(timer)
+    process.off('SIGINT', forward)
+    process.off('SIGTERM', forward)
   }
 }
 

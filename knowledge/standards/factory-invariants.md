@@ -198,10 +198,10 @@ A review pass after the first is a `verify` when every non-test file changed sin
 
 ### FI-031 — A reviewer role spends a bounded time in the sandbox
 
-Each reviewer role has a budget of minutes in `factory sandbox exec` per job and review pass, fixed by its task and the risk (`SANDBOX_MINUTES`). The CLI, which runs the command, adds the seconds each exec spends (a relaunched reviewer inherits them, and a command packing many steps counts its whole time), logs each duration, runs every exec with the time left as its timeout and refuses the next once the budget is spent. The guard denies a whole-suite run inside the sandbox.
+Each reviewer role has a budget of minutes in `factory sandbox exec` per job and review pass, fixed by its task and the risk (`SANDBOX_MINUTES`). The CLI, which runs the command, adds the seconds each exec spends (a relaunched reviewer inherits them, and a command packing many steps counts its whole time), logs each duration, runs every exec with the time left as its timeout and refuses the next once the budget is spent. Every exec runs in its own process group, and the whole group ends on the timeout (SIGTERM, then SIGKILL) and when the command ends with children left behind, so no server keeps the sandbox's port. The guard denies a whole-suite run inside the sandbox.
 
-- **Mechanism:** `review-plan.ts` (`SANDBOX_MINUTES`, `sandboxMinutes`), `commands/sandbox.ts` (`sandboxCommand`, `sandboxSecondsSpent`), `sandbox.ts` (`runInSandbox`), `bash-policy.ts` (`wholeSuite`).
-- **Defended by:** `commands/review-budget.acceptance.test.ts`, `commands/hook-sandbox.test.ts`.
+- **Mechanism:** `review-plan.ts` (`SANDBOX_MINUTES`, `sandboxMinutes`), `commands/sandbox.ts` (`sandboxCommand`, `sandboxSecondsSpent`), `sandbox.ts` (`runInSandbox`, `endGroup`), `bash-policy.ts` (`wholeSuite`).
+- **Defended by:** `commands/review-budget.acceptance.test.ts`, `sandbox-kill.acceptance.test.ts`, `commands/hook-sandbox.test.ts`.
 
 ### FI-032 — The user is asked each further $5 a job costs
 
